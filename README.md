@@ -10,12 +10,29 @@ Real-time lyric translation extension for **[Spicy Lyrics](https://github.com/Sp
 
 ## Features
 
-* **Interlinear Translation:** Displays translations directly below each original lyric line for a natural reading flow.
-* **Replace Translation:** Displays translations directly how each original lyric line for a natural reading flow.
-* **Flow Mode:** A streamlined UI mode designed to minimize background clutter and focus on the text.
-* **TTML-Style Visuals:** Animated glow transitions and bloom effects that match the native Spicy Lyrics aesthetic.
-* **Smart Caching:** Track-based caching system (up to 100 tracks) to ensure instant loading for repeated listens.
-* **Native Integration:** Settings are injected directly into Spotify's native settings page.
+- **Two display modes**  
+	- **Replace**: swaps original lines with translated lines.  
+	- **Below each line**: keeps original lyrics and adds translations underneath.
+- **Real-time translation pipeline**  
+	Uses Google Translate, LibreTranslate, or a custom LibreTranslate-compatible endpoint.
+- **Smart language detection**  
+	Detects source language and skips unnecessary translation when lyrics are already in the target language.
+- **Track-aware caching**  
+	Stores per-track translations for faster reloads and better offline resilience.
+- **Native Spotify settings integration**  
+	Injects settings directly into Spotify preferences (plus a quick modal via right-click on the translate button).
+- **Keyboard shortcut**  
+	Press **Alt+T** to toggle translation on/off.
+- **Update checks**  
+	Built-in update checker with release metadata and one-click update flow.
+
+---
+
+## Requirements
+
+- Spicetify `>= 2.0.0`
+- Spicy Lyrics extension installed and working
+- Internet connection for first-time translations and update checks
 
 ---
 
@@ -25,39 +42,105 @@ Real-time lyric translation extension for **[Spicy Lyrics](https://github.com/Sp
 
 ---
 
-## Quick Start
+## Installation
 
-Install using **Spicetify Marketplace**:
+### Marketplace (recommended)
+
+Install from **Spicetify Marketplace**:
 
 1. Open Spicetify Marketplace.
 2. Search for **Spicy Lyric Translator**.
 3. Click **Install**.
 
-Done. No additional setup required.
+No additional setup required.
+
+### Manual (loader)
+
+If you install manually, use the loader in `loader/SLT-loader.js` so you can receive hosted updates:
+
+1. Copy `SLT-loader.js` to your Spicetify extensions folder as `spicy-lyric-translater.js`.
+2. Register extension:
+	```bash
+	spicetify config extensions spicy-lyric-translater.js
+	spicetify apply
+	```
+
+Windows users can also use the installer script in `installer/install-spicetify-SLT.cmd`.
+
+### Local development build
+
+```bash
+npm install
+npm run build
+```
+
+Build output is written to `dist/spicy-lyric-translater.js`.
+
+Useful scripts:
+
+- `npm run build` — production bundle + typecheck
+- `npm run build:watch` — watch mode for development
+- `npm run deploy` — build and copy to `%APPDATA%\spicetify\Extensions\`
+- `npm run apply` — run `spicetify apply`
 
 ---
 
-## Documentation
+## Usage
 
-Full setup and usage guide:
+1. Open a track with available lyrics in Spicy Lyrics.
+2. Click the translate button in lyric view controls.
+3. Right-click the translate button to open quick settings.
+4. (Optional) Enable **Auto-Translate on Song Change**.
+
+The extension works across full lyrics view, sidebar lyrics, and picture-in-picture lyrics contexts when available.
+
+---
+
+## Settings
+
+- **Target Language**
+- **Translation Display** (`Replace` or `Below each line`)
+- **Translation API** (`Google`, `LibreTranslate`, or `Custom API URL`)
+- **Auto-Translate on Song Change**
+- **Show Notifications**
+- **Debug Mode** (shown when dev tools are enabled)
+- **Cache tools** (view/clear)
+- **Check for Updates**
+
+---
+
+## Caching & Data
+
+- Track cache keeps up to **100 tracks** (with expiry pruning).
+- Line translation cache keeps up to **500 entries** with 7-day expiry.
+- Connectivity indicator can report aggregate counts (installed/viewing) and latency.
+- Tooltip explicitly states: **No personal data collected**.
+
+---
+
+## Troubleshooting
+
+- **No translate button appears**: ensure Spicy Lyrics is installed and open.
+- **No translations**: verify internet/API availability and try switching Translation API.
+- **Wrong language or stale lines**: clear cache from settings and retry.
+- **Extension not loading after manual install**: re-run `spicetify apply` and restart Spotify.
+- **Custom API issues**: endpoint must be LibreTranslate-compatible.
+
+---
+
+## Links
+
+Full setup and usage guide:  
 https://7xeh.dev/apps/spicylyrictranslate/docs
 
----
-
-## Status
-
-Live status page:
+Service status page:  
 https://7xeh.dev/apps/spicylyrictranslate/status/
 
----
-
-## Community
-
-Join the Discord server for support, updates, and feedback:
+Join the Discord server for support, updates, and feedback:  
 https://discord.gg/fXK34DeDW5
 
 ---
 
 ## Credits
 
-Made for the Spicetify community by **7xeh**.
+Built for the Spicetify community by **7xeh**.
