@@ -8,8 +8,11 @@ import { storage } from './storage';
 
 const API_BASE = 'https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php';
 const HEARTBEAT_INTERVAL = 30000;
-const LATENCY_CHECK_INTERVAL = 10000;
+const LATENCY_CHECK_INTERVAL = 15000;
 const CONNECTION_TIMEOUT = 5000;
+const INITIAL_DELAY = 3000;
+const LATENCY_SAMPLES = 3;
+const SAMPLE_DELAY = 500;
 
 const LATENCY_THRESHOLDS = {
     GREAT: 150,
@@ -202,6 +205,29 @@ async function measureLatency(): Promise<number | null> {
     }
 }
 
+async function measureLatencyAccurate(): Promise<number | null> {
+    const samples: number[] = [];
+    
+    for (let i = 0; i < LATENCY_SAMPLES; i++) {
+        if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, SAMPLE_DELAY));
+        }
+        const latency = await measureLatency();
+        if (latency !== null) {
+            samples.push(latency);
+        }
+    }
+    
+    if (samples.length === 0) return null;
+    if (samples.length === 1) return samples[0];
+    
+    samples.sort((a, b) => a - b);
+    const trimmed = samples.slice(0, -1);
+    
+    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
+    return Math.round(avg);
+}
+
 async function sendHeartbeat(): Promise<boolean> {
     if (storage.get('share-usage-data') === 'false') return false;
 
@@ -261,8 +287,13 @@ async function connect(): Promise<boolean> {
             indicatorState.state = 'connected';
             indicatorState.lastHeartbeat = Date.now();
             
-            const latency = await measureLatency();
-            indicatorState.latencyMs = latency;
+            setTimeout(async () => {
+                const latency = await measureLatencyAccurate();
+                if (latency !== null) {
+                    indicatorState.latencyMs = latency;
+                    updateUI();
+                }
+            }, 1000);
             
             updateUI();
             return true;
@@ -409,6 +440,14 @@ export async function initConnectionIndicator(): Promise<void> {
     if (!appended) return;
 
     indicatorState.isInitialized = true;
+    
+    await new Promise(resolve => setTimeout(resolve, INITIAL_DELAY));
+    
+    if (storage.get('share-usage-data') === 'false') {
+        cleanupConnectionIndicator();
+        return;
+    }
+    
     const connected = await connect();
     
     if (connected) {
@@ -428,12 +467,13 @@ export async function initConnectionIndicator(): Promise<void> {
                     }
                 }, LATENCY_CHECK_INTERVAL);
                 
-                measureLatency().then(latency => {
+                setTimeout(async () => {
+                    const latency = await measureLatencyAccurate();
                     if (latency !== null) {
                         indicatorState.latencyMs = latency;
                         updateUI();
                     }
-                });
+                }, 500);
             }
         }
     });

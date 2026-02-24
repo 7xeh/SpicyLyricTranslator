@@ -3788,7 +3788,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.8.3" : "0.0.0";
+    return true ? "1.8.4" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslate";
@@ -4094,8 +4094,11 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
   // src/utils/connectivity.ts
   var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
   var HEARTBEAT_INTERVAL = 3e4;
-  var LATENCY_CHECK_INTERVAL = 1e4;
+  var LATENCY_CHECK_INTERVAL = 15e3;
   var CONNECTION_TIMEOUT = 5e3;
+  var INITIAL_DELAY = 3e3;
+  var LATENCY_SAMPLES = 3;
+  var SAMPLE_DELAY = 500;
   var LATENCY_THRESHOLDS = {
     GREAT: 150,
     OK: 300,
@@ -4266,6 +4269,26 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       return null;
     }
   }
+  async function measureLatencyAccurate() {
+    const samples = [];
+    for (let i = 0; i < LATENCY_SAMPLES; i++) {
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, SAMPLE_DELAY));
+      }
+      const latency = await measureLatency();
+      if (latency !== null) {
+        samples.push(latency);
+      }
+    }
+    if (samples.length === 0)
+      return null;
+    if (samples.length === 1)
+      return samples[0];
+    samples.sort((a, b) => a - b);
+    const trimmed = samples.slice(0, -1);
+    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
+    return Math.round(avg);
+  }
   async function sendHeartbeat() {
     if (storage.get("share-usage-data") === "false")
       return false;
@@ -4318,8 +4341,13 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         indicatorState.region = data.region || "";
         indicatorState.state = "connected";
         indicatorState.lastHeartbeat = Date.now();
-        const latency = await measureLatency();
-        indicatorState.latencyMs = latency;
+        setTimeout(async () => {
+          const latency = await measureLatencyAccurate();
+          if (latency !== null) {
+            indicatorState.latencyMs = latency;
+            updateUI();
+          }
+        }, 1e3);
         updateUI();
         return true;
       }
@@ -4450,6 +4478,11 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (!appended)
       return;
     indicatorState.isInitialized = true;
+    await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
+    if (storage.get("share-usage-data") === "false") {
+      cleanupConnectionIndicator();
+      return;
+    }
     const connected = await connect();
     if (connected) {
       startPeriodicChecks();
@@ -4469,12 +4502,13 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
               updateUI();
             }
           }, LATENCY_CHECK_INTERVAL);
-          measureLatency().then((latency) => {
+          setTimeout(async () => {
+            const latency = await measureLatencyAccurate();
             if (latency !== null) {
               indicatorState.latencyMs = latency;
               updateUI();
             }
-          });
+          }, 500);
         }
       }
     });
