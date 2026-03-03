@@ -272,7 +272,7 @@ export function assessMixedLanguageContent(
         
         if (isSameLanguage(detected.code, targetLanguage)) {
             targetCount++;
-        } else if (detected.confidence >= 0.5) {
+        } else if (detected.confidence >= 0.65) {
             nonTargetCount++;
         } else {
             uncertainCount++;
@@ -282,8 +282,8 @@ export function assessMixedLanguageContent(
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0) return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
 
-    const hasMixedContent = nonTargetCount > 0 ||
-        (uncertainCount > 0 && uncertainCount / totalChecked > 0.25);
+    const hasMixedContent = nonTargetCount >= 2 ||
+        (nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3);
     
     return { hasMixedContent, nonTargetCount, uncertainCount };
 }

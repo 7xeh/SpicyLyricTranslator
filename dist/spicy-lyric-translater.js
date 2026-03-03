@@ -725,7 +725,7 @@ var SpicyLyricTranslater = (() => {
       }
       if (isSameLanguage(detected.code, targetLanguage)) {
         targetCount++;
-      } else if (detected.confidence >= 0.5) {
+      } else if (detected.confidence >= 0.65) {
         nonTargetCount++;
       } else {
         uncertainCount++;
@@ -734,7 +734,7 @@ var SpicyLyricTranslater = (() => {
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0)
       return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
-    const hasMixedContent = nonTargetCount > 0 || uncertainCount > 0 && uncertainCount / totalChecked > 0.25;
+    const hasMixedContent = nonTargetCount >= 2 || nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3;
     return { hasMixedContent, nonTargetCount, uncertainCount };
   }
   async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
@@ -3862,7 +3862,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.8.7" : "0.0.0";
+    return true ? "1.8.8" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -5149,7 +5149,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       if (!detected) {
         continue;
       }
-      if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.5) {
+      if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.7) {
         indexes.push(i);
       }
     }
@@ -5417,6 +5417,9 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       restoreButtonState();
     }
   }
+  function normalizeForComparison(text) {
+    return (text || "").toLowerCase().replace(/[\s\p{P}]+/gu, "").trim();
+  }
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
     lines.forEach((line, index) => {
@@ -5426,7 +5429,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         translatedText = state.translatedLyrics.get(originalText2);
       }
       const originalText = extractLineText2(line);
-      if (translatedText && translatedText !== originalText) {
+      if (translatedText && translatedText !== originalText && normalizeForComparison(translatedText) !== normalizeForComparison(originalText)) {
         translationMapByIndex.set(index, translatedText);
       }
     });

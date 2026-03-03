@@ -267,7 +267,7 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
             continue;
         }
 
-        if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.5) {
+        if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.7) {
             indexes.push(i);
         }
     }
@@ -574,6 +574,10 @@ export async function translateCurrentLyrics(): Promise<void> {
     }
 }
 
+function normalizeForComparison(text: string): string {
+    return (text || '').toLowerCase().replace(/[\s\p{P}]+/gu, '').trim();
+}
+
 function applyTranslations(lines: NodeListOf<Element>): void {
     const translationMapByIndex = new Map<number, string>();
     lines.forEach((line, index) => {
@@ -583,7 +587,7 @@ function applyTranslations(lines: NodeListOf<Element>): void {
             translatedText = state.translatedLyrics.get(originalText);
         }
         const originalText = extractLineText(line);
-        if (translatedText && translatedText !== originalText) {
+        if (translatedText && translatedText !== originalText && normalizeForComparison(translatedText) !== normalizeForComparison(originalText)) {
             translationMapByIndex.set(index, translatedText);
         }
     });
