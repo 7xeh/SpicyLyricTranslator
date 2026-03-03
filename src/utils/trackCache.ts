@@ -13,6 +13,8 @@ interface TrackCacheEntry {
     timestamp: number;
     api?: string;
     sourceFingerprint?: string;
+    trackName?: string;
+    artistName?: string;
 }
 
 interface CacheIndex {
@@ -92,12 +94,16 @@ export function setTrackCache(
     sourceLang: string,
     lines: string[],
     api?: string,
-    sourceFingerprint?: string
+    sourceFingerprint?: string,
+    trackName?: string,
+    artistName?: string
 ): void {
     const storage = getStorage();
     if (!storage || !trackUri || !lines.length) return;
     
     const cacheKey = getCacheKey(trackUri, targetLang);
+    
+    const meta = trackName ? { trackName, artistName } : getCurrentTrackMeta();
     
     const entry: TrackCacheEntry = {
         lang: sourceLang,
@@ -105,7 +111,9 @@ export function setTrackCache(
         lines: lines,
         timestamp: Date.now(),
         api: api,
-        sourceFingerprint
+        sourceFingerprint,
+        trackName: meta.trackName,
+        artistName: meta.artistName
     };
     
     try {
@@ -303,6 +311,8 @@ export function getAllCachedTracks(): Array<{
     lineCount: number;
     timestamp: number;
     api?: string;
+    trackName?: string;
+    artistName?: string;
 }> {
     const storage = getStorage();
     if (!storage) return [];
@@ -314,6 +324,8 @@ export function getAllCachedTracks(): Array<{
         lineCount: number;
         timestamp: number;
         api?: string;
+        trackName?: string;
+        artistName?: string;
     }> = [];
     
     const nativeStorage = typeof localStorage !== 'undefined' ? localStorage : null;
@@ -338,7 +350,9 @@ export function getAllCachedTracks(): Array<{
                                 sourceLang: entry.lang,
                                 lineCount: entry.lines.length,
                                 timestamp: entry.timestamp,
-                                api: entry.api
+                                api: entry.api,
+                                trackName: entry.trackName,
+                                artistName: entry.artistName
                             });
                         }
                     } catch (e) {
@@ -372,7 +386,9 @@ export function getAllCachedTracks(): Array<{
                     sourceLang: entry.lang,
                     lineCount: entry.lines.length,
                     timestamp: entry.timestamp,
-                    api: entry.api
+                    api: entry.api,
+                    trackName: entry.trackName,
+                    artistName: entry.artistName
                 });
             }
         } catch (e) {
@@ -398,6 +414,24 @@ export function getCurrentTrackUri(): string | null {
     return null;
 }
 
+export function getCurrentTrackMeta(): { trackName?: string; artistName?: string } {
+    try {
+        if (typeof Spicetify !== 'undefined' &&
+            Spicetify.Player &&
+            Spicetify.Player.data &&
+            Spicetify.Player.data.item) {
+            const item = Spicetify.Player.data.item;
+            return {
+                trackName: item.name || undefined,
+                artistName: item.artists?.map((a: { name: string }) => a.name).join(', ') || undefined
+            };
+        }
+    } catch (e) {
+        warn('Failed to get current track metadata:', e);
+    }
+    return {};
+}
+
 export default {
     getTrackCache,
     setTrackCache,
@@ -406,5 +440,6 @@ export default {
     clearAllTrackCache,
     getTrackCacheStats,
     getAllCachedTracks,
-    getCurrentTrackUri
+    getCurrentTrackUri,
+    getCurrentTrackMeta
 };

@@ -5,8 +5,8 @@ import { clearLyricsCache } from './lyricsFetcher';
 import { injectStyles } from '../styles/main';
 import { registerSettings } from './settings';
 import { initConnectionIndicator, getConnectionState, refreshConnection } from './connectivity';
-import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION } from './updater';
-import { info } from './debug';
+import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
+import { info, debug } from './debug';
 
 import { 
     translateCurrentLyrics, 
@@ -36,6 +36,8 @@ export async function initialize(): Promise<void> {
     
     startUpdateChecker(30 * 60 * 1000);
     setupKeyboardShortcut();
+
+    showPostUpdateChangelog().catch(e => debug('Changelog display error:', e));
     
     let wasSpicyLyricsOpen = false;
     const observer = new MutationObserver((mutations) => {
@@ -71,7 +73,7 @@ export async function initialize(): Promise<void> {
         });
     }
     
-    (window as any).SpicyLyricTranslater = {
+    (window as any).SpicyLyricTranslator = {
         enable: () => {
             state.isEnabled = true;
             storage.set('translation-enabled', 'true');

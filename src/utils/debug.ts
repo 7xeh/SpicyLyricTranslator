@@ -2,7 +2,7 @@ import { storage } from './storage';
 
 let debugMode: boolean = storage.get('debug-mode') === 'true';
 
-const PREFIX = '[SpicyLyricTranslater]';
+const PREFIX = '[SpicyLyricTranslator]';
 
 export function isDebugEnabled(): boolean {
     return debugMode;

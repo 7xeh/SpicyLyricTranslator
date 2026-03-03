@@ -1,4 +1,4 @@
-const STORAGE_PREFIX = "spicy-lyric-translater:";
+const STORAGE_PREFIX = "spicy-lyric-translator:";
 
 const MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
 
@@ -36,7 +36,7 @@ export const storage = {
             if (!isLocalStorageAvailable()) return null;
             return localStorage.getItem(STORAGE_PREFIX + key);
         } catch (e) {
-            console.error("[SpicyLyricTranslater] Storage get error:", e);
+            console.error("[SpicyLyricTranslator] Storage get error:", e);
             return null;
         }
     },
@@ -48,7 +48,7 @@ export const storage = {
             if (value.length > 10000) {
                 const currentSize = getStorageSize();
                 if (currentSize + value.length * 2 > MAX_STORAGE_SIZE_BYTES) {
-                    console.warn("[SpicyLyricTranslater] Storage limit approaching, clearing old cache");
+                    console.warn("[SpicyLyricTranslator] Storage limit approaching, clearing old cache");
                     this.remove('translation-cache');
                 }
             }
@@ -57,7 +57,7 @@ export const storage = {
             return true;
         } catch (e) {
             if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-                console.warn("[SpicyLyricTranslater] Storage quota exceeded, clearing cache");
+                console.warn("[SpicyLyricTranslator] Storage quota exceeded, clearing cache");
                 this.remove('translation-cache');
                 try {
                     localStorage.setItem(STORAGE_PREFIX + key, value);
@@ -66,7 +66,7 @@ export const storage = {
                     return false;
                 }
             }
-            console.error("[SpicyLyricTranslater] Storage set error:", e);
+            console.error("[SpicyLyricTranslator] Storage set error:", e);
             return false;
         }
     },
@@ -76,7 +76,7 @@ export const storage = {
             if (!isLocalStorageAvailable()) return;
             localStorage.removeItem(STORAGE_PREFIX + key);
         } catch (e) {
-            console.error("[SpicyLyricTranslater] Storage remove error:", e);
+            console.error("[SpicyLyricTranslator] Storage remove error:", e);
         }
     },
 
@@ -86,7 +86,7 @@ export const storage = {
             if (value === null) return defaultValue;
             return JSON.parse(value) as T;
         } catch (e) {
-            console.error("[SpicyLyricTranslater] Storage getJSON error:", e);
+            console.error("[SpicyLyricTranslator] Storage getJSON error:", e);
             return defaultValue;
         }
     },
@@ -95,7 +95,7 @@ export const storage = {
         try {
             return this.set(key, JSON.stringify(value));
         } catch (e) {
-            console.error("[SpicyLyricTranslater] Storage setJSON error:", e);
+            console.error("[SpicyLyricTranslator] Storage setJSON error:", e);
             return false;
         }
     },
@@ -120,7 +120,7 @@ export const storage = {
             }
             keysToRemove.forEach(key => localStorage.removeItem(key));
         } catch (e) {
-            console.error("[SpicyLyricTranslater] Storage clearAll error:", e);
+            console.error("[SpicyLyricTranslator] Storage clearAll error:", e);
         }
     }
 };

@@ -800,19 +800,19 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
 import { getOverlayStyles } from '../utils/translationOverlay';
 
 export function injectStyles(): void {
-    const existingStyle = document.getElementById('spicy-lyric-translater-styles');
+    const existingStyle = document.getElementById('spicy-lyric-translator-styles');
     if (existingStyle) {
         return;
     }
 
     const styleElement = document.createElement('style');
-    styleElement.id = 'spicy-lyric-translater-styles';
+    styleElement.id = 'spicy-lyric-translator-styles';
     styleElement.textContent = styles + getOverlayStyles();
     document.head.appendChild(styleElement);
 }
 
 export function removeStyles(): void {
-    const styleElement = document.getElementById('spicy-lyric-translater-styles');
+    const styleElement = document.getElementById('spicy-lyric-translator-styles');
     if (styleElement) {
         styleElement.remove();
     }

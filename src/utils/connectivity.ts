@@ -1,9 +1,3 @@
-/**
- * Connection Indicator Component for Spicy Lyric Translater
- * Shows connectivity status, latency, and active user count
- * * @author 7xeh
- */
-
 import { storage } from './storage';
 
 const API_BASE = 'https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php';
@@ -302,7 +296,7 @@ async function connect(): Promise<boolean> {
     } catch (error) {
         const isAbortError = error instanceof Error && error.name === 'AbortError';
         if (!isAbortError) {
-            console.warn('[SpicyLyricTranslater] Connection failed:', error);
+            console.warn('[SpicyLyricTranslator] Connection failed:', error);
         }
         indicatorState.state = 'error';
         updateUI();

@@ -8,7 +8,7 @@ import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
 
-const SETTINGS_ID = 'spicy-lyric-translater-settings';
+const SETTINGS_ID = 'spicy-lyric-translator-settings';
 
 function areDevToolsEnabled(): boolean {
     const hasDeveloperSettingsSection = !!document.getElementById('spicy-lyrics-dev-settings');
@@ -150,7 +150,7 @@ function createNativeSettingsSection(): HTMLElement {
     section.id = SETTINGS_ID;
     section.innerHTML = `
         <div class="x-settings-section">
-            <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translater</h2>
+            <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
     
@@ -1172,10 +1172,13 @@ function createCacheViewerUI(): HTMLElement {
                     .sort((a, b) => b.timestamp - a.timestamp)
                     .map((track, index) => {
                         const trackId = getTrackIdFromUri(track.trackUri);
+                        const displayTitle = track.trackName || `Track ID: ${trackId}`;
+                        const displayArtist = track.artistName || '';
                         return `
                         <div class="slt-cache-item" data-uri="${track.trackUri}" data-lang="${track.targetLang}">
                             <div class="slt-cache-item-info">
-                                <span class="slt-cache-item-title">Track ID: ${trackId}</span>
+                                <span class="slt-cache-item-title">${escapeHtml(displayTitle)}</span>
+                                ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml(displayArtist)}</span>` : ''}
                                 <span class="slt-cache-item-meta">${track.sourceLang} → ${track.targetLang} · ${track.lineCount} lines · ${formatDate(track.timestamp)}</span>
                             </div>
                             <div class="slt-cache-item-actions">
@@ -1323,7 +1326,7 @@ function openCacheViewer(): void {
 export function openSettingsModal(): void {
     if (Spicetify.PopupModal) {
         Spicetify.PopupModal.display({
-            title: 'Spicy Lyric Translater Settings',
+            title: 'Spicy Lyric Translator Settings',
             content: createSettingsUI(),
             isLarge: true
         });
@@ -1342,7 +1345,7 @@ export async function registerSettings(): Promise<void> {
             if ((Spicetify as any).Menu) {
                 try {
                     new (Spicetify as any).Menu.Item(
-                        'Spicy Lyric Translater',
+                        'Spicy Lyric Translator',
                         false,
                         openSettingsModal
                     ).register();

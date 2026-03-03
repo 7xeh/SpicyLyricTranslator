@@ -4,12 +4,12 @@ import { debug, warn, error as logError, info } from './debug';
 declare const __VERSION__: string;
 
 const isLoaderMode = (): boolean => {
-    const metadata = (window as any)._spicy_lyric_translater_metadata;
+    const metadata = (window as any)._spicy_lyric_translator_metadata;
     return metadata?.IsLoader === true;
 };
 
 const getLoadedVersion = (): string => {
-    const metadata = (window as any)._spicy_lyric_translater_metadata;
+    const metadata = (window as any)._spicy_lyric_translator_metadata;
     if (metadata?.LoadedVersion) {
         return metadata.LoadedVersion;
     }
@@ -17,10 +17,10 @@ const getLoadedVersion = (): string => {
 };
 
 const CURRENT_VERSION = getLoadedVersion();
-const GITHUB_REPO = '7xeh/SpicyLyricTranslate';
+const GITHUB_REPO = '7xeh/SpicyLyricTranslator';
 const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-const EXTENSION_FILENAME = 'spicy-lyric-translater.js';
+const EXTENSION_FILENAME = 'spicy-lyric-translator.js';
 
 const UPDATE_API_URL = 'https://7xeh.dev/apps/spicylyrictranslate/api/version.php';
 
@@ -254,7 +254,7 @@ function getExtensionDownloadUrl(release: GitHubRelease): string | null {
     
     const jsAsset = release.assets.find(asset => 
         asset.name.endsWith('.js') && 
-        (asset.name.includes('spicy-lyric-translater') || asset.name.includes('spicylyrictranslate'))
+        (asset.name.includes('spicy-lyric-translator') || asset.name.includes('spicylyrictranslator'))
     );
     
     if (jsAsset) {
@@ -296,6 +296,7 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
     try {
         storage.set('pending-update-version', version.text);
         storage.set('pending-update-timestamp', Date.now().toString());
+        storage.set('pending-update-changelog', release.body || '');
         
         updateState.progress = 30;
         updateState.status = 'Preparing to update...';
@@ -315,8 +316,8 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
         
         await new Promise(r => setTimeout(r, 300));
         
-        if ((window as any)._spicy_lyric_translater_metadata) {
-            (window as any)._spicy_lyric_translater_metadata = {};
+        if ((window as any)._spicy_lyric_translator_metadata) {
+            (window as any)._spicy_lyric_translator_metadata = {};
         }
         
         window.location.reload();
@@ -364,7 +365,7 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
     }
 }
 
-async function performSilentAutoUpdate(version: VersionInfo): Promise<void> {
+async function performSilentAutoUpdate(version: VersionInfo, releaseBody?: string): Promise<void> {
     if (updateState.isUpdating) {
         return;
     }
@@ -376,9 +377,12 @@ async function performSilentAutoUpdate(version: VersionInfo): Promise<void> {
 
         storage.set('pending-update-version', version.text);
         storage.set('pending-update-timestamp', Date.now().toString());
+        if (releaseBody) {
+            storage.set('pending-update-changelog', releaseBody);
+        }
 
-        if ((window as any)._spicy_lyric_translater_metadata) {
-            (window as any)._spicy_lyric_translater_metadata = {};
+        if ((window as any)._spicy_lyric_translator_metadata) {
+            (window as any)._spicy_lyric_translator_metadata = {};
         }
 
         window.setTimeout(() => {
@@ -603,7 +607,7 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
     
     if (Spicetify.PopupModal) {
         Spicetify.PopupModal.display({
-            title: 'Spicy Lyric Translater - Update Available',
+            title: 'Spicy Lyric Translator - Update Available',
             content: content,
             isLarge: true
         });
@@ -629,27 +633,117 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
 
 function showUpdateSnackbar(latestVersion: VersionInfo, release: GitHubRelease): void {
     if (Spicetify.showNotification) {
-        const message = `Spicy Lyric Translater v${latestVersion.text} is available! Click to update.`;
+        const message = `Spicy Lyric Translator v${latestVersion.text} is available! Click to update.`;
         Spicetify.showNotification(message, false, 10000);
     }
+}
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function processInlineMarkdown(text: string): string {
+    return text
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">$1</a>')
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, '<em>$1</em>')
+        .replace(/~~(.*?)~~/g, '<del>$1</del>')
+        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: #1db954;">$1</code>');
 }
 
 function formatReleaseNotes(body: string): string {
     if (!body || body.trim() === '') {
         return '<span style="color: var(--spice-subtext); font-style: italic;">No changelog available for this release.</span>';
     }
-    
-    return body
-        .replace(/^### (.*)/gm, '<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--spice-text);">$1</div>')
-        .replace(/^## (.*)/gm, '<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--spice-text);">$1</div>')
-        .replace(/^# (.*)/gm, '<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--spice-text);">$1</div>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: #1db954;">$1</code>')
-        .replace(/^- (.*)/gm, '<div style="display: flex; gap: 8px; margin: 4px 0;"><span style="color: #1db954;">•</span><span>$1</span></div>')
-        .replace(/^\* (.*)/gm, '<div style="display: flex; gap: 8px; margin: 4px 0;"><span style="color: #1db954;">•</span><span>$1</span></div>')
-        .replace(/\n\n/g, '<div style="height: 8px;"></div>')
-        .replace(/\n/g, '');
+
+    const lines = body.split('\n');
+    const output: string[] = [];
+    let inCodeBlock = false;
+    let codeContent: string[] = [];
+    let inUl = false;
+    let inOl = false;
+
+    const closeLists = () => {
+        if (inUl) { output.push('</ul>'); inUl = false; }
+        if (inOl) { output.push('</ol>'); inOl = false; }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.trim().startsWith('```')) {
+            if (inCodeBlock) {
+                output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--spice-subtext); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join('\n')}</code></pre>`);
+                codeContent = [];
+                inCodeBlock = false;
+            } else {
+                closeLists();
+                inCodeBlock = true;
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            codeContent.push(escapeHtml(line));
+            continue;
+        }
+
+        if (line.trim() === '') {
+            closeLists();
+            output.push('<div style="height: 8px;"></div>');
+            continue;
+        }
+
+        const h3 = line.match(/^###\s+(.*)/);
+        if (h3) { closeLists(); output.push(`<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--spice-text);">${processInlineMarkdown(h3[1])}</div>`); continue; }
+
+        const h2 = line.match(/^##\s+(.*)/);
+        if (h2) { closeLists(); output.push(`<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--spice-text);">${processInlineMarkdown(h2[1])}</div>`); continue; }
+
+        const h1 = line.match(/^#\s+(.*)/);
+        if (h1) { closeLists(); output.push(`<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--spice-text);">${processInlineMarkdown(h1[1])}</div>`); continue; }
+
+        if (line.match(/^(---+|===+|\*\*\*+)\s*$/)) {
+            closeLists();
+            output.push('<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">');
+            continue;
+        }
+
+        const bq = line.match(/^>\s?(.*)/);
+        if (bq) { closeLists(); output.push(`<div style="border-left: 3px solid #1db954; padding-left: 12px; margin: 6px 0; color: var(--spice-subtext); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`); continue; }
+
+        const ul = line.match(/^\s*[-*+]\s+(.*)/);
+        if (ul) {
+            if (inOl) { output.push('</ol>'); inOl = false; }
+            if (!inUl) { output.push('<ul style="margin: 4px 0; padding-left: 0; list-style: none;">'); inUl = true; }
+            output.push(`<li style="display: flex; gap: 8px; margin: 4px 0;"><span style="color: #1db954;">•</span><span>${processInlineMarkdown(ul[1])}</span></li>`);
+            continue;
+        }
+
+        const ol = line.match(/^\s*(\d+)\.\s+(.*)/);
+        if (ol) {
+            if (inUl) { output.push('</ul>'); inUl = false; }
+            if (!inOl) { output.push('<ol style="margin: 4px 0; padding-left: 20px; color: var(--spice-subtext);">'); inOl = true; }
+            output.push(`<li style="margin: 4px 0;">${processInlineMarkdown(ol[2])}</li>`);
+            continue;
+        }
+
+        closeLists();
+        output.push(`<p style="margin: 4px 0; color: var(--spice-subtext);">${processInlineMarkdown(line)}</p>`);
+    }
+
+    closeLists();
+    if (inCodeBlock) {
+        output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--spice-subtext); margin: 8px 0;"><code>${codeContent.join('\n')}</code></pre>`);
+    }
+
+    return output.join('');
 }
 
 export async function checkForUpdates(force: boolean = false): Promise<void> {
@@ -690,9 +784,9 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
             debug(`Update available: ${current.text} → ${latest.version.text}`);
             if (!hasShownUpdateNotice) {
                 hasShownUpdateNotice = true;
-                info(`Auto-updating Spicy Lyric Translater to ${latest.version.text}`);
+                info(`Auto-updating Spicy Lyric Translator to ${latest.version.text}`);
             }
-            await performSilentAutoUpdate(latest.version);
+            await performSilentAutoUpdate(latest.version, latest.release.body);
             hasShownUpdateNotice = true;
         } else {
             debug('Already on latest version:', current.text);
@@ -763,6 +857,191 @@ export async function getUpdateInfo(): Promise<{
     } catch {
         return null;
     }
+}
+
+function showChangelogModal(version: string, changelog: string): void {
+    const content = document.createElement('div');
+    content.className = 'slt-changelog-modal';
+    content.innerHTML = `
+        <style>
+            .slt-changelog-modal {
+                padding: 16px;
+                color: var(--spice-text);
+            }
+            .slt-changelog-modal .changelog-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+            .slt-changelog-modal .changelog-badge {
+                background: #1db954;
+                color: #000;
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .slt-changelog-modal .changelog-subtitle {
+                color: var(--spice-subtext);
+                font-size: 13px;
+            }
+            .slt-changelog-modal .changelog-content {
+                background: var(--spice-card);
+                padding: 16px;
+                border-radius: 8px;
+                margin-bottom: 16px;
+                max-height: 400px;
+                overflow-y: auto;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 13px;
+                line-height: 1.6;
+                color: var(--spice-subtext);
+            }
+            .slt-changelog-modal .changelog-content::-webkit-scrollbar {
+                width: 6px;
+            }
+            .slt-changelog-modal .changelog-content::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 3px;
+            }
+            .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+            .slt-changelog-modal .changelog-content a {
+                color: #1db954;
+                text-decoration: none;
+            }
+            .slt-changelog-modal .changelog-content a:hover {
+                text-decoration: underline;
+            }
+            .slt-changelog-modal .changelog-content img {
+                max-width: 100%;
+                border-radius: 6px;
+                margin: 8px 0;
+            }
+            .slt-changelog-modal .changelog-content strong {
+                color: var(--spice-text);
+            }
+            .slt-changelog-modal .changelog-content del {
+                opacity: 0.6;
+            }
+            .slt-changelog-modal .changelog-buttons {
+                display: flex;
+                gap: 12px;
+                justify-content: flex-end;
+            }
+            .slt-changelog-modal .changelog-btn {
+                padding: 10px 24px;
+                border-radius: 20px;
+                border: none;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.2s;
+            }
+            .slt-changelog-modal .changelog-btn.primary {
+                background: #1db954;
+                color: #000;
+            }
+            .slt-changelog-modal .changelog-btn.primary:hover {
+                background: #1ed760;
+                transform: scale(1.02);
+            }
+            .slt-changelog-modal .changelog-btn.secondary {
+                background: var(--spice-card);
+                color: var(--spice-text);
+            }
+            .slt-changelog-modal .changelog-btn.secondary:hover {
+                background: var(--spice-button);
+            }
+        </style>
+        <div class="changelog-header">
+            <span class="changelog-badge">v${version}</span>
+            <span class="changelog-subtitle">Here's what's new in this update</span>
+        </div>
+        <div class="changelog-content">${formatReleaseNotes(changelog)}</div>
+        <div class="changelog-buttons">
+            <a href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
+                <button class="changelog-btn secondary" type="button">View on GitHub</button>
+            </a>
+            <button class="changelog-btn primary" id="slt-changelog-dismiss">Got it</button>
+        </div>
+    `;
+
+    if (Spicetify.PopupModal) {
+        Spicetify.PopupModal.display({
+            title: '\u{1F389} Spicy Lyric Translator Updated!',
+            content: content,
+            isLarge: true
+        });
+
+        setTimeout(() => {
+            const dismissBtn = document.getElementById('slt-changelog-dismiss');
+            if (dismissBtn) {
+                dismissBtn.addEventListener('click', () => {
+                    Spicetify.PopupModal.hide();
+                });
+            }
+        }, 100);
+    }
+}
+
+export async function showPostUpdateChangelog(): Promise<void> {
+    const pendingVersion = storage.get('pending-update-version');
+    if (!pendingVersion) return;
+
+    const pendingTimestamp = storage.get('pending-update-timestamp');
+
+    storage.remove('pending-update-version');
+    storage.remove('pending-update-timestamp');
+
+    if (pendingTimestamp) {
+        const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
+        if (elapsed > 60 * 60 * 1000) {
+            storage.remove('pending-update-changelog');
+            return;
+        }
+    }
+
+    let changelog = storage.get('pending-update-changelog');
+    storage.remove('pending-update-changelog');
+
+    if (!changelog) {
+        try {
+            const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${pendingVersion}`;
+            const response = await fetchWithTimeout(tagUrl, {
+                headers: { 'Accept': 'application/vnd.github.v3+json' }
+            });
+            if (response.ok) {
+                const release: GitHubRelease = await response.json();
+                changelog = release.body || '';
+            }
+        } catch (e) {
+            debug('Could not fetch changelog for post-update display:', e);
+        }
+    }
+
+    if (!changelog) {
+        try {
+            const response = await fetchWithTimeout(GITHUB_API_URL, {
+                headers: { 'Accept': 'application/vnd.github.v3+json' }
+            });
+            if (response.ok) {
+                const release: GitHubRelease = await response.json();
+                changelog = release.body || '';
+            }
+        } catch (e) {
+            debug('Could not fetch latest release changelog:', e);
+        }
+    }
+
+    await new Promise(r => setTimeout(r, 2000));
+
+    showChangelogModal(pendingVersion, changelog || '');
 }
 
 export const VERSION = CURRENT_VERSION;
