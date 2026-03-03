@@ -3862,7 +3862,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.8.6" : "0.0.0";
+    return true ? "1.8.7" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -4382,51 +4382,92 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       }, 100);
     }
   }
+  async function fetchChangelogForVersion(version) {
+    try {
+      const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
+      const response = await fetchWithTimeout(tagUrl, {
+        headers: { "Accept": "application/vnd.github.v3+json" }
+      });
+      if (response.ok) {
+        const release = await response.json();
+        if (release.body)
+          return release.body;
+      }
+    } catch (e) {
+      debug("Could not fetch changelog for version", version, ":", e);
+    }
+    try {
+      const response = await fetchWithTimeout(GITHUB_API_URL, {
+        headers: { "Accept": "application/vnd.github.v3+json" }
+      });
+      if (response.ok) {
+        const release = await response.json();
+        if (release.body)
+          return release.body;
+      }
+    } catch (e) {
+      debug("Could not fetch latest release changelog:", e);
+    }
+    return "";
+  }
   async function showPostUpdateChangelog() {
+    const currentVersion = CURRENT_VERSION;
+    let targetVersion = null;
+    let changelog = null;
+    const hotfixDetected = storage.get("hotfix-detected");
+    if (hotfixDetected) {
+      storage.remove("hotfix-detected");
+      await new Promise((r) => setTimeout(r, 2e3));
+      const metadata = window._spicy_lyric_translator_metadata;
+      const hashShort = metadata?.ContentHash ? metadata.ContentHash.substring(0, 8) : "";
+      const hashLabel = hashShort ? ` [${hashShort}]` : "";
+      if (Spicetify.showNotification) {
+        Spicetify.showNotification(`Spicy Lyric Translator v${currentVersion} hotfix applied!${hashLabel}`);
+      }
+      info(`Hotfix applied for v${currentVersion}${hashLabel}`);
+    }
     const pendingVersion = storage.get("pending-update-version");
-    if (!pendingVersion)
-      return;
-    const pendingTimestamp = storage.get("pending-update-timestamp");
-    storage.remove("pending-update-version");
-    storage.remove("pending-update-timestamp");
-    if (pendingTimestamp) {
-      const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
-      if (elapsed > 60 * 60 * 1e3) {
-        storage.remove("pending-update-changelog");
+    if (pendingVersion) {
+      const pendingTimestamp = storage.get("pending-update-timestamp");
+      storage.remove("pending-update-version");
+      storage.remove("pending-update-timestamp");
+      if (pendingTimestamp) {
+        const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
+        if (elapsed > 60 * 60 * 1e3) {
+          storage.remove("pending-update-changelog");
+          storage.set("last-known-version", currentVersion);
+          return;
+        }
+      }
+      changelog = storage.get("pending-update-changelog");
+      storage.remove("pending-update-changelog");
+      targetVersion = pendingVersion;
+    } else {
+      const lastKnownVersion = storage.get("last-known-version");
+      if (lastKnownVersion && lastKnownVersion !== currentVersion) {
+        const lastParsed = parseVersion(lastKnownVersion);
+        const currentParsed = parseVersion(currentVersion);
+        if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
+          targetVersion = currentVersion;
+          debug(`Version change detected: ${lastKnownVersion} \u2192 ${currentVersion}`);
+        }
+      } else if (!lastKnownVersion) {
+        storage.set("last-known-version", currentVersion);
         return;
       }
     }
-    let changelog = storage.get("pending-update-changelog");
-    storage.remove("pending-update-changelog");
+    storage.set("last-known-version", currentVersion);
+    if (!targetVersion)
+      return;
     if (!changelog) {
-      try {
-        const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${pendingVersion}`;
-        const response = await fetchWithTimeout(tagUrl, {
-          headers: { "Accept": "application/vnd.github.v3+json" }
-        });
-        if (response.ok) {
-          const release = await response.json();
-          changelog = release.body || "";
-        }
-      } catch (e) {
-        debug("Could not fetch changelog for post-update display:", e);
-      }
-    }
-    if (!changelog) {
-      try {
-        const response = await fetchWithTimeout(GITHUB_API_URL, {
-          headers: { "Accept": "application/vnd.github.v3+json" }
-        });
-        if (response.ok) {
-          const release = await response.json();
-          changelog = release.body || "";
-        }
-      } catch (e) {
-        debug("Could not fetch latest release changelog:", e);
-      }
+      changelog = await fetchChangelogForVersion(targetVersion);
     }
     await new Promise((r) => setTimeout(r, 2e3));
-    showChangelogModal(pendingVersion, changelog || "");
+    showChangelogModal(targetVersion, changelog || "");
+  }
+  async function showCurrentChangelog() {
+    const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
+    showChangelogModal(CURRENT_VERSION, changelog);
   }
   var VERSION = CURRENT_VERSION;
   var REPO_URL = RELEASES_URL;
@@ -5796,6 +5837,30 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       }
     ));
     sectionContent.appendChild(createNativeButton(
+      "slt-settings.view-changelog",
+      `What's New in v${VERSION}`,
+      "View Changelog",
+      async () => {
+        const btn = document.getElementById("slt-settings.view-changelog");
+        if (btn) {
+          btn.textContent = "Loading...";
+          btn.disabled = true;
+        }
+        try {
+          await showCurrentChangelog();
+        } catch (e) {
+          if (Spicetify.showNotification) {
+            Spicetify.showNotification("Failed to load changelog", true);
+          }
+        } finally {
+          if (btn) {
+            btn.textContent = "View Changelog";
+            btn.disabled = false;
+          }
+        }
+      }
+    ));
+    sectionContent.appendChild(createNativeButton(
       "slt-settings.check-updates",
       `Version ${VERSION}`,
       "Check for Updates",
@@ -6130,7 +6195,10 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
                 <span style="margin: 0 8px; color: var(--spice-subtext);">\u2022</span>
                 <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
             </div>
-            <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="slt-button" id="slt-view-changelog-popup" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">View Changelog</button>
+                <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            </div>
         </div>
         
         <div class="slt-setting-row" style="padding-top: 0; opacity: 0.6;">
@@ -6147,6 +6215,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       const showNotificationsCheckbox = container.querySelector("#slt-show-notifications");
       const debugModeCheckbox = container.querySelector("#slt-debug-mode");
       const viewCacheButton = container.querySelector("#slt-view-cache");
+      const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
       const checkUpdatesButton = container.querySelector("#slt-check-updates");
       targetLangSelect?.addEventListener("change", () => {
         storage.set("target-language", targetLangSelect.value);
@@ -6186,6 +6255,21 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       viewCacheButton?.addEventListener("click", () => {
         Spicetify.PopupModal?.hide();
         setTimeout(() => openCacheViewer(), 150);
+      });
+      viewChangelogPopupButton?.addEventListener("click", async () => {
+        viewChangelogPopupButton.textContent = "Loading...";
+        viewChangelogPopupButton.disabled = true;
+        Spicetify.PopupModal?.hide();
+        try {
+          await showCurrentChangelog();
+        } catch (e) {
+          if (Spicetify.showNotification) {
+            Spicetify.showNotification("Failed to load changelog", true);
+          }
+        } finally {
+          viewChangelogPopupButton.textContent = "View Changelog";
+          viewChangelogPopupButton.disabled = false;
+        }
       });
       checkUpdatesButton?.addEventListener("click", async () => {
         checkUpdatesButton.textContent = "Checking...";

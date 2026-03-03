@@ -990,58 +990,103 @@ function showChangelogModal(version: string, changelog: string): void {
     }
 }
 
+async function fetchChangelogForVersion(version: string): Promise<string> {
+    try {
+        const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
+        const response = await fetchWithTimeout(tagUrl, {
+            headers: { 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (response.ok) {
+            const release: GitHubRelease = await response.json();
+            if (release.body) return release.body;
+        }
+    } catch (e) {
+        debug('Could not fetch changelog for version', version, ':', e);
+    }
+
+    try {
+        const response = await fetchWithTimeout(GITHUB_API_URL, {
+            headers: { 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (response.ok) {
+            const release: GitHubRelease = await response.json();
+            if (release.body) return release.body;
+        }
+    } catch (e) {
+        debug('Could not fetch latest release changelog:', e);
+    }
+
+    return '';
+}
+
 export async function showPostUpdateChangelog(): Promise<void> {
+    const currentVersion = CURRENT_VERSION;
+    let targetVersion: string | null = null;
+    let changelog: string | null = null;
+
+    const hotfixDetected = storage.get('hotfix-detected');
+    if (hotfixDetected) {
+        storage.remove('hotfix-detected');
+        await new Promise(r => setTimeout(r, 2000));
+        const metadata = (window as any)._spicy_lyric_translator_metadata;
+        const hashShort = metadata?.ContentHash ? metadata.ContentHash.substring(0, 8) : '';
+        const hashLabel = hashShort ? ` [${hashShort}]` : '';
+        if (Spicetify.showNotification) {
+            Spicetify.showNotification(`Spicy Lyric Translator v${currentVersion} hotfix applied!${hashLabel}`);
+        }
+        info(`Hotfix applied for v${currentVersion}${hashLabel}`);
+    }
+
     const pendingVersion = storage.get('pending-update-version');
-    if (!pendingVersion) return;
+    if (pendingVersion) {
+        const pendingTimestamp = storage.get('pending-update-timestamp');
 
-    const pendingTimestamp = storage.get('pending-update-timestamp');
+        storage.remove('pending-update-version');
+        storage.remove('pending-update-timestamp');
 
-    storage.remove('pending-update-version');
-    storage.remove('pending-update-timestamp');
+        if (pendingTimestamp) {
+            const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
+            if (elapsed > 60 * 60 * 1000) {
+                storage.remove('pending-update-changelog');
+                storage.set('last-known-version', currentVersion);
+                return;
+            }
+        }
 
-    if (pendingTimestamp) {
-        const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
-        if (elapsed > 60 * 60 * 1000) {
-            storage.remove('pending-update-changelog');
+        changelog = storage.get('pending-update-changelog');
+        storage.remove('pending-update-changelog');
+        targetVersion = pendingVersion;
+    } else {
+        const lastKnownVersion = storage.get('last-known-version');
+        if (lastKnownVersion && lastKnownVersion !== currentVersion) {
+            const lastParsed = parseVersion(lastKnownVersion);
+            const currentParsed = parseVersion(currentVersion);
+            if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
+                targetVersion = currentVersion;
+                debug(`Version change detected: ${lastKnownVersion} → ${currentVersion}`);
+            }
+        } else if (!lastKnownVersion) {
+            storage.set('last-known-version', currentVersion);
             return;
         }
     }
 
-    let changelog = storage.get('pending-update-changelog');
-    storage.remove('pending-update-changelog');
+    storage.set('last-known-version', currentVersion);
+
+    if (!targetVersion) return;
 
     if (!changelog) {
-        try {
-            const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${pendingVersion}`;
-            const response = await fetchWithTimeout(tagUrl, {
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
-            });
-            if (response.ok) {
-                const release: GitHubRelease = await response.json();
-                changelog = release.body || '';
-            }
-        } catch (e) {
-            debug('Could not fetch changelog for post-update display:', e);
-        }
-    }
-
-    if (!changelog) {
-        try {
-            const response = await fetchWithTimeout(GITHUB_API_URL, {
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
-            });
-            if (response.ok) {
-                const release: GitHubRelease = await response.json();
-                changelog = release.body || '';
-            }
-        } catch (e) {
-            debug('Could not fetch latest release changelog:', e);
-        }
+        changelog = await fetchChangelogForVersion(targetVersion);
     }
 
     await new Promise(r => setTimeout(r, 2000));
 
-    showChangelogModal(pendingVersion, changelog || '');
+    showChangelogModal(targetVersion, changelog || '');
+}
+
+export async function showCurrentChangelog(): Promise<void> {
+    const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
+    showChangelogModal(CURRENT_VERSION, changelog);
 }
 
 export const VERSION = CURRENT_VERSION;

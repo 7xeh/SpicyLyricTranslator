@@ -3,7 +3,7 @@ import { state } from './state';
 import { SUPPORTED_LANGUAGES, clearTranslationCache, setPreferredApi } from './translator';
 import { debug, info, isDebugEnabled, setDebugMode } from './debug';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
-import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo } from './updater';
+import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog } from './updater';
 import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
@@ -277,6 +277,31 @@ function createNativeSettingsSection(): HTMLElement {
         }
     ));
     
+    sectionContent.appendChild(createNativeButton(
+        'slt-settings.view-changelog',
+        `What's New in v${VERSION}`,
+        'View Changelog',
+        async () => {
+            const btn = document.getElementById('slt-settings.view-changelog') as HTMLButtonElement;
+            if (btn) {
+                btn.textContent = 'Loading...';
+                btn.disabled = true;
+            }
+            try {
+                await showCurrentChangelog();
+            } catch (e) {
+                if (Spicetify.showNotification) {
+                    Spicetify.showNotification('Failed to load changelog', true);
+                }
+            } finally {
+                if (btn) {
+                    btn.textContent = 'View Changelog';
+                    btn.disabled = false;
+                }
+            }
+        }
+    ));
+
     sectionContent.appendChild(createNativeButton(
         'slt-settings.check-updates',
         `Version ${VERSION}`,
@@ -642,7 +667,10 @@ function createSettingsUI(): HTMLElement {
                 <span style="margin: 0 8px; color: var(--spice-subtext);">•</span>
                 <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
             </div>
-            <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="slt-button" id="slt-view-changelog-popup" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">View Changelog</button>
+                <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            </div>
         </div>
         
         <div class="slt-setting-row" style="padding-top: 0; opacity: 0.6;">
@@ -660,6 +688,7 @@ function createSettingsUI(): HTMLElement {
         const showNotificationsCheckbox = container.querySelector('#slt-show-notifications') as HTMLInputElement;
         const debugModeCheckbox = container.querySelector('#slt-debug-mode') as HTMLInputElement;
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
+        const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
         
         targetLangSelect?.addEventListener('change', () => {
@@ -708,6 +737,22 @@ function createSettingsUI(): HTMLElement {
         viewCacheButton?.addEventListener('click', () => {
             Spicetify.PopupModal?.hide();
             setTimeout(() => openCacheViewer(), 150);
+        });
+        
+        viewChangelogPopupButton?.addEventListener('click', async () => {
+            viewChangelogPopupButton.textContent = 'Loading...';
+            viewChangelogPopupButton.disabled = true;
+            Spicetify.PopupModal?.hide();
+            try {
+                await showCurrentChangelog();
+            } catch (e) {
+                if (Spicetify.showNotification) {
+                    Spicetify.showNotification('Failed to load changelog', true);
+                }
+            } finally {
+                viewChangelogPopupButton.textContent = 'View Changelog';
+                viewChangelogPopupButton.disabled = false;
+            }
         });
         
         checkUpdatesButton?.addEventListener('click', async () => {
