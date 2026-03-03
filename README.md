@@ -7,6 +7,9 @@ Real-time lyric translation extension for **[Spicy Lyrics](https://github.com/Sp
 ![Status](https://img.shields.io/badge/Status-Online-success?style=flat-square)
 
 ---
+![Preview](https://raw.githubusercontent.com/7xeh/SpicyLyricTranslate/main/preview.png)
+
+---
 
 ## Features
 
@@ -33,12 +36,6 @@ Real-time lyric translation extension for **[Spicy Lyrics](https://github.com/Sp
 - Spicetify `>= 2.0.0`
 - Spicy Lyrics extension installed and working
 - Internet connection for first-time translations and update checks
-
----
-
-## Preview
-
-![Preview](https://raw.githubusercontent.com/7xeh/SpicyLyricTranslate/main/preview.png)
 
 ---
 
@@ -113,8 +110,8 @@ The extension works across full lyrics view, sidebar lyrics, and picture-in-pict
 
 - Track cache keeps up to **100 tracks** (with expiry pruning).
 - Line translation cache keeps up to **500 entries** with 7-day expiry.
-- Connectivity indicator can report aggregate counts (installed/viewing) and latency.
-- Tooltip explicitly states: **No personal data collected**.
+- Connectivity indicator shows install/viewer counts and latency at a glance.
+- **No personal data is collected** — ever.
 
 ---
 
@@ -130,17 +127,20 @@ The extension works across full lyrics view, sidebar lyrics, and picture-in-pict
 
 ## Links
 
-Full setup and usage guide:  
+Setup & usage guide:  
 https://7xeh.dev/apps/spicylyrictranslate/docs
 
-Service status page:  
+Service status:  
 https://7xeh.dev/apps/spicylyrictranslate/status/
 
-Join the Discord server for support, updates, and feedback:  
+Song issue or bad translation? Report it here:  
+https://7xeh.dev/apps/spicylyrictranslate/report/
+
+Join the Discord for support, updates, and feedback:  
 https://discord.gg/fXK34DeDW5
 
 ---
 
 ## Credits
 
-Built for the Spicetify community by **7xeh**.
+Made with care for the Spicetify community by **7xeh**.
