@@ -245,6 +245,8 @@ export function extractLineText(lineElement: Element): string {
 
 function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: string): number[] {
     const indexes: number[] = [];
+    const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -252,12 +254,20 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
             continue;
         }
 
+        if (targetIsLatin) {
+            const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line);
+            if (hasNonLatin) {
+                indexes.push(i);
+                continue;
+            }
+        }
+
         const detected = detectLanguageHeuristic(line);
-        if (!detected || detected.confidence < 0.75) {
+        if (!detected) {
             continue;
         }
 
-        if (!isSameLanguage(detected.code, targetLanguage)) {
+        if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.5) {
             indexes.push(i);
         }
     }

@@ -1,45 +1,29 @@
-
-
 import { debug, warn } from './debug';
 
-
 const detectionCache: Map<string, { language: string; confidence: number; timestamp: number }> = new Map();
-const DETECTION_CACHE_TTL = 30 * 60 * 1000;  
-
+const DETECTION_CACHE_TTL = 30 * 60 * 1000;
 
 const LANGUAGE_PATTERNS: { code: string; scripts: RegExp }[] = [
-    
     { code: 'ja', scripts: /[\u3040-\u30FF\u4E00-\u9FAF]/ },
     { code: 'zh', scripts: /[\u4E00-\u9FFF]/ },
     { code: 'ko', scripts: /[\uAC00-\uD7AF\u1100-\u11FF]/ },
-    
-    
     { code: 'ar', scripts: /[\u0600-\u06FF]/ },
     { code: 'he', scripts: /[\u0590-\u05FF]/ },
-    
-    
     { code: 'ru', scripts: /[\u0400-\u04FF]/ },
-    
-    
     { code: 'th', scripts: /[\u0E00-\u0E7F]/ },
-    
-    
     { code: 'hi', scripts: /[\u0900-\u097F]/ },
-    
-    
     { code: 'el', scripts: /[\u0370-\u03FF]/ },
 ];
 
-
 const LATIN_LANGUAGE_WORDS: { code: string; words: string[] }[] = [
-    { code: 'es', words: ['el', 'la', 'los', 'las', 'que', 'de', 'en', 'un', 'una', 'es', 'no', 'por', 'con', 'para', 'como', 'pero', 'más', 'yo', 'tu', 'mi'] },
-    { code: 'fr', words: ['le', 'la', 'les', 'de', 'et', 'en', 'un', 'une', 'est', 'que', 'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ne', 'pas', 'pour', 'avec'] },
-    { code: 'de', words: ['der', 'die', 'das', 'und', 'ist', 'ich', 'du', 'er', 'sie', 'wir', 'ihr', 'nicht', 'ein', 'eine', 'mit', 'auf', 'für', 'von'] },
-    { code: 'pt', words: ['o', 'a', 'os', 'as', 'de', 'que', 'e', 'em', 'um', 'uma', 'é', 'não', 'eu', 'tu', 'ele', 'ela', 'nós', 'você', 'com', 'para'] },
-    { code: 'it', words: ['il', 'la', 'lo', 'gli', 'le', 'di', 'che', 'e', 'un', 'una', 'è', 'non', 'io', 'tu', 'lui', 'lei', 'noi', 'voi', 'con', 'per'] },
+    { code: 'es', words: ['el', 'la', 'los', 'las', 'que', 'de', 'en', 'un', 'una', 'es', 'no', 'por', 'con', 'para', 'como', 'pero', 'más', 'yo', 'tu', 'mi', 'muy', 'hay', 'donde', 'cuando', 'siempre', 'nunca', 'todo', 'nada', 'sin', 'sobre', 'soy', 'estoy', 'tengo', 'aquí', 'porque', 'te', 'se', 'le', 'nos', 'ya', 'del', 'al'] },
+    { code: 'fr', words: ['le', 'la', 'les', 'de', 'et', 'en', 'un', 'une', 'est', 'que', 'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ne', 'pas', 'pour', 'avec', 'mais', 'aussi', 'très', 'mon', 'ton', 'son', 'mes', 'ses', 'sur', 'dans', 'qui', 'au', 'du', 'des', 'ce', 'cette', 'ça'] },
+    { code: 'de', words: ['der', 'die', 'das', 'und', 'ist', 'ich', 'du', 'er', 'sie', 'wir', 'ihr', 'nicht', 'ein', 'eine', 'mit', 'auf', 'für', 'von', 'auch', 'noch', 'nur', 'sehr', 'wie', 'doch', 'dann', 'nein', 'ja', 'wenn', 'mein', 'dein', 'sein', 'kein'] },
+    { code: 'pt', words: ['o', 'a', 'os', 'as', 'de', 'que', 'e', 'em', 'um', 'uma', 'é', 'não', 'eu', 'tu', 'ele', 'ela', 'nós', 'você', 'com', 'para', 'meu', 'seu', 'muito', 'bem', 'sim', 'aqui', 'agora', 'onde', 'quando', 'sempre', 'também', 'porque', 'mais', 'nunca', 'tudo', 'nada', 'sem'] },
+    { code: 'it', words: ['il', 'la', 'lo', 'gli', 'le', 'di', 'che', 'e', 'un', 'una', 'è', 'non', 'io', 'tu', 'lui', 'lei', 'noi', 'voi', 'con', 'per', 'anche', 'ancora', 'molto', 'bene', 'quando', 'dove', 'sempre', 'mai', 'tutto', 'mio', 'mia', 'tuo', 'suo'] },
     { code: 'nl', words: ['de', 'het', 'een', 'en', 'van', 'is', 'dat', 'op', 'te', 'in', 'voor', 'niet', 'met', 'zijn', 'maar', 'ook', 'als', 'dit'] },
     { code: 'pl', words: ['i', 'w', 'na', 'nie', 'do', 'to', 'że', 'co', 'jest', 'się', 'ja', 'ty', 'on', 'my', 'wy', 'ale', 'jak', 'tak'] },
-    { code: 'en', words: ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'i', 'you', 'he', 'she', 'it', 'we', 'they'] },
+    { code: 'en', words: ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'my', 'your', 'his', 'her', 'our', 'their', 'do', 'did', 'not', 'no', 'have', 'has', 'had', 'be', 'been', 'will', 'would', 'can', 'could', 'just', 'like', 'so', 'this', 'that', 'what', 'when', 'how', 'all', 'if', 'there', 'them', 'from', 'about', 'up', 'out', 'know', 'only', 'into', 'than', 'then', 'its', 'who', 'which', 'more', 'some', 'these', 'those', 'here'] },
 ];
 
 const LATIN_LANGUAGE_WORD_SETS: { code: string; words: Set<string> }[] = LATIN_LANGUAGE_WORDS.map(lang => ({
@@ -84,7 +68,6 @@ function tokenizeWords(text: string): string[] {
     return matches.filter(word => word.length > 1);
 }
 
-
 export function detectLanguageHeuristic(text: string): { code: string; confidence: number } | null {
     if (!text || text.length < 10) {
         return null;
@@ -127,7 +110,7 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
     }
     
     const words = tokenizeWords(normalizedText);
-    if (words.length < 5) {
+    if (words.length < 3) {
         return null;
     }
     
@@ -152,18 +135,23 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
     
     const matchRatio = maxCount / words.length;
     
-    if (matchRatio > 0.15 && maxCount >= 3) {
+    const minMatchCount = words.length <= 6 ? 2 : 3;
+    if (matchRatio > 0.12 && maxCount >= minMatchCount) {
         const sortedCounts = Object.entries(wordCounts)
             .sort((a, b) => b[1] - a[1]);
         
-        if (sortedCounts.length >= 2 && sortedCounts[0][1] >= sortedCounts[1][1] * 1.5) {
+        if (sortedCounts.length < 2 || sortedCounts[1][1] === 0) {
+            return { code: maxLang, confidence: Math.min(0.75, 0.35 + matchRatio) };
+        }
+        
+        const disambiguationRatio = words.length <= 6 ? 1.3 : 1.5;
+        if (sortedCounts[0][1] >= sortedCounts[1][1] * disambiguationRatio) {
             return { code: maxLang, confidence: Math.min(0.8, 0.4 + matchRatio) };
         }
     }
     
     return null;
 }
-
 
 async function detectLanguageViaAPI(text: string): Promise<{ code: string; confidence: number }> {
     const sample = text.slice(0, 500);
@@ -184,19 +172,15 @@ async function detectLanguageViaAPI(text: string): Promise<{ code: string; confi
     
     const data = await response.json();
     const detectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
-    
-    
     const confidence = detectedLang !== 'unknown' ? 0.9 : 0.5;
     
     return { code: detectedLang, confidence };
 }
 
-
 export async function detectLyricsLanguage(
     lyrics: string[],
     trackUri?: string
 ): Promise<{ code: string; confidence: number }> {
-    
     if (trackUri) {
         const cached = detectionCache.get(trackUri);
         if (cached && Date.now() - cached.timestamp < DETECTION_CACHE_TTL) {
@@ -204,20 +188,17 @@ export async function detectLyricsLanguage(
             return { code: cached.language, confidence: cached.confidence };
         }
     }
-    
-    
+
     const sampleText = buildSampleText(lyrics);
-    
+
     if (sampleText.length < 20) {
         return { code: 'unknown', confidence: 0 };
     }
-    
-    
+
     const heuristic = detectLanguageHeuristic(sampleText);
     if (heuristic && heuristic.confidence >= 0.7) {
         debug(`Heuristic language detection: ${heuristic.code} (${(heuristic.confidence * 100).toFixed(0)}%)`);
-        
-        
+
         if (trackUri) {
             detectionCache.set(trackUri, { 
                 language: heuristic.code, 
@@ -228,13 +209,11 @@ export async function detectLyricsLanguage(
         
         return heuristic;
     }
-    
-    
+
     try {
         const apiResult = await detectLanguageViaAPI(sampleText);
         debug(`API language detection: ${apiResult.code} (${(apiResult.confidence * 100).toFixed(0)}%)`);
-        
-        
+
         if (trackUri) {
             detectionCache.set(trackUri, { 
                 language: apiResult.code, 
@@ -246,12 +225,9 @@ export async function detectLyricsLanguage(
         return apiResult;
     } catch (error) {
         warn('API language detection failed:', error);
-        
-        
         return heuristic || { code: 'unknown', confidence: 0 };
     }
 }
-
 
 export function isSameLanguage(source: string, target: string): boolean {
     if (!source || source === 'unknown') return false;
@@ -263,6 +239,54 @@ export function isSameLanguage(source: string, target: string): boolean {
     return normalizeCode(source) === normalizeCode(target);
 }
 
+export function assessMixedLanguageContent(
+    lines: string[],
+    targetLanguage: string
+): { hasMixedContent: boolean; nonTargetCount: number; uncertainCount: number } {
+    let nonTargetCount = 0;
+    let uncertainCount = 0;
+    let targetCount = 0;
+    const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
+    
+    for (const line of lines) {
+        const trimmed = (line || '').trim();
+        if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed)) continue;
+
+        if (targetIsLatin) {
+            const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
+            if (hasNonLatin) {
+                nonTargetCount++;
+                continue;
+            }
+        }
+        
+        const detected = detectLanguageHeuristic(trimmed);
+
+        if (!detected) {
+            if (trimmed.length >= 10) {
+                uncertainCount++;
+            }
+            continue;
+        }
+        
+        if (isSameLanguage(detected.code, targetLanguage)) {
+            targetCount++;
+        } else if (detected.confidence >= 0.5) {
+            nonTargetCount++;
+        } else {
+            uncertainCount++;
+        }
+    }
+    
+    const totalChecked = targetCount + nonTargetCount + uncertainCount;
+    if (totalChecked === 0) return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
+
+    const hasMixedContent = nonTargetCount > 0 ||
+        (uncertainCount > 0 && uncertainCount / totalChecked > 0.25);
+    
+    return { hasMixedContent, nonTargetCount, uncertainCount };
+}
 
 export async function shouldSkipTranslation(
     lyrics: string[],
@@ -279,6 +303,11 @@ export async function shouldSkipTranslation(
     
     if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
         if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
+            const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+            if (mixedCheck.hasMixedContent) {
+                debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) — will not skip`);
+                return { skip: false, detectedLanguage: quickHeuristic.code };
+            }
             return {
                 skip: true,
                 reason: `Lyrics already in ${quickHeuristic.code.toUpperCase()}`,
@@ -295,6 +324,11 @@ export async function shouldSkipTranslation(
     }
     
     if (isSameLanguage(detection.code, targetLanguage)) {
+        const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+        if (mixedCheck.hasMixedContent) {
+            debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) — will not skip`);
+            return { skip: false, detectedLanguage: detection.code };
+        }
         return {
             skip: true,
             reason: `Lyrics already in ${detection.code.toUpperCase()}`,
@@ -308,11 +342,9 @@ export async function shouldSkipTranslation(
     };
 }
 
-
 export function clearDetectionCache(): void {
     detectionCache.clear();
 }
-
 
 export function getLanguageName(code: string): string {
     const languageNames: { [key: string]: string } = {
@@ -357,6 +389,7 @@ export default {
     detectLanguageHeuristic,
     detectLyricsLanguage,
     isSameLanguage,
+    assessMixedLanguageContent,
     shouldSkipTranslation,
     clearDetectionCache,
     getLanguageName

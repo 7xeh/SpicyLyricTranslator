@@ -504,14 +504,14 @@ var SpicyLyricTranslater = (() => {
     { code: "el", scripts: /[\u0370-\u03FF]/ }
   ];
   var LATIN_LANGUAGE_WORDS = [
-    { code: "es", words: ["el", "la", "los", "las", "que", "de", "en", "un", "una", "es", "no", "por", "con", "para", "como", "pero", "m\xE1s", "yo", "tu", "mi"] },
-    { code: "fr", words: ["le", "la", "les", "de", "et", "en", "un", "une", "est", "que", "je", "tu", "il", "elle", "nous", "vous", "ne", "pas", "pour", "avec"] },
-    { code: "de", words: ["der", "die", "das", "und", "ist", "ich", "du", "er", "sie", "wir", "ihr", "nicht", "ein", "eine", "mit", "auf", "f\xFCr", "von"] },
-    { code: "pt", words: ["o", "a", "os", "as", "de", "que", "e", "em", "um", "uma", "\xE9", "n\xE3o", "eu", "tu", "ele", "ela", "n\xF3s", "voc\xEA", "com", "para"] },
-    { code: "it", words: ["il", "la", "lo", "gli", "le", "di", "che", "e", "un", "una", "\xE8", "non", "io", "tu", "lui", "lei", "noi", "voi", "con", "per"] },
+    { code: "es", words: ["el", "la", "los", "las", "que", "de", "en", "un", "una", "es", "no", "por", "con", "para", "como", "pero", "m\xE1s", "yo", "tu", "mi", "muy", "hay", "donde", "cuando", "siempre", "nunca", "todo", "nada", "sin", "sobre", "soy", "estoy", "tengo", "aqu\xED", "porque", "te", "se", "le", "nos", "ya", "del", "al"] },
+    { code: "fr", words: ["le", "la", "les", "de", "et", "en", "un", "une", "est", "que", "je", "tu", "il", "elle", "nous", "vous", "ne", "pas", "pour", "avec", "mais", "aussi", "tr\xE8s", "mon", "ton", "son", "mes", "ses", "sur", "dans", "qui", "au", "du", "des", "ce", "cette", "\xE7a"] },
+    { code: "de", words: ["der", "die", "das", "und", "ist", "ich", "du", "er", "sie", "wir", "ihr", "nicht", "ein", "eine", "mit", "auf", "f\xFCr", "von", "auch", "noch", "nur", "sehr", "wie", "doch", "dann", "nein", "ja", "wenn", "mein", "dein", "sein", "kein"] },
+    { code: "pt", words: ["o", "a", "os", "as", "de", "que", "e", "em", "um", "uma", "\xE9", "n\xE3o", "eu", "tu", "ele", "ela", "n\xF3s", "voc\xEA", "com", "para", "meu", "seu", "muito", "bem", "sim", "aqui", "agora", "onde", "quando", "sempre", "tamb\xE9m", "porque", "mais", "nunca", "tudo", "nada", "sem"] },
+    { code: "it", words: ["il", "la", "lo", "gli", "le", "di", "che", "e", "un", "una", "\xE8", "non", "io", "tu", "lui", "lei", "noi", "voi", "con", "per", "anche", "ancora", "molto", "bene", "quando", "dove", "sempre", "mai", "tutto", "mio", "mia", "tuo", "suo"] },
     { code: "nl", words: ["de", "het", "een", "en", "van", "is", "dat", "op", "te", "in", "voor", "niet", "met", "zijn", "maar", "ook", "als", "dit"] },
     { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak"] },
-    { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they"] }
+    { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
   ];
   var LATIN_LANGUAGE_WORD_SETS = LATIN_LANGUAGE_WORDS.map((lang) => ({
     code: lang.code,
@@ -578,7 +578,7 @@ var SpicyLyricTranslater = (() => {
       };
     }
     const words = tokenizeWords(normalizedText);
-    if (words.length < 5) {
+    if (words.length < 3) {
       return null;
     }
     const wordCounts = {};
@@ -598,9 +598,14 @@ var SpicyLyricTranslater = (() => {
       }
     }
     const matchRatio = maxCount / words.length;
-    if (matchRatio > 0.15 && maxCount >= 3) {
+    const minMatchCount = words.length <= 6 ? 2 : 3;
+    if (matchRatio > 0.12 && maxCount >= minMatchCount) {
       const sortedCounts = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
-      if (sortedCounts.length >= 2 && sortedCounts[0][1] >= sortedCounts[1][1] * 1.5) {
+      if (sortedCounts.length < 2 || sortedCounts[1][1] === 0) {
+        return { code: maxLang, confidence: Math.min(0.75, 0.35 + matchRatio) };
+      }
+      const disambiguationRatio = words.length <= 6 ? 1.3 : 1.5;
+      if (sortedCounts[0][1] >= sortedCounts[1][1] * disambiguationRatio) {
         return { code: maxLang, confidence: Math.min(0.8, 0.4 + matchRatio) };
       }
     }
@@ -673,6 +678,44 @@ var SpicyLyricTranslater = (() => {
     };
     return normalizeCode(source) === normalizeCode(target);
   }
+  function assessMixedLanguageContent(lines, targetLanguage) {
+    let nonTargetCount = 0;
+    let uncertainCount = 0;
+    let targetCount = 0;
+    const targetBase = targetLanguage.toLowerCase().split("-")[0].split("_")[0];
+    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el"].includes(targetBase);
+    for (const line of lines) {
+      const trimmed = (line || "").trim();
+      if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed))
+        continue;
+      if (targetIsLatin) {
+        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
+        if (hasNonLatin) {
+          nonTargetCount++;
+          continue;
+        }
+      }
+      const detected = detectLanguageHeuristic(trimmed);
+      if (!detected) {
+        if (trimmed.length >= 10) {
+          uncertainCount++;
+        }
+        continue;
+      }
+      if (isSameLanguage(detected.code, targetLanguage)) {
+        targetCount++;
+      } else if (detected.confidence >= 0.5) {
+        nonTargetCount++;
+      } else {
+        uncertainCount++;
+      }
+    }
+    const totalChecked = targetCount + nonTargetCount + uncertainCount;
+    if (totalChecked === 0)
+      return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
+    const hasMixedContent = nonTargetCount > 0 || uncertainCount > 0 && uncertainCount / totalChecked > 0.25;
+    return { hasMixedContent, nonTargetCount, uncertainCount };
+  }
   async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
     const nonEmptyLyrics = lyrics.filter((l) => l && l.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(l.trim()));
     if (nonEmptyLyrics.length === 0) {
@@ -682,6 +725,11 @@ var SpicyLyricTranslater = (() => {
     const quickHeuristic = detectLanguageHeuristic(sampleText);
     if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
       if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
+        const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+        if (mixedCheck.hasMixedContent) {
+          debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
+          return { skip: false, detectedLanguage: quickHeuristic.code };
+        }
         return {
           skip: true,
           reason: `Lyrics already in ${quickHeuristic.code.toUpperCase()}`,
@@ -695,6 +743,11 @@ var SpicyLyricTranslater = (() => {
       return { skip: false };
     }
     if (isSameLanguage(detection.code, targetLanguage)) {
+      const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+      if (mixedCheck.hasMixedContent) {
+        debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
+        return { skip: false, detectedLanguage: detection.code };
+      }
       return {
         skip: true,
         reason: `Lyrics already in ${detection.code.toUpperCase()}`,
@@ -3788,7 +3841,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.8.4" : "0.0.0";
+    return true ? "1.8.5" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslate";
@@ -4727,16 +4780,25 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
   }
   function getConfidentNonTargetLineIndexes(lines, targetLanguage) {
     const indexes = [];
+    const targetBase = targetLanguage.toLowerCase().split("-")[0].split("_")[0];
+    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el"].includes(targetBase);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!line || line.trim().length === 0) {
         continue;
       }
+      if (targetIsLatin) {
+        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line);
+        if (hasNonLatin) {
+          indexes.push(i);
+          continue;
+        }
+      }
       const detected = detectLanguageHeuristic(line);
-      if (!detected || detected.confidence < 0.75) {
+      if (!detected) {
         continue;
       }
-      if (!isSameLanguage(detected.code, targetLanguage)) {
+      if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.5) {
         indexes.push(i);
       }
     }
