@@ -32,7 +32,8 @@ export async function initialize(): Promise<void> {
         customApiKey: state.customApiKey,
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
-        openaiModel: state.openaiModel
+        openaiModel: state.openaiModel,
+        geminiApiKey: state.geminiApiKey
     });
     injectStyles();
     initConnectionIndicator();

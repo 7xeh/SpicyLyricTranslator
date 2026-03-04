@@ -158,6 +158,7 @@ var SpicyLyricTranslater = (() => {
     deeplApiKey: storage.get("deepl-api-key") || "",
     openaiApiKey: storage.get("openai-api-key") || "",
     openaiModel: storage.get("openai-model") || "gpt-4o-mini",
+    geminiApiKey: storage.get("gemini-api-key") || "",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
     lastViewMode: null,
@@ -795,6 +796,7 @@ var SpicyLyricTranslater = (() => {
   var deeplApiKey = "";
   var openaiApiKey = "";
   var openaiModel = "gpt-4o-mini";
+  var geminiApiKey = "";
   var RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2e3,
@@ -939,6 +941,8 @@ var SpicyLyricTranslater = (() => {
         openaiApiKey = apiKeys.openaiApiKey;
       if (apiKeys.openaiModel !== void 0)
         openaiModel = apiKeys.openaiModel;
+      if (apiKeys.geminiApiKey !== void 0)
+        geminiApiKey = apiKeys.geminiApiKey;
     }
     info(`API preference set to: ${api}${api === "custom" ? ` (${customUrl})` : ""}`);
   }
@@ -1236,6 +1240,47 @@ var SpicyLyricTranslater = (() => {
     }
     throw new Error("Invalid response from OpenAI API");
   }
+  async function translateWithGemini(text, targetLang) {
+    if (!geminiApiKey) {
+      throw new Error("Gemini API key not configured. Set it in Settings.");
+    }
+    const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.
+
+${text}`
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: Math.max(text.length * 3, 500)
+        }
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    }
+    const data = await response.json();
+    if (data.candidates && data.candidates.length > 0) {
+      const translation = data.candidates[0]?.content?.parts?.[0]?.text?.trim();
+      if (translation) {
+        return { translation };
+      }
+    }
+    throw new Error("Invalid response from Gemini API");
+  }
   async function translateWithCustomApi(text, targetLang) {
     if (!customApiUrl) {
       throw new Error("Custom API URL not configured");
@@ -1482,6 +1527,10 @@ var SpicyLyricTranslater = (() => {
       const result = await translateWithOpenAI(text, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
+    const tryGemini = async () => {
+      const result = await translateWithGemini(text, targetLang);
+      return { translation: result.translation, detectedLang: result.detectedLang };
+    };
     let primaryApi;
     let fallbackApis = [];
     switch (preferredApi) {
@@ -1495,6 +1544,10 @@ var SpicyLyricTranslater = (() => {
         break;
       case "openai":
         primaryApi = tryOpenAI;
+        fallbackApis = [{ name: "google", fn: tryGoogle }];
+        break;
+      case "gemini":
+        primaryApi = tryGemini;
         fallbackApis = [{ name: "google", fn: tryGoogle }];
         break;
       case "custom":
@@ -4339,7 +4392,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.0" : "0.0.0";
+    return true ? "1.9.1" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6270,6 +6323,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         { value: "libretranslate", text: "LibreTranslate" },
         { value: "deepl", text: "DeepL" },
         { value: "openai", text: "OpenAI" },
+        { value: "gemini", text: "Gemini" },
         { value: "custom", text: "Custom API" }
       ],
       storage.get("preferred-api") || "google",
@@ -6281,13 +6335,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           customApiKey: state.customApiKey,
           deeplApiKey: state.deeplApiKey,
           openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel
+          openaiModel: state.openaiModel,
+          geminiApiKey: state.geminiApiKey
         });
         const customRow = document.getElementById("slt-settings-custom-api-row");
         const customKeyRow = document.getElementById("slt-settings-custom-api-key-row");
         const deeplRow = document.getElementById("slt-settings-deepl-key-row");
         const openaiRow = document.getElementById("slt-settings-openai-key-row");
         const openaiModelRow2 = document.getElementById("slt-settings-openai-model-row");
+        const geminiRow = document.getElementById("slt-settings-gemini-key-row");
         if (customRow)
           customRow.style.display = api === "custom" ? "" : "none";
         if (customKeyRow)
@@ -6298,6 +6354,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           openaiRow.style.display = api === "openai" ? "" : "none";
         if (openaiModelRow2)
           openaiModelRow2.style.display = api === "openai" ? "" : "none";
+        if (geminiRow)
+          geminiRow.style.display = api === "gemini" ? "" : "none";
       }
     ));
     const customApiRow = document.createElement("div");
@@ -6320,7 +6378,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         customApiKey: state.customApiKey,
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
-        openaiModel: state.openaiModel
+        openaiModel: state.openaiModel,
+        geminiApiKey: state.geminiApiKey
       });
     });
     sectionContent.appendChild(customApiRow);
@@ -6400,6 +6459,25 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
     });
     sectionContent.appendChild(openaiModelRow);
+    const geminiKeyRow = document.createElement("div");
+    geminiKeyRow.id = "slt-settings-gemini-key-row";
+    geminiKeyRow.className = "x-settings-row";
+    geminiKeyRow.style.display = storage.get("preferred-api") === "gemini" ? "" : "none";
+    geminiKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
+        </div>
+    `;
+    const geminiKeyInput = geminiKeyRow.querySelector("input");
+    geminiKeyInput?.addEventListener("change", () => {
+      storage.set("gemini-api-key", geminiKeyInput.value);
+      state.geminiApiKey = geminiKeyInput.value;
+      setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiKeyInput.value });
+    });
+    sectionContent.appendChild(geminiKeyRow);
     sectionContent.appendChild(createNativeToggle(
       "slt-settings.auto-translate",
       "Auto-Translate on Song Change",
@@ -6782,6 +6860,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 <option value="libretranslate" ${storage.get("preferred-api") === "libretranslate" ? "selected" : ""}>LibreTranslate</option>
                 <option value="deepl" ${storage.get("preferred-api") === "deepl" ? "selected" : ""}>DeepL</option>
                 <option value="openai" ${storage.get("preferred-api") === "openai" ? "selected" : ""}>OpenAI</option>
+                <option value="gemini" ${storage.get("preferred-api") === "gemini" ? "selected" : ""}>Gemini</option>
                 <option value="custom" ${storage.get("preferred-api") === "custom" ? "selected" : ""}>Custom API</option>
             </select>
         </div>
@@ -6812,6 +6891,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label for="slt-openai-model">OpenAI Model</label>
             <input type="text" id="slt-openai-model" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
             <span class="slt-description">e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo</span>
+        </div>
+
+        <div class="slt-setting-row" id="slt-gemini-key-row" style="display: ${storage.get("preferred-api") === "gemini" ? "flex" : "none"}">
+            <label for="slt-gemini-api-key">Gemini API Key</label>
+            <input type="password" id="slt-gemini-api-key" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
+            <span class="slt-description">Get a key at aistudio.google.com/apikey</span>
         </div>
         
         <div class="slt-setting-row slt-toggle-row">
@@ -6890,6 +6975,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const openaiKeyRow = container.querySelector("#slt-openai-key-row");
       const openaiModelInput = container.querySelector("#slt-openai-model");
       const openaiModelRow = container.querySelector("#slt-openai-model-row");
+      const geminiApiKeyInput = container.querySelector("#slt-gemini-api-key");
+      const geminiKeyRow = container.querySelector("#slt-gemini-key-row");
       const autoTranslateCheckbox = container.querySelector("#slt-auto-translate");
       const showNotificationsCheckbox = container.querySelector("#slt-show-notifications");
       const showQualityIndicatorCheckbox = container.querySelector("#slt-show-quality-indicator");
@@ -6916,7 +7003,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           customApiKey: state.customApiKey,
           deeplApiKey: state.deeplApiKey,
           openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel
+          openaiModel: state.openaiModel,
+          geminiApiKey: state.geminiApiKey
         });
         if (customApiRow)
           customApiRow.style.display = api === "custom" ? "flex" : "none";
@@ -6928,6 +7016,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           openaiKeyRow.style.display = api === "openai" ? "flex" : "none";
         if (openaiModelRow)
           openaiModelRow.style.display = api === "openai" ? "flex" : "none";
+        if (geminiKeyRow)
+          geminiKeyRow.style.display = api === "gemini" ? "flex" : "none";
       });
       customApiUrlInput?.addEventListener("change", () => {
         storage.set("custom-api-url", customApiUrlInput.value);
@@ -6936,7 +7026,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           customApiKey: state.customApiKey,
           deeplApiKey: state.deeplApiKey,
           openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel
+          openaiModel: state.openaiModel,
+          geminiApiKey: state.geminiApiKey
         });
       });
       customApiKeyInput?.addEventListener("change", () => {
@@ -6958,6 +7049,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         storage.set("openai-model", openaiModelInput.value);
         state.openaiModel = openaiModelInput.value;
         setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
+      });
+      geminiApiKeyInput?.addEventListener("change", () => {
+        storage.set("gemini-api-key", geminiApiKeyInput.value);
+        state.geminiApiKey = geminiApiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiApiKeyInput.value });
       });
       autoTranslateCheckbox?.addEventListener("change", () => {
         storage.set("auto-translate", String(autoTranslateCheckbox.checked));
@@ -7685,7 +7781,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       customApiKey: state.customApiKey,
       deeplApiKey: state.deeplApiKey,
       openaiApiKey: state.openaiApiKey,
-      openaiModel: state.openaiModel
+      openaiModel: state.openaiModel,
+      geminiApiKey: state.geminiApiKey
     });
     injectStyles();
     initConnectionIndicator();

@@ -15,12 +15,13 @@ export interface ExtensionState {
     targetLanguage: string;
     autoTranslate: boolean;
     showNotifications: boolean;
-    preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom';
+    preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
     customApiUrl: string;
     customApiKey: string;
     deeplApiKey: string;
     openaiApiKey: string;
     openaiModel: string;
+    geminiApiKey: string;
     lastTranslatedSongUri: string | null;
     translatedLyrics: Map<string, string>;
     lastViewMode: string | null;
@@ -40,12 +41,13 @@ export const state: ExtensionState = {
     targetLanguage: storage.get('target-language') || 'en',
     autoTranslate: storage.get('auto-translate') === 'true',
     showNotifications: storage.get('show-notifications') !== 'false',
-    preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom') || 'google',
+    preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom') || 'google',
     customApiUrl: storage.get('custom-api-url') || '',
     customApiKey: storage.get('custom-api-key') || '',
     deeplApiKey: storage.get('deepl-api-key') || '',
     openaiApiKey: storage.get('openai-api-key') || '',
     openaiModel: storage.get('openai-model') || 'gpt-4o-mini',
+    geminiApiKey: storage.get('gemini-api-key') || '',
     lastTranslatedSongUri: null,
     translatedLyrics: new Map(),
     lastViewMode: null,

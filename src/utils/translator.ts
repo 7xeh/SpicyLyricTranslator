@@ -29,7 +29,7 @@ export interface TranslationCache {
     };
 }
 
-export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom';
+export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
 
 let preferredApi: ApiPreference = 'google';
 let customApiUrl: string = '';
@@ -37,6 +37,7 @@ let customApiKey: string = '';
 let deeplApiKey: string = '';
 let openaiApiKey: string = '';
 let openaiModel: string = 'gpt-4o-mini';
+let geminiApiKey: string = '';
 
 const RATE_LIMIT = {
     minDelayMs: 100,
@@ -215,7 +216,7 @@ async function retryWithBackoff<T>(
     throw lastError || new Error('All retry attempts failed');
 }
 
-export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?: { customApiKey?: string; deeplApiKey?: string; openaiApiKey?: string; openaiModel?: string }): void {
+export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?: { customApiKey?: string; deeplApiKey?: string; openaiApiKey?: string; openaiModel?: string; geminiApiKey?: string }): void {
     preferredApi = api;
     if (customUrl !== undefined) {
         customApiUrl = customUrl;
@@ -225,6 +226,7 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         if (apiKeys.deeplApiKey !== undefined) deeplApiKey = apiKeys.deeplApiKey;
         if (apiKeys.openaiApiKey !== undefined) openaiApiKey = apiKeys.openaiApiKey;
         if (apiKeys.openaiModel !== undefined) openaiModel = apiKeys.openaiModel;
+        if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
     }
     info(`API preference set to: ${api}${api === 'custom' ? ` (${customUrl})` : ''}`);
 }
@@ -567,6 +569,52 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
     throw new Error('Invalid response from OpenAI API');
 }
 
+async function translateWithGemini(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
+    if (!geminiApiKey) {
+        throw new Error('Gemini API key not configured. Set it in Settings.');
+    }
+
+    const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [
+                {
+                    parts: [
+                        {
+                            text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.\n\n${text}`
+                        }
+                    ]
+                }
+            ],
+            generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: Math.max(text.length * 3, 500)
+            }
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    if (data.candidates && data.candidates.length > 0) {
+        const translation = data.candidates[0]?.content?.parts?.[0]?.text?.trim();
+        if (translation) {
+            return { translation };
+        }
+    }
+
+    throw new Error('Invalid response from Gemini API');
+}
+
 async function translateWithCustomApi(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
     if (!customApiUrl) {
         throw new Error('Custom API URL not configured');
@@ -890,6 +938,11 @@ export async function translateText(text: string, targetLang: string): Promise<T
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
     
+    const tryGemini = async () => {
+        const result = await translateWithGemini(text, targetLang);
+        return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+    
     let primaryApi: () => Promise<{ translation: string; detectedLang?: string }>;
     let fallbackApis: { name: string, fn: () => Promise<{ translation: string; detectedLang?: string }> }[] = [];
     
@@ -904,6 +957,10 @@ export async function translateText(text: string, targetLang: string): Promise<T
             break;
         case 'openai':
             primaryApi = tryOpenAI;
+            fallbackApis = [{ name: 'google', fn: tryGoogle }];
+            break;
+        case 'gemini':
+            primaryApi = tryGemini;
             fallbackApis = [{ name: 'google', fn: tryGoogle }];
             break;
         case 'custom':
