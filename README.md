@@ -29,6 +29,13 @@ Real-time lyric translation extension for **[Spicy Lyrics](https://github.com/Sp
 - **Update checks**  
 	Built-in update checker with release metadata and one-click update flow.
 
+## Vocabulary & Learning Mode
+- **Interactive Flashcard System**
+  - Introduced a new "Learning Mode" toggle that transforms lyric lines into word-by-word paired flashcards.
+  - Original words are blurred by default and revealed on hover, paired directly with their translated counterpart.
+- **Karaoke Integration**
+  - Fully integrated with the existing karaoke gradient sync system, allowing translated words to highlight in perfect time with the music.
+
 ---
 
 ## Requirements
