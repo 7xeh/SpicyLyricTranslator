@@ -154,13 +154,20 @@ var SpicyLyricTranslater = (() => {
     showNotifications: storage.get("show-notifications") !== "false",
     preferredApi: storage.get("preferred-api") || "google",
     customApiUrl: storage.get("custom-api-url") || "",
+    customApiKey: storage.get("custom-api-key") || "",
+    deeplApiKey: storage.get("deepl-api-key") || "",
+    openaiApiKey: storage.get("openai-api-key") || "",
+    openaiModel: storage.get("openai-model") || "gpt-4o-mini",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
     lastViewMode: null,
     translationAbortController: null,
     overlayMode: storage.get("overlay-mode") || "interleaved",
     detectedLanguage: null,
-    syncWordHighlight: storage.get("sync-word-highlight") !== "false"
+    syncWordHighlight: storage.get("sync-word-highlight") !== "false",
+    showQualityIndicator: storage.get("show-quality-indicator") !== "false",
+    vocabularyMode: storage.get("vocabulary-mode") === "true",
+    _qualityByIndex: void 0
   };
 
   // src/utils/debug.ts
@@ -784,6 +791,10 @@ var SpicyLyricTranslater = (() => {
   // src/utils/translator.ts
   var preferredApi = "google";
   var customApiUrl = "";
+  var customApiKey = "";
+  var deeplApiKey = "";
+  var openaiApiKey = "";
+  var openaiModel = "gpt-4o-mini";
   var RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2e3,
@@ -914,10 +925,20 @@ var SpicyLyricTranslater = (() => {
     }
     throw lastError || new Error("All retry attempts failed");
   }
-  function setPreferredApi(api, customUrl) {
+  function setPreferredApi(api, customUrl, apiKeys) {
     preferredApi = api;
     if (customUrl !== void 0) {
       customApiUrl = customUrl;
+    }
+    if (apiKeys) {
+      if (apiKeys.customApiKey !== void 0)
+        customApiKey = apiKeys.customApiKey;
+      if (apiKeys.deeplApiKey !== void 0)
+        deeplApiKey = apiKeys.deeplApiKey;
+      if (apiKeys.openaiApiKey !== void 0)
+        openaiApiKey = apiKeys.openaiApiKey;
+      if (apiKeys.openaiModel !== void 0)
+        openaiModel = apiKeys.openaiModel;
     }
     info(`API preference set to: ${api}${api === "custom" ? ` (${customUrl})` : ""}`);
   }
@@ -1137,36 +1158,121 @@ var SpicyLyricTranslater = (() => {
     const data = await response.json();
     return data.translatedText;
   }
+  async function translateWithDeepL(text, targetLang) {
+    if (!deeplApiKey) {
+      throw new Error("DeepL API key not configured. Set it in Settings.");
+    }
+    const isFreePlan = deeplApiKey.endsWith(":fx");
+    const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
+    const url = `${baseUrl}/v2/translate`;
+    const deeplLangMap = {
+      "en": "EN-US",
+      "pt": "PT-BR",
+      "zh": "ZH-HANS",
+      "zh-TW": "ZH-HANT"
+    };
+    const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text: [text],
+        target_lang: deeplTarget
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`DeepL API error: ${response.status} ${errorText}`);
+    }
+    const data = await response.json();
+    if (data.translations && data.translations.length > 0) {
+      return {
+        translation: data.translations[0].text,
+        detectedLang: data.translations[0].detected_source_language?.toLowerCase()
+      };
+    }
+    throw new Error("Invalid response from DeepL API");
+  }
+  async function translateWithOpenAI(text, targetLang) {
+    if (!openaiApiKey) {
+      throw new Error("OpenAI API key not configured. Set it in Settings.");
+    }
+    const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: openaiModel || "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
+          },
+          {
+            role: "user",
+            content: text
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: Math.max(text.length * 3, 500)
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
+    }
+    const data = await response.json();
+    if (data.choices && data.choices.length > 0) {
+      const translation = data.choices[0].message?.content?.trim();
+      if (translation) {
+        return { translation };
+      }
+    }
+    throw new Error("Invalid response from OpenAI API");
+  }
   async function translateWithCustomApi(text, targetLang) {
     if (!customApiUrl) {
       throw new Error("Custom API URL not configured");
     }
     try {
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      if (customApiKey) {
+        headers["Authorization"] = `Bearer ${customApiKey}`;
+        headers["X-API-Key"] = customApiKey;
+      }
       const response = await fetch(customApiUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers,
         body: JSON.stringify({
           text,
           q: text,
           source: "auto",
           target: targetLang,
+          target_lang: targetLang,
           format: "text"
         })
       });
       if (!response.ok) {
-        throw new Error(`Custom API error: ${response.status}`);
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(`Custom API error: ${response.status} ${errorBody}`);
       }
       const data = await response.json();
-      const translation = data.translatedText || data.translated_text || data.translation || data.result || data.text || data.translations && data.translations[0]?.text || data.data && data.data.translatedText || Array.isArray(data) && data[0]?.translatedText;
+      const translation = data.translatedText || data.translated_text || data.translation || data.result || data.text || data.translations && data.translations[0]?.text || data.data && data.data.translatedText || data.choices && data.choices[0]?.message?.content || Array.isArray(data) && data[0]?.translatedText;
       if (translation) {
         return {
-          translation,
-          detectedLang: data.detectedLanguage || data.detected_language || data.sourceLang || data.src
+          translation: typeof translation === "string" ? translation : String(translation),
+          detectedLang: data.detectedLanguage || data.detected_language || data.sourceLang || data.src || data.detected_source_language
         };
       }
-      throw new Error("Could not parse translation from API response");
+      throw new Error(`Could not parse translation from API response: ${JSON.stringify(data).slice(0, 200)}`);
     } catch (error2) {
       error("Custom API error:", error2);
       throw error2;
@@ -1212,25 +1318,65 @@ var SpicyLyricTranslater = (() => {
     if (texts.length === 0) {
       return { translations: [], detectedLang: void 0 };
     }
+    if (preferredApi === "deepl" && deeplApiKey) {
+      const isFreePlan = deeplApiKey.endsWith(":fx");
+      const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
+      const deeplLangMap = {
+        "en": "EN-US",
+        "pt": "PT-BR",
+        "zh": "ZH-HANS",
+        "zh-TW": "ZH-HANT"
+      };
+      const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
+      const response2 = await fetch(`${baseUrl}/v2/translate`, {
+        method: "POST",
+        headers: {
+          "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: texts,
+          target_lang: deeplTarget
+        })
+      });
+      if (!response2.ok) {
+        throw new Error(`DeepL batch API error: ${response2.status}`);
+      }
+      const data2 = await response2.json();
+      if (data2.translations && Array.isArray(data2.translations)) {
+        return {
+          translations: data2.translations.map((t) => t.text || ""),
+          detectedLang: data2.translations[0]?.detected_source_language?.toLowerCase()
+        };
+      }
+      throw new Error("DeepL batch returned unexpected format");
+    }
     const url = preferredApi === "libretranslate" ? "https://libretranslate.de/translate" : customApiUrl;
     if (!url) {
       throw new Error("Custom API URL not configured");
     }
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (preferredApi === "custom" && customApiKey) {
+      headers["Authorization"] = `Bearer ${customApiKey}`;
+      headers["X-API-Key"] = customApiKey;
+    }
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({
         q: texts,
         text: texts,
         source: "auto",
         target: targetLang,
+        target_lang: targetLang,
         format: "text"
       })
     });
     if (!response.ok) {
-      throw new Error(`Batch API error: ${response.status}`);
+      const errorBody = await response.text().catch(() => "");
+      throw new Error(`Batch API error: ${response.status} ${errorBody}`);
     }
     const data = await response.json();
     const normalized = normalizeBatchTranslations(data);
@@ -1328,11 +1474,27 @@ var SpicyLyricTranslater = (() => {
       const result = await translateWithCustomApi(text, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
+    const tryDeepL = async () => {
+      const result = await translateWithDeepL(text, targetLang);
+      return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+    const tryOpenAI = async () => {
+      const result = await translateWithOpenAI(text, targetLang);
+      return { translation: result.translation, detectedLang: result.detectedLang };
+    };
     let primaryApi;
     let fallbackApis = [];
     switch (preferredApi) {
       case "libretranslate":
         primaryApi = tryLibreTranslate;
+        fallbackApis = [{ name: "google", fn: tryGoogle }];
+        break;
+      case "deepl":
+        primaryApi = tryDeepL;
+        fallbackApis = [{ name: "google", fn: tryGoogle }];
+        break;
+      case "openai":
+        primaryApi = tryOpenAI;
         fallbackApis = [{ name: "google", fn: tryGoogle }];
         break;
       case "custom":
@@ -1391,7 +1553,8 @@ var SpicyLyricTranslater = (() => {
               translatedText: trackCache.lines[index] || line,
               targetLanguage: targetLang,
               wasTranslated: trackCache.lines[index] !== line,
-              source: "cache"
+              source: "cache",
+              apiProvider: trackCache.api
             }));
           }
           deleteTrackCache(currentTrackUri, targetLang);
@@ -1417,12 +1580,16 @@ var SpicyLyricTranslater = (() => {
       } else {
         const cached = getCachedTranslation(line, targetLang);
         if (cached) {
+          const lineCache = storage_default.getJSON("translation-cache", {});
+          const lineKey = `${targetLang}:${line}`;
+          const lineCacheEntry = lineCache[lineKey];
           cachedResults.set(index, {
             originalText: line,
             translatedText: cached,
             targetLanguage: targetLang,
             wasTranslated: cached !== line,
-            source: "cache"
+            source: "cache",
+            apiProvider: lineCacheEntry?.api
           });
         } else {
           uncachedLines.push({ index, text: line });
@@ -1442,7 +1609,7 @@ var SpicyLyricTranslater = (() => {
     let detectedLang = detectedSourceLang || "auto";
     try {
       let translatedLines = null;
-      if ((preferredApi === "custom" || preferredApi === "libretranslate") && uncachedLines.length > 1) {
+      if ((preferredApi === "custom" || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
         try {
           const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map((l) => l.text), targetLang));
           translatedLines = batchResult.translations;
@@ -1478,7 +1645,8 @@ var SpicyLyricTranslater = (() => {
           translatedText: normalizeTranslatedLine(translatedLines[i] || "") || item.text,
           targetLanguage: targetLang,
           wasTranslated: (normalizeTranslatedLine(translatedLines[i] || "") || item.text) !== item.text,
-          source: "api"
+          source: "api",
+          apiProvider: preferredApi
         });
       });
       for (const item of uncachedLines) {
@@ -1492,7 +1660,8 @@ var SpicyLyricTranslater = (() => {
           translatedText: finalTranslation,
           targetLanguage: targetLang,
           wasTranslated: finalTranslation !== item.text,
-          source: "api"
+          source: "api",
+          apiProvider: preferredApi
         });
       }
     } catch (error2) {
@@ -1890,6 +2059,7 @@ var SpicyLyricTranslater = (() => {
   var isOverlayEnabled = false;
   var translationMap = /* @__PURE__ */ new Map();
   var lineTimingData = [];
+  var qualityMap = /* @__PURE__ */ new Map();
   var cachedLines = null;
   var cachedTranslationMap = null;
   var lastActiveIndex = -1;
@@ -2065,7 +2235,11 @@ var SpicyLyricTranslater = (() => {
         replaceEl.textContent = "\u266A \u266A \u266A";
         replaceEl.classList.add("slt-replace-instrumental");
       } else {
-        if (currentConfig.syncWordHighlight) {
+        const vocabEnabled = storage.get("vocabulary-mode") === "true";
+        if (vocabEnabled) {
+          replaceEl.classList.add("slt-vocab-line");
+          appendVocabularyPairs(doc, replaceEl, originalText, translation, line, "slt-replace-word");
+        } else if (currentConfig.syncWordHighlight) {
           appendTranslationWordSpans(doc, replaceEl, translation, line, "slt-replace-word");
         } else {
           replaceEl.textContent = translation;
@@ -2079,7 +2253,7 @@ var SpicyLyricTranslater = (() => {
         e.preventDefault();
         e.stopPropagation();
         let seekTarget = replaceEl.dataset.startTime;
-        const clickedWord = e.target?.closest?.(".slt-replace-word");
+        const clickedWord = e.target?.closest?.(".slt-replace-word, .slt-vocab-pair");
         if (clickedWord) {
           seekTarget = clickedWord.dataset.startTime || seekTarget;
         }
@@ -2107,6 +2281,10 @@ var SpicyLyricTranslater = (() => {
       });
       if (isLineActive(line)) {
         replaceEl.classList.add("active");
+      }
+      const qualityIndicator = createQualityIndicator(doc, index);
+      if (qualityIndicator) {
+        replaceEl.appendChild(qualityIndicator);
       }
       line.parentNode.insertBefore(replaceEl, line.nextSibling);
     });
@@ -2138,6 +2316,62 @@ var SpicyLyricTranslater = (() => {
       }
       container.appendChild(span);
     });
+  }
+  function appendVocabularyPairs(doc, container, originalText, translatedText, originalLine, wordClassName) {
+    const origWords = originalText.trim().split(/\s+/).filter(Boolean);
+    const transWords = translatedText.trim().split(/\s+/).filter(Boolean);
+    if (origWords.length === 0 || transWords.length === 0) {
+      container.textContent = translatedText;
+      return;
+    }
+    const originalWordUnits = getWordUnits(originalLine);
+    const pairCount = Math.min(origWords.length, transWords.length);
+    const origChunks = distributeWords(origWords, pairCount);
+    const transChunks = distributeWords(transWords, pairCount);
+    const transRatio = transWords.length / Math.max(originalWordUnits.length, 1);
+    let globalWordIndex = 0;
+    for (let i = 0; i < pairCount; i++) {
+      const pair = doc.createElement("span");
+      pair.className = "slt-vocab-pair";
+      const chunkWords = transChunks[i].split(/\s+/).filter(Boolean);
+      const transSpan = doc.createElement("span");
+      transSpan.className = `slt-vocab-translated ${wordClassName}`;
+      if (wordClassName === "slt-sync-word") {
+        transSpan.classList.add("slt-word-future");
+      } else {
+        transSpan.classList.add("word-notsng");
+      }
+      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(Math.floor(globalWordIndex / Math.max(transRatio, 0.01)), originalWordUnits.length - 1) : globalWordIndex;
+      transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
+      transSpan.dataset.wordIndex = globalWordIndex.toString();
+      transSpan.textContent = transChunks[i];
+      pair.appendChild(transSpan);
+      globalWordIndex += chunkWords.length;
+      const origSpan = doc.createElement("span");
+      origSpan.className = "slt-vocab-original";
+      origSpan.textContent = origChunks[i];
+      pair.appendChild(origSpan);
+      pair.title = `${origChunks[i]}  \u2192  ${transChunks[i]}`;
+      container.appendChild(pair);
+    }
+  }
+  function distributeWords(words, buckets) {
+    if (buckets >= words.length) {
+      const result2 = words.map((w) => w);
+      while (result2.length < buckets)
+        result2.push("");
+      return result2;
+    }
+    const base = Math.floor(words.length / buckets);
+    const extra = words.length % buckets;
+    const result = [];
+    let idx = 0;
+    for (let b = 0; b < buckets; b++) {
+      const count = base + (b < extra ? 1 : 0);
+      result.push(words.slice(idx, idx + count).join(" "));
+      idx += count;
+    }
+    return result;
   }
   function lineHasSyllableStructure(line) {
     return !!line.querySelector(".syllable, .letterGroup .letter, .word-group .syllable");
@@ -2290,9 +2524,14 @@ var SpicyLyricTranslater = (() => {
           translationEl.className = "slt-interleaved-translation";
           translationEl.dataset.forLine = index.toString();
           translationEl.dataset.lineIndex = index.toString();
+          const isVocabMode = storage.get("vocabulary-mode") === "true";
           if (isBreak) {
             translationEl.textContent = "\u2022 \u2022 \u2022";
             translationEl.classList.add("slt-music-break");
+          } else if (isVocabMode && translation) {
+            translationEl.classList.add("slt-vocab-line");
+            translationEl.classList.add("slt-sync-translation");
+            appendVocabularyPairs(doc, translationEl, originalText, translation, line, "slt-sync-word");
           } else {
             translationEl.classList.add("slt-sync-translation");
             if (currentConfig.syncWordHighlight && translation) {
@@ -2308,6 +2547,10 @@ var SpicyLyricTranslater = (() => {
           }
           if (isLineActive(line))
             translationEl.classList.add("active");
+          const qualityIndicator = createQualityIndicator(doc, index);
+          if (qualityIndicator) {
+            translationEl.appendChild(qualityIndicator);
+          }
           line.parentNode.insertBefore(translationEl, line.nextSibling);
           if (!isBreak && currentConfig.syncWordHighlight && translation) {
             fallbackToContinuousMultilineGradient(translationEl, translation, line);
@@ -2332,53 +2575,6 @@ var SpicyLyricTranslater = (() => {
     container.style.setProperty("--slt-overlay-opacity", currentConfig.opacity.toString());
     container.style.setProperty("--slt-overlay-font-scale", currentConfig.fontSize.toString());
     return container;
-  }
-  function applySyncedMode(doc) {
-    try {
-      const lines = getLyricLines(doc);
-      if (!lines || lines.length === 0) {
-        debug("No lyrics lines found for synced mode");
-        return;
-      }
-      doc.querySelectorAll(".slt-sync-translation").forEach((el) => el.remove());
-      lines.forEach((line, index) => {
-        try {
-          const translation = translationMap.get(index);
-          const originalText = extractLineText(line);
-          const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
-          if (!translation && !isBreak)
-            return;
-          if (translation === originalText)
-            return;
-          if (!line.parentNode)
-            return;
-          line.classList.add("slt-overlay-parent");
-          line.dataset.sltIndex = index.toString();
-          const translationEl = doc.createElement("div");
-          translationEl.className = "slt-sync-translation slt-interleaved-translation";
-          translationEl.dataset.lineIndex = index.toString();
-          if (isBreak) {
-            translationEl.textContent = "\u2022 \u2022 \u2022";
-            translationEl.classList.add("slt-music-break");
-          } else if (currentConfig.syncWordHighlight) {
-            appendTranslationWordSpans(doc, translationEl, translation || "", line, "slt-sync-word");
-          } else {
-            translationEl.textContent = translation || "";
-          }
-          if (isLineActive(line)) {
-            translationEl.classList.add("active");
-          }
-          line.parentNode.insertBefore(translationEl, line.nextSibling);
-          if (!isBreak && currentConfig.syncWordHighlight) {
-            fallbackToContinuousMultilineGradient(translationEl, translation || "", line);
-          }
-        } catch (lineErr) {
-          warn("Failed to process line for synced mode", index, ":", lineErr);
-        }
-      });
-    } catch (err) {
-      warn("Failed to apply synced mode:", err);
-    }
   }
   var MIRRORED_LINE_STYLE_PROPS = [
     "--gradient-position",
@@ -2627,7 +2823,7 @@ var SpicyLyricTranslater = (() => {
     });
     return true;
   }
-  function updateSyncedWordStates(doc) {
+  function updateWordSyncStates(doc) {
     if (!isOverlayEnabled)
       return;
     const lyricsContainer = doc.querySelector(".SpicyLyricsScrollContainer");
@@ -2707,9 +2903,6 @@ var SpicyLyricTranslater = (() => {
         break;
       case "interleaved":
         applyInterleavedMode(doc);
-        break;
-      case "synced":
-        applySyncedMode(doc);
         break;
     }
   }
@@ -2799,7 +2992,7 @@ var SpicyLyricTranslater = (() => {
     }
     try {
       onActiveLineChanged(document);
-      updateSyncedWordStates(document);
+      updateWordSyncStates(document);
       syncBlurToTranslations(document);
       const pipWindow = getPIPWindow();
       if (pipWindow) {
@@ -2807,7 +3000,7 @@ var SpicyLyricTranslater = (() => {
           const pipDoc = pipWindow.document;
           if (pipDoc && pipDoc.body) {
             onActiveLineChanged(pipDoc);
-            updateSyncedWordStates(pipDoc);
+            updateWordSyncStates(pipDoc);
             syncBlurToTranslations(pipDoc);
             if (!activeLineObservers.has(pipDoc)) {
               setupActiveLineObserver(pipDoc);
@@ -2913,6 +3106,11 @@ var SpicyLyricTranslater = (() => {
       renderTranslations(document);
     }
     document.body.classList.add("slt-overlay-active");
+    try {
+      const qiVal = localStorage.getItem("spicy-lyric-translator:show-quality-indicator");
+      document.body.classList.toggle("slt-hide-quality-indicator", qiVal === "false");
+    } catch {
+    }
     const pipWindow = getPIPWindow();
     if (pipWindow) {
       initOverlayContainer(pipWindow.document);
@@ -3004,6 +3202,35 @@ var SpicyLyricTranslater = (() => {
   }
   function setLineTimingData(data) {
     lineTimingData = data;
+  }
+  function setQualityMetadata(metadata) {
+    qualityMap = new Map(metadata);
+  }
+  function createQualityIndicator(doc, index) {
+    const meta = qualityMap.get(index);
+    if (!meta)
+      return null;
+    const indicator = doc.createElement("span");
+    indicator.className = "slt-quality-indicator";
+    const isCached = meta.source === "cache";
+    const apiLabel = meta.api === "google" ? "Google" : meta.api === "libretranslate" ? "LibreTranslate" : meta.api === "custom" ? "Custom" : meta.api || "Unknown";
+    indicator.dataset.source = meta.source;
+    indicator.dataset.api = meta.api || "";
+    const dot = doc.createElement("span");
+    dot.className = `slt-qi-dot ${isCached ? "slt-qi-cached" : "slt-qi-fresh"}`;
+    indicator.appendChild(dot);
+    const label = doc.createElement("span");
+    label.className = "slt-qi-label";
+    label.textContent = isCached ? `Cached \xB7 ${apiLabel}` : `Fresh \xB7 ${apiLabel}`;
+    indicator.appendChild(label);
+    const tooltipParts = [];
+    tooltipParts.push(`Source: ${isCached ? "Cached" : "Live API"}`);
+    tooltipParts.push(`Provider: ${apiLabel}`);
+    if (meta.detectedLanguage) {
+      tooltipParts.push(`Detected: ${meta.detectedLanguage.toUpperCase()}`);
+    }
+    indicator.title = tooltipParts.join(" | ");
+    return indicator;
   }
   function getOverlayStyles() {
     return `
@@ -3233,7 +3460,18 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     text-shadow: none;
 }
 
-.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word) {
+.slt-replace-line.slt-vocab-line {
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    text-shadow: none;
+    font-weight: inherit;
+}
+
+.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
+.slt-interleaved-translation.slt-vocab-line {
     background-image: none !important;
     color: inherit !important;
     -webkit-text-fill-color: inherit !important;
@@ -3844,6 +4082,245 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         0 0 30px rgba(255, 255, 255, 0.4),
         0 0 45px rgba(255, 255, 255, 0.2);
 }
+
+
+/* Hide quality indicators when toggled off */
+body.slt-hide-quality-indicator .slt-quality-indicator {
+    display: none !important;
+}
+
+/* Translation Quality Indicator */
+
+/* Lines that hold the indicator need relative positioning */
+.slt-replace-line,
+.slt-interleaved-translation,
+.slt-sync-translation {
+    position: relative;
+}
+
+.slt-quality-indicator {
+    position: absolute;
+    right: 0;
+    bottom: -2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 2px 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(6px);
+    font-size: 8px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, gap 0.25s ease, padding 0.25s ease, background 0.25s ease;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.45) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.45) !important;
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    z-index: 5;
+    cursor: default;
+}
+
+/* Show the dot on active/hover line */
+.slt-replace-line:hover .slt-quality-indicator,
+.slt-interleaved-translation:hover .slt-quality-indicator,
+.slt-sync-translation:hover .slt-quality-indicator,
+.slt-replace-line.active .slt-quality-indicator,
+.slt-replace-line.Active .slt-quality-indicator,
+.slt-interleaved-translation.active .slt-quality-indicator,
+.slt-interleaved-translation.Active .slt-quality-indicator,
+.slt-sync-translation.active .slt-quality-indicator,
+.slt-sync-translation.Active .slt-quality-indicator {
+    opacity: 0.5;
+    pointer-events: auto;
+}
+
+/* Expand label on indicator hover */
+.slt-quality-indicator:hover {
+    opacity: 0.85 !important;
+    gap: 4px;
+    padding: 2px 7px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.slt-quality-indicator:hover .slt-qi-label {
+    max-width: 120px;
+    opacity: 1;
+}
+
+.slt-qi-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.slt-qi-dot.slt-qi-cached {
+    background: #ffe666;
+    box-shadow: 0 0 4px rgba(255, 230, 102, 0.35);
+}
+
+.slt-qi-dot.slt-qi-fresh {
+    background: #1db954;
+    box-shadow: 0 0 4px rgba(29, 185, 84, 0.35);
+}
+
+.slt-qi-label {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.3s ease, opacity 0.25s ease;
+    color: rgba(255, 255, 255, 0.55) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.55) !important;
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+}
+
+/* Sidebar: smaller quality indicators */
+body.SpicySidebarLyrics__Active .slt-quality-indicator {
+    font-size: 7px;
+    padding: 1px 3px;
+    bottom: -1px;
+}
+
+body.SpicySidebarLyrics__Active .slt-qi-dot {
+    width: 4px;
+    height: 4px;
+}
+
+/* PiP: adjust size */
+.spicy-pip-wrapper .slt-quality-indicator {
+    font-size: 7px;
+    padding: 1px 4px;
+}
+
+/* \u2500\u2500\u2500 Vocabulary / Learning Mode \u2500\u2500\u2500 */
+.slt-vocab-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 5px;
+    align-items: flex-end;
+    font-size: 0.55em;
+}
+
+.slt-vocab-pair {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2px 5px 3px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1.5px solid rgba(30, 215, 96, 0.25);
+    transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    cursor: default;
+    max-width: 100%;
+}
+
+.slt-vocab-pair:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+    border-bottom-color: rgba(30, 215, 96, 0.6);
+}
+
+.slt-vocab-translated {
+    font-size: 1em;
+    font-weight: 700;
+    line-height: 1.25;
+    white-space: normal;
+    word-break: break-word;
+    display: inline;
+    transform-origin: center center;
+    will-change: transform;
+    transition: opacity 180ms linear, text-shadow 180ms linear;
+
+    --text-shadow-blur-radius: 4px;
+    --text-shadow-opacity: 0%;
+    text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
+
+    --gradient-degrees: 90deg;
+    --gradient-alpha: 0.85;
+    --gradient-alpha-end: 0.5;
+    --gradient-position: -20%;
+    --gradient-offset: 0%;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    background-image: linear-gradient(
+        var(--gradient-degrees),
+        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
+        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + 20% + var(--gradient-offset))
+    ) !important;
+}
+
+.slt-vocab-translated.word-notsng,
+.slt-vocab-translated.slt-word-future {
+    opacity: 0.51;
+}
+
+.slt-vocab-translated.word-sung,
+.slt-vocab-translated.slt-word-past {
+    opacity: 0.5;
+    --gradient-position: 100%;
+}
+
+.slt-vocab-translated.word-active,
+.slt-vocab-translated.slt-word-active {
+    opacity: 1;
+}
+
+.slt-vocab-original {
+    font-size: 0.65em;
+    line-height: 1.15;
+    color: rgba(255, 255, 255, 0.3);
+    letter-spacing: 0.01em;
+    filter: blur(3px);
+    transition: filter 0.25s ease, color 0.25s ease;
+    user-select: none;
+    white-space: normal;
+    word-break: break-word;
+    margin-top: 1px;
+}
+
+.slt-vocab-pair:hover .slt-vocab-original {
+    filter: blur(0px);
+    color: rgba(255, 255, 255, 0.65);
+}
+
+/* Active line: reveal originals */
+.active .slt-vocab-original,
+.Active .slt-vocab-original,
+.slt-interleaved-translation.active .slt-vocab-original {
+    filter: blur(0px);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* PiP vocab adjustments */
+.spicy-pip-wrapper .slt-vocab-pair {
+    padding: 1px 3px 2px;
+    border-bottom-width: 1px;
+}
+
+.spicy-pip-wrapper .slt-vocab-line {
+    font-size: 0.5em;
+}
+
+.spicy-pip-wrapper .slt-vocab-original {
+    font-size: 0.55em;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+    .slt-vocab-original {
+        filter: none !important;
+    }
+}
 `;
   function injectStyles() {
     const existingStyle = document.getElementById("spicy-lyric-translator-styles");
@@ -3862,7 +4339,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.8.8" : "0.0.0";
+    return true ? "1.9.0" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -4497,6 +4974,15 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
 
   // src/utils/connectivity.ts
   var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
+  var CLIENT_ID_KEY = "client-id";
+  function getOrCreateClientId() {
+    let clientId = storage.get(CLIENT_ID_KEY);
+    if (!clientId) {
+      clientId = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
+      storage.set(CLIENT_ID_KEY, clientId);
+    }
+    return clientId;
+  }
   var HEARTBEAT_INTERVAL = 3e4;
   var LATENCY_CHECK_INTERVAL = 15e3;
   var CONNECTION_TIMEOUT = 5e3;
@@ -4701,7 +5187,8 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         action: "heartbeat",
         session: indicatorState.sessionId || "",
         version: storage.get("extension-version") || "1.0.0",
-        active: indicatorState.isViewingLyrics ? "true" : "false"
+        active: indicatorState.isViewingLyrics ? "true" : "false",
+        clientId: getOrCreateClientId()
       });
       const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
       if (!response.ok)
@@ -4732,7 +5219,8 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     try {
       const params = new URLSearchParams({
         action: "connect",
-        version: storage.get("extension-version") || "1.0.0"
+        version: storage.get("extension-version") || "1.0.0",
+        clientId: getOrCreateClientId()
       });
       const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
       if (!response.ok)
@@ -5357,7 +5845,8 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         partialTranslations.forEach((result, idx) => {
           translatedByIndex.set(nonTargetIndexes[idx], {
             translatedText: result.translatedText,
-            source: result.source
+            source: result.source,
+            apiProvider: result.apiProvider
           });
         });
         translations = lineTexts.map((line, index) => {
@@ -5369,7 +5858,9 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
             translatedText,
             targetLanguage: state.targetLanguage,
             wasTranslated,
-            source: partial?.source
+            source: partial?.source,
+            apiProvider: partial?.apiProvider,
+            detectedLanguage: state.detectedLanguage || void 0
           };
         });
       } else {
@@ -5388,6 +5879,17 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       state._translationsByIndex = /* @__PURE__ */ new Map();
       translations.forEach((result, index) => {
         state._translationsByIndex.set(index, result.translatedText);
+      });
+      state._qualityByIndex = /* @__PURE__ */ new Map();
+      translations.forEach((result, index) => {
+        if (result.wasTranslated) {
+          const meta = {
+            source: result.source || "api",
+            api: result.apiProvider || state.preferredApi,
+            detectedLanguage: state.detectedLanguage || result.detectedLanguage || void 0
+          };
+          state._qualityByIndex.set(index, meta);
+        }
       });
       state.lastTranslatedSongUri = currentTrackUri2;
       if (useApiLines && apiVocalLineData) {
@@ -5439,6 +5941,9 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         syncWordHighlight: state.syncWordHighlight
       });
     }
+    if (state._qualityByIndex) {
+      setQualityMetadata(state._qualityByIndex);
+    }
     updateOverlayContent(translationMapByIndex);
   }
   function reapplyTranslations() {
@@ -5446,10 +5951,12 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       return;
     const savedTranslations = new Map(state.translatedLyrics);
     const savedIndexMap = state._translationsByIndex ? new Map(state._translationsByIndex) : void 0;
+    const savedQualityMap = state._qualityByIndex ? new Map(state._qualityByIndex) : void 0;
     const savedUri = state.lastTranslatedSongUri;
     removeTranslations();
     state.translatedLyrics = savedTranslations;
     state._translationsByIndex = savedIndexMap;
+    state._qualityByIndex = savedQualityMap;
     state.lastTranslatedSongUri = savedUri;
     const lines = getLyricsLines();
     if (lines.length > 0) {
@@ -5499,6 +6006,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     });
     state.translatedLyrics.clear();
     state._translationsByIndex = void 0;
+    state._qualityByIndex = void 0;
   }
   function setupLyricsObserver() {
     if (lyricsObserver) {
@@ -5760,6 +6268,8 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       [
         { value: "google", text: "Google Translate" },
         { value: "libretranslate", text: "LibreTranslate" },
+        { value: "deepl", text: "DeepL" },
+        { value: "openai", text: "OpenAI" },
         { value: "custom", text: "Custom API" }
       ],
       storage.get("preferred-api") || "google",
@@ -5767,11 +6277,27 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         const api = value;
         storage.set("preferred-api", api);
         state.preferredApi = api;
-        setPreferredApi(api, storage.get("custom-api-url") || "");
+        setPreferredApi(api, storage.get("custom-api-url") || "", {
+          customApiKey: state.customApiKey,
+          deeplApiKey: state.deeplApiKey,
+          openaiApiKey: state.openaiApiKey,
+          openaiModel: state.openaiModel
+        });
         const customRow = document.getElementById("slt-settings-custom-api-row");
-        if (customRow) {
+        const customKeyRow = document.getElementById("slt-settings-custom-api-key-row");
+        const deeplRow = document.getElementById("slt-settings-deepl-key-row");
+        const openaiRow = document.getElementById("slt-settings-openai-key-row");
+        const openaiModelRow2 = document.getElementById("slt-settings-openai-model-row");
+        if (customRow)
           customRow.style.display = api === "custom" ? "" : "none";
-        }
+        if (customKeyRow)
+          customKeyRow.style.display = api === "custom" ? "" : "none";
+        if (deeplRow)
+          deeplRow.style.display = api === "deepl" ? "" : "none";
+        if (openaiRow)
+          openaiRow.style.display = api === "openai" ? "" : "none";
+        if (openaiModelRow2)
+          openaiModelRow2.style.display = api === "openai" ? "" : "none";
       }
     ));
     const customApiRow = document.createElement("div");
@@ -5790,9 +6316,90 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     customApiInput?.addEventListener("change", () => {
       storage.set("custom-api-url", customApiInput.value);
       state.customApiUrl = customApiInput.value;
-      setPreferredApi(state.preferredApi, customApiInput.value);
+      setPreferredApi(state.preferredApi, customApiInput.value, {
+        customApiKey: state.customApiKey,
+        deeplApiKey: state.deeplApiKey,
+        openaiApiKey: state.openaiApiKey,
+        openaiModel: state.openaiModel
+      });
     });
     sectionContent.appendChild(customApiRow);
+    const customApiKeyRow = document.createElement("div");
+    customApiKeyRow.id = "slt-settings-custom-api-key-row";
+    customApiKeyRow.className = "x-settings-row";
+    customApiKeyRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
+    customApiKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
+        </div>
+    `;
+    const customApiKeyInput = customApiKeyRow.querySelector("input");
+    customApiKeyInput?.addEventListener("change", () => {
+      storage.set("custom-api-key", customApiKeyInput.value);
+      state.customApiKey = customApiKeyInput.value;
+      setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
+    });
+    sectionContent.appendChild(customApiKeyRow);
+    const deeplKeyRow = document.createElement("div");
+    deeplKeyRow.id = "slt-settings-deepl-key-row";
+    deeplKeyRow.className = "x-settings-row";
+    deeplKeyRow.style.display = storage.get("preferred-api") === "deepl" ? "" : "none";
+    deeplKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        </div>
+    `;
+    const deeplKeyInput = deeplKeyRow.querySelector("input");
+    deeplKeyInput?.addEventListener("change", () => {
+      storage.set("deepl-api-key", deeplKeyInput.value);
+      state.deeplApiKey = deeplKeyInput.value;
+      setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
+    });
+    sectionContent.appendChild(deeplKeyRow);
+    const openaiKeyRow = document.createElement("div");
+    openaiKeyRow.id = "slt-settings-openai-key-row";
+    openaiKeyRow.className = "x-settings-row";
+    openaiKeyRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
+    openaiKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
+        </div>
+    `;
+    const openaiKeyInput = openaiKeyRow.querySelector("input");
+    openaiKeyInput?.addEventListener("change", () => {
+      storage.set("openai-api-key", openaiKeyInput.value);
+      state.openaiApiKey = openaiKeyInput.value;
+      setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
+    });
+    sectionContent.appendChild(openaiKeyRow);
+    const openaiModelRow = document.createElement("div");
+    openaiModelRow.id = "slt-settings-openai-model-row";
+    openaiModelRow.className = "x-settings-row";
+    openaiModelRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
+    openaiModelRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
+        </div>
+    `;
+    const openaiModelInput = openaiModelRow.querySelector("input");
+    openaiModelInput?.addEventListener("change", () => {
+      storage.set("openai-model", openaiModelInput.value);
+      state.openaiModel = openaiModelInput.value;
+      setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
+    });
+    sectionContent.appendChild(openaiModelRow);
     sectionContent.appendChild(createNativeToggle(
       "slt-settings.auto-translate",
       "Auto-Translate on Song Change",
@@ -5809,6 +6416,27 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       (checked) => {
         storage.set("show-notifications", String(checked));
         state.showNotifications = checked;
+      }
+    ));
+    sectionContent.appendChild(createNativeToggle(
+      "slt-settings.show-quality-indicator",
+      "Show Translation Quality Indicator",
+      storage.get("show-quality-indicator") !== "false",
+      (checked) => {
+        storage.set("show-quality-indicator", String(checked));
+        state.showQualityIndicator = checked;
+        document.body.classList.toggle("slt-hide-quality-indicator", !checked);
+      }
+    ));
+    sectionContent.appendChild(createNativeToggle(
+      "slt-settings.vocabulary-mode",
+      "Vocabulary / Learning Mode",
+      storage.get("vocabulary-mode") === "true",
+      (checked) => {
+        storage.set("vocabulary-mode", String(checked));
+        state.vocabularyMode = checked;
+        document.body.classList.toggle("slt-vocabulary-mode", checked);
+        reapplyTranslations();
       }
     ));
     if (areDevToolsEnabled()) {
@@ -6152,6 +6780,8 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
             <select id="slt-preferred-api">
                 <option value="google" ${(storage.get("preferred-api") || "google") === "google" ? "selected" : ""}>Google Translate</option>
                 <option value="libretranslate" ${storage.get("preferred-api") === "libretranslate" ? "selected" : ""}>LibreTranslate</option>
+                <option value="deepl" ${storage.get("preferred-api") === "deepl" ? "selected" : ""}>DeepL</option>
+                <option value="openai" ${storage.get("preferred-api") === "openai" ? "selected" : ""}>OpenAI</option>
                 <option value="custom" ${storage.get("preferred-api") === "custom" ? "selected" : ""}>Custom API</option>
             </select>
         </div>
@@ -6160,6 +6790,28 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
             <label for="slt-custom-api-url">Custom API URL</label>
             <input type="text" id="slt-custom-api-url" value="${storage.get("custom-api-url") || ""}" placeholder="https://your-api.com/translate">
             <span class="slt-description">LibreTranslate-compatible API endpoint</span>
+        </div>
+
+        <div class="slt-setting-row" id="slt-custom-api-key-row" style="display: ${storage.get("preferred-api") === "custom" ? "flex" : "none"}">
+            <label for="slt-custom-api-key">Custom API Key (optional)</label>
+            <input type="password" id="slt-custom-api-key" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
+        </div>
+
+        <div class="slt-setting-row" id="slt-deepl-key-row" style="display: ${storage.get("preferred-api") === "deepl" ? "flex" : "none"}">
+            <label for="slt-deepl-api-key">DeepL API Key</label>
+            <input type="password" id="slt-deepl-api-key" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+            <span class="slt-description">Get a free key at deepl.com/pro-api</span>
+        </div>
+
+        <div class="slt-setting-row" id="slt-openai-key-row" style="display: ${storage.get("preferred-api") === "openai" ? "flex" : "none"}">
+            <label for="slt-openai-api-key">OpenAI API Key</label>
+            <input type="password" id="slt-openai-api-key" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
+        </div>
+
+        <div class="slt-setting-row" id="slt-openai-model-row" style="display: ${storage.get("preferred-api") === "openai" ? "flex" : "none"}">
+            <label for="slt-openai-model">OpenAI Model</label>
+            <input type="text" id="slt-openai-model" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
+            <span class="slt-description">e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo</span>
         </div>
         
         <div class="slt-setting-row slt-toggle-row">
@@ -6177,7 +6829,23 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
                 <span class="slt-toggle-slider"></span>
             </label>
         </div>
-        
+
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-show-quality-indicator">Show Translation Quality Indicator</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-show-quality-indicator" ${storage.get("show-quality-indicator") !== "false" ? "checked" : ""}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-vocabulary-mode">Vocabulary / Learning Mode</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-vocabulary-mode" ${storage.get("vocabulary-mode") === "true" ? "checked" : ""}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
         ${showDebugToggle ? `
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
@@ -6214,8 +6882,18 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       const preferredApiSelect = container.querySelector("#slt-preferred-api");
       const customApiUrlInput = container.querySelector("#slt-custom-api-url");
       const customApiRow = container.querySelector("#slt-custom-api-row");
+      const customApiKeyInput = container.querySelector("#slt-custom-api-key");
+      const customApiKeyRow = container.querySelector("#slt-custom-api-key-row");
+      const deeplApiKeyInput = container.querySelector("#slt-deepl-api-key");
+      const deeplKeyRow = container.querySelector("#slt-deepl-key-row");
+      const openaiApiKeyInput = container.querySelector("#slt-openai-api-key");
+      const openaiKeyRow = container.querySelector("#slt-openai-key-row");
+      const openaiModelInput = container.querySelector("#slt-openai-model");
+      const openaiModelRow = container.querySelector("#slt-openai-model-row");
       const autoTranslateCheckbox = container.querySelector("#slt-auto-translate");
       const showNotificationsCheckbox = container.querySelector("#slt-show-notifications");
+      const showQualityIndicatorCheckbox = container.querySelector("#slt-show-quality-indicator");
+      const vocabularyModeCheckbox = container.querySelector("#slt-vocabulary-mode");
       const debugModeCheckbox = container.querySelector("#slt-debug-mode");
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
@@ -6234,15 +6912,52 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         const api = preferredApiSelect.value;
         storage.set("preferred-api", api);
         state.preferredApi = api;
-        setPreferredApi(api, customApiUrlInput?.value || "");
-        if (customApiRow) {
+        setPreferredApi(api, customApiUrlInput?.value || "", {
+          customApiKey: state.customApiKey,
+          deeplApiKey: state.deeplApiKey,
+          openaiApiKey: state.openaiApiKey,
+          openaiModel: state.openaiModel
+        });
+        if (customApiRow)
           customApiRow.style.display = api === "custom" ? "flex" : "none";
-        }
+        if (customApiKeyRow)
+          customApiKeyRow.style.display = api === "custom" ? "flex" : "none";
+        if (deeplKeyRow)
+          deeplKeyRow.style.display = api === "deepl" ? "flex" : "none";
+        if (openaiKeyRow)
+          openaiKeyRow.style.display = api === "openai" ? "flex" : "none";
+        if (openaiModelRow)
+          openaiModelRow.style.display = api === "openai" ? "flex" : "none";
       });
       customApiUrlInput?.addEventListener("change", () => {
         storage.set("custom-api-url", customApiUrlInput.value);
         state.customApiUrl = customApiUrlInput.value;
-        setPreferredApi(state.preferredApi, customApiUrlInput.value);
+        setPreferredApi(state.preferredApi, customApiUrlInput.value, {
+          customApiKey: state.customApiKey,
+          deeplApiKey: state.deeplApiKey,
+          openaiApiKey: state.openaiApiKey,
+          openaiModel: state.openaiModel
+        });
+      });
+      customApiKeyInput?.addEventListener("change", () => {
+        storage.set("custom-api-key", customApiKeyInput.value);
+        state.customApiKey = customApiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
+      });
+      deeplApiKeyInput?.addEventListener("change", () => {
+        storage.set("deepl-api-key", deeplApiKeyInput.value);
+        state.deeplApiKey = deeplApiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplApiKeyInput.value });
+      });
+      openaiApiKeyInput?.addEventListener("change", () => {
+        storage.set("openai-api-key", openaiApiKeyInput.value);
+        state.openaiApiKey = openaiApiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiApiKeyInput.value });
+      });
+      openaiModelInput?.addEventListener("change", () => {
+        storage.set("openai-model", openaiModelInput.value);
+        state.openaiModel = openaiModelInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
       });
       autoTranslateCheckbox?.addEventListener("change", () => {
         storage.set("auto-translate", String(autoTranslateCheckbox.checked));
@@ -6251,6 +6966,17 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       showNotificationsCheckbox?.addEventListener("change", () => {
         storage.set("show-notifications", String(showNotificationsCheckbox.checked));
         state.showNotifications = showNotificationsCheckbox.checked;
+      });
+      showQualityIndicatorCheckbox?.addEventListener("change", () => {
+        storage.set("show-quality-indicator", String(showQualityIndicatorCheckbox.checked));
+        state.showQualityIndicator = showQualityIndicatorCheckbox.checked;
+        document.body.classList.toggle("slt-hide-quality-indicator", !showQualityIndicatorCheckbox.checked);
+      });
+      vocabularyModeCheckbox?.addEventListener("change", () => {
+        storage.set("vocabulary-mode", String(vocabularyModeCheckbox.checked));
+        state.vocabularyMode = vocabularyModeCheckbox.checked;
+        document.body.classList.toggle("slt-vocabulary-mode", vocabularyModeCheckbox.checked);
+        reapplyTranslations();
       });
       debugModeCheckbox?.addEventListener("change", () => {
         setDebugMode(debugModeCheckbox.checked);
@@ -6431,6 +7157,24 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
             .slt-lyrics-toolbar {
                 display: flex;
                 justify-content: flex-end;
+                gap: 8px;
+            }
+            .slt-lyrics-copy {
+                padding: 8px 14px;
+                border-radius: 999px;
+                border: none;
+                background: var(--spice-button);
+                color: var(--spice-text);
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+            }
+            .slt-lyrics-copy:hover {
+                opacity: 0.85;
+            }
+            .slt-lyrics-copy.slt-copied {
+                background: #1db954;
             }
             .slt-lyrics-back {
                 padding: 8px 14px;
@@ -6479,6 +7223,7 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
             }
         </style>
         <div class="slt-lyrics-toolbar">
+            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">\u{1F4CB} Copy Lyrics</button>
             <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">\u2190 Back to Cache</button>
         </div>
         <div class="slt-lyrics-header">Track ID: ${escapeHtml2(getTrackIdFromUri2(trackUri))}</div>
@@ -6503,6 +7248,46 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
     backToCacheBtn?.addEventListener("click", () => {
       Spicetify.PopupModal?.hide();
       setTimeout(() => openCacheViewer(), 120);
+    });
+    const copyBtn = content.querySelector("#slt-lyrics-copy-all");
+    copyBtn?.addEventListener("click", async () => {
+      const rows = content.querySelectorAll("#slt-lyrics-rows .slt-lyrics-row");
+      const lines = [];
+      const trackTitle = trackCache.trackName || getTrackIdFromUri2(trackUri);
+      const trackArtist = trackCache.artistName || "";
+      lines.push(`${trackTitle}${trackArtist ? " \u2014 " + trackArtist : ""}`);
+      lines.push(`${sourceLang.toUpperCase()} \u2192 ${targetLang.toUpperCase()}`);
+      lines.push("\u2500".repeat(40));
+      rows.forEach((row) => {
+        const cols = row.querySelectorAll(".slt-lyrics-col");
+        if (cols.length >= 2) {
+          const src = (cols[0].textContent || "").trim();
+          const tgt = (cols[1].textContent || "").trim();
+          if (src || tgt) {
+            lines.push(src || "\u266A");
+            if (tgt && tgt !== src)
+              lines.push(`  \u2192 ${tgt}`);
+            lines.push("");
+          }
+        }
+      });
+      lines.push("\u2500".repeat(40));
+      lines.push("Exported from Spicy Lyric Translator");
+      const text = lines.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = "\u2713 Copied!";
+        copyBtn.classList.add("slt-copied");
+        setTimeout(() => {
+          copyBtn.textContent = "\u{1F4CB} Copy Lyrics";
+          copyBtn.classList.remove("slt-copied");
+        }, 2e3);
+      } catch (e) {
+        copyBtn.textContent = "\u2717 Failed";
+        setTimeout(() => {
+          copyBtn.textContent = "\u{1F4CB} Copy Lyrics";
+        }, 2e3);
+      }
     });
     try {
       const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
@@ -6896,7 +7681,12 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     info("Initializing...");
-    setPreferredApi(state.preferredApi, state.customApiUrl);
+    setPreferredApi(state.preferredApi, state.customApiUrl, {
+      customApiKey: state.customApiKey,
+      deeplApiKey: state.deeplApiKey,
+      openaiApiKey: state.openaiApiKey,
+      openaiModel: state.openaiModel
+    });
     injectStyles();
     initConnectionIndicator();
     await registerSettings();

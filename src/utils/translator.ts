@@ -18,6 +18,7 @@ export interface TranslationResult {
     targetLanguage: string;
     wasTranslated?: boolean;
     source?: 'cache' | 'api';
+    apiProvider?: string;
 }
 
 export interface TranslationCache {
@@ -28,10 +29,14 @@ export interface TranslationCache {
     };
 }
 
-export type ApiPreference = 'google' | 'libretranslate' | 'custom';
+export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom';
 
 let preferredApi: ApiPreference = 'google';
 let customApiUrl: string = '';
+let customApiKey: string = '';
+let deeplApiKey: string = '';
+let openaiApiKey: string = '';
+let openaiModel: string = 'gpt-4o-mini';
 
 const RATE_LIMIT = {
     minDelayMs: 100,
@@ -210,10 +215,16 @@ async function retryWithBackoff<T>(
     throw lastError || new Error('All retry attempts failed');
 }
 
-export function setPreferredApi(api: ApiPreference, customUrl?: string): void {
+export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?: { customApiKey?: string; deeplApiKey?: string; openaiApiKey?: string; openaiModel?: string }): void {
     preferredApi = api;
     if (customUrl !== undefined) {
         customApiUrl = customUrl;
+    }
+    if (apiKeys) {
+        if (apiKeys.customApiKey !== undefined) customApiKey = apiKeys.customApiKey;
+        if (apiKeys.deeplApiKey !== undefined) deeplApiKey = apiKeys.deeplApiKey;
+        if (apiKeys.openaiApiKey !== undefined) openaiApiKey = apiKeys.openaiApiKey;
+        if (apiKeys.openaiModel !== undefined) openaiModel = apiKeys.openaiModel;
     }
     info(`API preference set to: ${api}${api === 'custom' ? ` (${customUrl})` : ''}`);
 }
@@ -466,28 +477,126 @@ async function translateWithLibreTranslate(text: string, targetLang: string): Pr
     return data.translatedText;
 }
 
+async function translateWithDeepL(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
+    if (!deeplApiKey) {
+        throw new Error('DeepL API key not configured. Set it in Settings.');
+    }
+    
+    const isFreePlan = deeplApiKey.endsWith(':fx');
+    const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    const url = `${baseUrl}/v2/translate`;
+    
+    const deeplLangMap: Record<string, string> = {
+        'en': 'EN-US', 'pt': 'PT-BR', 'zh': 'ZH-HANS', 'zh-TW': 'ZH-HANT'
+    };
+    const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
+    
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            text: [text],
+            target_lang: deeplTarget
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`DeepL API error: ${response.status} ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.translations && data.translations.length > 0) {
+        return {
+            translation: data.translations[0].text,
+            detectedLang: data.translations[0].detected_source_language?.toLowerCase()
+        };
+    }
+    
+    throw new Error('Invalid response from DeepL API');
+}
+
+async function translateWithOpenAI(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
+    if (!openaiApiKey) {
+        throw new Error('OpenAI API key not configured. Set it in Settings.');
+    }
+    
+    const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: openaiModel || 'gpt-4o-mini',
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
+                },
+                {
+                    role: 'user',
+                    content: text
+                }
+            ],
+            temperature: 0.3,
+            max_tokens: Math.max(text.length * 3, 500)
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.choices && data.choices.length > 0) {
+        const translation = data.choices[0].message?.content?.trim();
+        if (translation) {
+            return { translation };
+        }
+    }
+    
+    throw new Error('Invalid response from OpenAI API');
+}
+
 async function translateWithCustomApi(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
     if (!customApiUrl) {
         throw new Error('Custom API URL not configured');
     }
     
     try {
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (customApiKey) {
+            headers['Authorization'] = `Bearer ${customApiKey}`;
+            headers['X-API-Key'] = customApiKey;
+        }
+        
         const response = await fetch(customApiUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers,
             body: JSON.stringify({
                 text: text,
                 q: text,
                 source: 'auto',
                 target: targetLang,
+                target_lang: targetLang,
                 format: 'text'
             })
         });
         
         if (!response.ok) {
-            throw new Error(`Custom API error: ${response.status}`);
+            const errorBody = await response.text().catch(() => '');
+            throw new Error(`Custom API error: ${response.status} ${errorBody}`);
         }
         
         const data = await response.json();
@@ -499,16 +608,17 @@ async function translateWithCustomApi(text: string, targetLang: string): Promise
                           data.text ||
                           (data.translations && data.translations[0]?.text) ||
                           (data.data && data.data.translatedText) ||
+                          (data.choices && data.choices[0]?.message?.content) ||
                           (Array.isArray(data) && data[0]?.translatedText);
         
         if (translation) {
             return { 
-                translation,
-                detectedLang: data.detectedLanguage || data.detected_language || data.sourceLang || data.src
+                translation: typeof translation === 'string' ? translation : String(translation),
+                detectedLang: data.detectedLanguage || data.detected_language || data.sourceLang || data.src || data.detected_source_language
             };
         }
         
-        throw new Error('Could not parse translation from API response');
+        throw new Error(`Could not parse translation from API response: ${JSON.stringify(data).slice(0, 200)}`);
     } catch (error) {
         logError('Custom API error:', error);
         throw error;
@@ -561,6 +671,41 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
         return { translations: [], detectedLang: undefined };
     }
 
+    // DeepL has native batch support
+    if (preferredApi === 'deepl' && deeplApiKey) {
+        const isFreePlan = deeplApiKey.endsWith(':fx');
+        const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+        const deeplLangMap: Record<string, string> = {
+            'en': 'EN-US', 'pt': 'PT-BR', 'zh': 'ZH-HANS', 'zh-TW': 'ZH-HANT'
+        };
+        const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
+        
+        const response = await fetch(`${baseUrl}/v2/translate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: texts,
+                target_lang: deeplTarget
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`DeepL batch API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.translations && Array.isArray(data.translations)) {
+            return {
+                translations: data.translations.map((t: any) => t.text || ''),
+                detectedLang: data.translations[0]?.detected_source_language?.toLowerCase()
+            };
+        }
+        throw new Error('DeepL batch returned unexpected format');
+    }
+
     const url = preferredApi === 'libretranslate'
         ? 'https://libretranslate.de/translate'
         : customApiUrl;
@@ -569,22 +714,30 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
         throw new Error('Custom API URL not configured');
     }
 
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+    if (preferredApi === 'custom' && customApiKey) {
+        headers['Authorization'] = `Bearer ${customApiKey}`;
+        headers['X-API-Key'] = customApiKey;
+    }
+
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({
             q: texts,
             text: texts,
             source: 'auto',
             target: targetLang,
+            target_lang: targetLang,
             format: 'text'
         })
     });
 
     if (!response.ok) {
-        throw new Error(`Batch API error: ${response.status}`);
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(`Batch API error: ${response.status} ${errorBody}`);
     }
 
     const data = await response.json();
@@ -727,12 +880,30 @@ export async function translateText(text: string, targetLang: string): Promise<T
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
     
+    const tryDeepL = async () => {
+        const result = await translateWithDeepL(text, targetLang);
+        return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+    
+    const tryOpenAI = async () => {
+        const result = await translateWithOpenAI(text, targetLang);
+        return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+    
     let primaryApi: () => Promise<{ translation: string; detectedLang?: string }>;
     let fallbackApis: { name: string, fn: () => Promise<{ translation: string; detectedLang?: string }> }[] = [];
     
     switch (preferredApi) {
         case 'libretranslate':
             primaryApi = tryLibreTranslate;
+            fallbackApis = [{ name: 'google', fn: tryGoogle }];
+            break;
+        case 'deepl':
+            primaryApi = tryDeepL;
+            fallbackApis = [{ name: 'google', fn: tryGoogle }];
+            break;
+        case 'openai':
+            primaryApi = tryOpenAI;
             fallbackApis = [{ name: 'google', fn: tryGoogle }];
             break;
         case 'custom':
@@ -803,7 +974,8 @@ export async function translateLyrics(
                         translatedText: trackCache.lines[index] || line,
                         targetLanguage: targetLang,
                         wasTranslated: trackCache.lines[index] !== line,
-                        source: 'cache'
+                        source: 'cache' as const,
+                        apiProvider: trackCache.api
                     }));
                 }
 
@@ -832,12 +1004,16 @@ export async function translateLyrics(
         } else {
             const cached = getCachedTranslation(line, targetLang);
             if (cached) {
+                const lineCache = storage.getJSON<TranslationCache>('translation-cache', {});
+                const lineKey = `${targetLang}:${line}`;
+                const lineCacheEntry = lineCache[lineKey];
                 cachedResults.set(index, {
                     originalText: line,
                     translatedText: cached,
                     targetLanguage: targetLang,
                     wasTranslated: cached !== line,
-                    source: 'cache'
+                    source: 'cache',
+                    apiProvider: lineCacheEntry?.api
                 });
             } else {
                 uncachedLines.push({ index, text: line });
@@ -864,7 +1040,7 @@ export async function translateLyrics(
     try {
         let translatedLines: string[] | null = null;
 
-        if ((preferredApi === 'custom' || preferredApi === 'libretranslate') && uncachedLines.length > 1) {
+        if ((preferredApi === 'custom' || preferredApi === 'libretranslate' || preferredApi === 'deepl') && uncachedLines.length > 1) {
             try {
                 const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map(l => l.text), targetLang));
                 translatedLines = batchResult.translations;
@@ -907,7 +1083,8 @@ export async function translateLyrics(
                 translatedText: normalizeTranslatedLine(translatedLines[i] || '') || item.text,
                 targetLanguage: targetLang,
                 wasTranslated: (normalizeTranslatedLine(translatedLines[i] || '') || item.text) !== item.text,
-                source: 'api'
+                source: 'api',
+                apiProvider: preferredApi
             });
         });
 
@@ -923,7 +1100,8 @@ export async function translateLyrics(
                 translatedText: finalTranslation,
                 targetLanguage: targetLang,
                 wasTranslated: finalTranslation !== item.text,
-                source: 'api'
+                source: 'api',
+                apiProvider: preferredApi
             });
         }
     } catch (error) {

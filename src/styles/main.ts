@@ -184,7 +184,18 @@ export const styles = `
     text-shadow: none;
 }
 
-.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word) {
+.slt-replace-line.slt-vocab-line {
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    text-shadow: none;
+    font-weight: inherit;
+}
+
+.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
+.slt-interleaved-translation.slt-vocab-line {
     background-image: none !important;
     color: inherit !important;
     -webkit-text-fill-color: inherit !important;
@@ -794,6 +805,245 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
         0 0 15px rgba(255, 255, 255, 0.6),
         0 0 30px rgba(255, 255, 255, 0.4),
         0 0 45px rgba(255, 255, 255, 0.2);
+}
+
+
+/* Hide quality indicators when toggled off */
+body.slt-hide-quality-indicator .slt-quality-indicator {
+    display: none !important;
+}
+
+/* Translation Quality Indicator */
+
+/* Lines that hold the indicator need relative positioning */
+.slt-replace-line,
+.slt-interleaved-translation,
+.slt-sync-translation {
+    position: relative;
+}
+
+.slt-quality-indicator {
+    position: absolute;
+    right: 0;
+    bottom: -2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 2px 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(6px);
+    font-size: 8px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, gap 0.25s ease, padding 0.25s ease, background 0.25s ease;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.45) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.45) !important;
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    z-index: 5;
+    cursor: default;
+}
+
+/* Show the dot on active/hover line */
+.slt-replace-line:hover .slt-quality-indicator,
+.slt-interleaved-translation:hover .slt-quality-indicator,
+.slt-sync-translation:hover .slt-quality-indicator,
+.slt-replace-line.active .slt-quality-indicator,
+.slt-replace-line.Active .slt-quality-indicator,
+.slt-interleaved-translation.active .slt-quality-indicator,
+.slt-interleaved-translation.Active .slt-quality-indicator,
+.slt-sync-translation.active .slt-quality-indicator,
+.slt-sync-translation.Active .slt-quality-indicator {
+    opacity: 0.5;
+    pointer-events: auto;
+}
+
+/* Expand label on indicator hover */
+.slt-quality-indicator:hover {
+    opacity: 0.85 !important;
+    gap: 4px;
+    padding: 2px 7px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.slt-quality-indicator:hover .slt-qi-label {
+    max-width: 120px;
+    opacity: 1;
+}
+
+.slt-qi-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.slt-qi-dot.slt-qi-cached {
+    background: #ffe666;
+    box-shadow: 0 0 4px rgba(255, 230, 102, 0.35);
+}
+
+.slt-qi-dot.slt-qi-fresh {
+    background: #1db954;
+    box-shadow: 0 0 4px rgba(29, 185, 84, 0.35);
+}
+
+.slt-qi-label {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.3s ease, opacity 0.25s ease;
+    color: rgba(255, 255, 255, 0.55) !important;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.55) !important;
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+}
+
+/* Sidebar: smaller quality indicators */
+body.SpicySidebarLyrics__Active .slt-quality-indicator {
+    font-size: 7px;
+    padding: 1px 3px;
+    bottom: -1px;
+}
+
+body.SpicySidebarLyrics__Active .slt-qi-dot {
+    width: 4px;
+    height: 4px;
+}
+
+/* PiP: adjust size */
+.spicy-pip-wrapper .slt-quality-indicator {
+    font-size: 7px;
+    padding: 1px 4px;
+}
+
+/* ─── Vocabulary / Learning Mode ─── */
+.slt-vocab-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 5px;
+    align-items: flex-end;
+    font-size: 0.55em;
+}
+
+.slt-vocab-pair {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2px 5px 3px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1.5px solid rgba(30, 215, 96, 0.25);
+    transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    cursor: default;
+    max-width: 100%;
+}
+
+.slt-vocab-pair:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+    border-bottom-color: rgba(30, 215, 96, 0.6);
+}
+
+.slt-vocab-translated {
+    font-size: 1em;
+    font-weight: 700;
+    line-height: 1.25;
+    white-space: normal;
+    word-break: break-word;
+    display: inline;
+    transform-origin: center center;
+    will-change: transform;
+    transition: opacity 180ms linear, text-shadow 180ms linear;
+
+    --text-shadow-blur-radius: 4px;
+    --text-shadow-opacity: 0%;
+    text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
+
+    --gradient-degrees: 90deg;
+    --gradient-alpha: 0.85;
+    --gradient-alpha-end: 0.5;
+    --gradient-position: -20%;
+    --gradient-offset: 0%;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    background-image: linear-gradient(
+        var(--gradient-degrees),
+        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
+        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + 20% + var(--gradient-offset))
+    ) !important;
+}
+
+.slt-vocab-translated.word-notsng,
+.slt-vocab-translated.slt-word-future {
+    opacity: 0.51;
+}
+
+.slt-vocab-translated.word-sung,
+.slt-vocab-translated.slt-word-past {
+    opacity: 0.5;
+    --gradient-position: 100%;
+}
+
+.slt-vocab-translated.word-active,
+.slt-vocab-translated.slt-word-active {
+    opacity: 1;
+}
+
+.slt-vocab-original {
+    font-size: 0.65em;
+    line-height: 1.15;
+    color: rgba(255, 255, 255, 0.3);
+    letter-spacing: 0.01em;
+    filter: blur(3px);
+    transition: filter 0.25s ease, color 0.25s ease;
+    user-select: none;
+    white-space: normal;
+    word-break: break-word;
+    margin-top: 1px;
+}
+
+.slt-vocab-pair:hover .slt-vocab-original {
+    filter: blur(0px);
+    color: rgba(255, 255, 255, 0.65);
+}
+
+/* Active line: reveal originals */
+.active .slt-vocab-original,
+.Active .slt-vocab-original,
+.slt-interleaved-translation.active .slt-vocab-original {
+    filter: blur(0px);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* PiP vocab adjustments */
+.spicy-pip-wrapper .slt-vocab-pair {
+    padding: 1px 3px 2px;
+    border-bottom-width: 1px;
+}
+
+.spicy-pip-wrapper .slt-vocab-line {
+    font-size: 0.5em;
+}
+
+.spicy-pip-wrapper .slt-vocab-original {
+    font-size: 0.55em;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+    .slt-vocab-original {
+        filter: none !important;
+    }
 }
 `;
 

@@ -190,19 +190,32 @@ function createNativeSettingsSection(): HTMLElement {
         [
             { value: 'google', text: 'Google Translate' },
             { value: 'libretranslate', text: 'LibreTranslate' },
+            { value: 'deepl', text: 'DeepL' },
+            { value: 'openai', text: 'OpenAI' },
             { value: 'custom', text: 'Custom API' }
         ],
         storage.get('preferred-api') || 'google',
         (value) => {
-            const api = value as 'google' | 'libretranslate' | 'custom';
+            const api = value as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom';
             storage.set('preferred-api', api);
             state.preferredApi = api;
-            setPreferredApi(api, storage.get('custom-api-url') || '');
+            setPreferredApi(api, storage.get('custom-api-url') || '', {
+                customApiKey: state.customApiKey,
+                deeplApiKey: state.deeplApiKey,
+                openaiApiKey: state.openaiApiKey,
+                openaiModel: state.openaiModel
+            });
             
             const customRow = document.getElementById('slt-settings-custom-api-row');
-            if (customRow) {
-                customRow.style.display = api === 'custom' ? '' : 'none';
-            }
+            const customKeyRow = document.getElementById('slt-settings-custom-api-key-row');
+            const deeplRow = document.getElementById('slt-settings-deepl-key-row');
+            const openaiRow = document.getElementById('slt-settings-openai-key-row');
+            const openaiModelRow = document.getElementById('slt-settings-openai-model-row');
+            if (customRow) customRow.style.display = api === 'custom' ? '' : 'none';
+            if (customKeyRow) customKeyRow.style.display = api === 'custom' ? '' : 'none';
+            if (deeplRow) deeplRow.style.display = api === 'deepl' ? '' : 'none';
+            if (openaiRow) openaiRow.style.display = api === 'openai' ? '' : 'none';
+            if (openaiModelRow) openaiModelRow.style.display = api === 'openai' ? '' : 'none';
         }
     ));
     
@@ -222,9 +235,98 @@ function createNativeSettingsSection(): HTMLElement {
     customApiInput?.addEventListener('change', () => {
         storage.set('custom-api-url', customApiInput.value);
         state.customApiUrl = customApiInput.value;
-        setPreferredApi(state.preferredApi, customApiInput.value);
+        setPreferredApi(state.preferredApi, customApiInput.value, {
+            customApiKey: state.customApiKey,
+            deeplApiKey: state.deeplApiKey,
+            openaiApiKey: state.openaiApiKey,
+            openaiModel: state.openaiModel
+        });
     });
     sectionContent.appendChild(customApiRow);
+
+    // Custom API Key row
+    const customApiKeyRow = document.createElement('div');
+    customApiKeyRow.id = 'slt-settings-custom-api-key-row';
+    customApiKeyRow.className = 'x-settings-row';
+    customApiKeyRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
+    customApiKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
+        </div>
+    `;
+    const customApiKeyInput = customApiKeyRow.querySelector('input') as HTMLInputElement;
+    customApiKeyInput?.addEventListener('change', () => {
+        storage.set('custom-api-key', customApiKeyInput.value);
+        state.customApiKey = customApiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
+    });
+    sectionContent.appendChild(customApiKeyRow);
+
+    // DeepL API Key row
+    const deeplKeyRow = document.createElement('div');
+    deeplKeyRow.id = 'slt-settings-deepl-key-row';
+    deeplKeyRow.className = 'x-settings-row';
+    deeplKeyRow.style.display = storage.get('preferred-api') === 'deepl' ? '' : 'none';
+    deeplKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        </div>
+    `;
+    const deeplKeyInput = deeplKeyRow.querySelector('input') as HTMLInputElement;
+    deeplKeyInput?.addEventListener('change', () => {
+        storage.set('deepl-api-key', deeplKeyInput.value);
+        state.deeplApiKey = deeplKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
+    });
+    sectionContent.appendChild(deeplKeyRow);
+
+    // OpenAI API Key row
+    const openaiKeyRow = document.createElement('div');
+    openaiKeyRow.id = 'slt-settings-openai-key-row';
+    openaiKeyRow.className = 'x-settings-row';
+    openaiKeyRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
+    openaiKeyRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
+        </div>
+    `;
+    const openaiKeyInput = openaiKeyRow.querySelector('input') as HTMLInputElement;
+    openaiKeyInput?.addEventListener('change', () => {
+        storage.set('openai-api-key', openaiKeyInput.value);
+        state.openaiApiKey = openaiKeyInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
+    });
+    sectionContent.appendChild(openaiKeyRow);
+
+    // OpenAI Model row
+    const openaiModelRow = document.createElement('div');
+    openaiModelRow.id = 'slt-settings-openai-model-row';
+    openaiModelRow.className = 'x-settings-row';
+    openaiModelRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
+    openaiModelRow.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
+        </div>
+    `;
+    const openaiModelInput = openaiModelRow.querySelector('input') as HTMLInputElement;
+    openaiModelInput?.addEventListener('change', () => {
+        storage.set('openai-model', openaiModelInput.value);
+        state.openaiModel = openaiModelInput.value;
+        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
+    });
+    sectionContent.appendChild(openaiModelRow);
     
     sectionContent.appendChild(createNativeToggle(
         'slt-settings.auto-translate',
@@ -245,7 +347,30 @@ function createNativeSettingsSection(): HTMLElement {
             state.showNotifications = checked;
         }
     ));
-    
+
+    sectionContent.appendChild(createNativeToggle(
+        'slt-settings.show-quality-indicator',
+        'Show Translation Quality Indicator',
+        storage.get('show-quality-indicator') !== 'false',
+        (checked) => {
+            storage.set('show-quality-indicator', String(checked));
+            state.showQualityIndicator = checked;
+            document.body.classList.toggle('slt-hide-quality-indicator', !checked);
+        }
+    ));
+
+    sectionContent.appendChild(createNativeToggle(
+        'slt-settings.vocabulary-mode',
+        'Vocabulary / Learning Mode',
+        storage.get('vocabulary-mode') === 'true',
+        (checked) => {
+            storage.set('vocabulary-mode', String(checked));
+            state.vocabularyMode = checked;
+            document.body.classList.toggle('slt-vocabulary-mode', checked);
+            reapplyTranslations();
+        }
+    ));
+
     if (areDevToolsEnabled()) {
         sectionContent.appendChild(createNativeToggle(
             'slt-settings.debug-mode',
@@ -621,6 +746,8 @@ function createSettingsUI(): HTMLElement {
             <select id="slt-preferred-api">
                 <option value="google" ${(storage.get('preferred-api') || 'google') === 'google' ? 'selected' : ''}>Google Translate</option>
                 <option value="libretranslate" ${storage.get('preferred-api') === 'libretranslate' ? 'selected' : ''}>LibreTranslate</option>
+                <option value="deepl" ${storage.get('preferred-api') === 'deepl' ? 'selected' : ''}>DeepL</option>
+                <option value="openai" ${storage.get('preferred-api') === 'openai' ? 'selected' : ''}>OpenAI</option>
                 <option value="custom" ${storage.get('preferred-api') === 'custom' ? 'selected' : ''}>Custom API</option>
             </select>
         </div>
@@ -629,6 +756,28 @@ function createSettingsUI(): HTMLElement {
             <label for="slt-custom-api-url">Custom API URL</label>
             <input type="text" id="slt-custom-api-url" value="${storage.get('custom-api-url') || ''}" placeholder="https://your-api.com/translate">
             <span class="slt-description">LibreTranslate-compatible API endpoint</span>
+        </div>
+
+        <div class="slt-setting-row" id="slt-custom-api-key-row" style="display: ${storage.get('preferred-api') === 'custom' ? 'flex' : 'none'}">
+            <label for="slt-custom-api-key">Custom API Key (optional)</label>
+            <input type="password" id="slt-custom-api-key" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
+        </div>
+
+        <div class="slt-setting-row" id="slt-deepl-key-row" style="display: ${storage.get('preferred-api') === 'deepl' ? 'flex' : 'none'}">
+            <label for="slt-deepl-api-key">DeepL API Key</label>
+            <input type="password" id="slt-deepl-api-key" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+            <span class="slt-description">Get a free key at deepl.com/pro-api</span>
+        </div>
+
+        <div class="slt-setting-row" id="slt-openai-key-row" style="display: ${storage.get('preferred-api') === 'openai' ? 'flex' : 'none'}">
+            <label for="slt-openai-api-key">OpenAI API Key</label>
+            <input type="password" id="slt-openai-api-key" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
+        </div>
+
+        <div class="slt-setting-row" id="slt-openai-model-row" style="display: ${storage.get('preferred-api') === 'openai' ? 'flex' : 'none'}">
+            <label for="slt-openai-model">OpenAI Model</label>
+            <input type="text" id="slt-openai-model" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
+            <span class="slt-description">e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo</span>
         </div>
         
         <div class="slt-setting-row slt-toggle-row">
@@ -646,7 +795,23 @@ function createSettingsUI(): HTMLElement {
                 <span class="slt-toggle-slider"></span>
             </label>
         </div>
-        
+
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-show-quality-indicator">Show Translation Quality Indicator</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-show-quality-indicator" ${storage.get('show-quality-indicator') !== 'false' ? 'checked' : ''}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-vocabulary-mode">Vocabulary / Learning Mode</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-vocabulary-mode" ${storage.get('vocabulary-mode') === 'true' ? 'checked' : ''}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
         ${showDebugToggle ? `
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
@@ -684,8 +849,18 @@ function createSettingsUI(): HTMLElement {
         const preferredApiSelect = container.querySelector('#slt-preferred-api') as HTMLSelectElement;
         const customApiUrlInput = container.querySelector('#slt-custom-api-url') as HTMLInputElement;
         const customApiRow = container.querySelector('#slt-custom-api-row') as HTMLElement;
+        const customApiKeyInput = container.querySelector('#slt-custom-api-key') as HTMLInputElement;
+        const customApiKeyRow = container.querySelector('#slt-custom-api-key-row') as HTMLElement;
+        const deeplApiKeyInput = container.querySelector('#slt-deepl-api-key') as HTMLInputElement;
+        const deeplKeyRow = container.querySelector('#slt-deepl-key-row') as HTMLElement;
+        const openaiApiKeyInput = container.querySelector('#slt-openai-api-key') as HTMLInputElement;
+        const openaiKeyRow = container.querySelector('#slt-openai-key-row') as HTMLElement;
+        const openaiModelInput = container.querySelector('#slt-openai-model') as HTMLInputElement;
+        const openaiModelRow = container.querySelector('#slt-openai-model-row') as HTMLElement;
         const autoTranslateCheckbox = container.querySelector('#slt-auto-translate') as HTMLInputElement;
         const showNotificationsCheckbox = container.querySelector('#slt-show-notifications') as HTMLInputElement;
+        const showQualityIndicatorCheckbox = container.querySelector('#slt-show-quality-indicator') as HTMLInputElement;
+        const vocabularyModeCheckbox = container.querySelector('#slt-vocabulary-mode') as HTMLInputElement;
         const debugModeCheckbox = container.querySelector('#slt-debug-mode') as HTMLInputElement;
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
@@ -704,20 +879,56 @@ function createSettingsUI(): HTMLElement {
         });
         
         preferredApiSelect?.addEventListener('change', () => {
-            const api = preferredApiSelect.value as 'google' | 'libretranslate' | 'custom';
+            const api = preferredApiSelect.value as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'custom';
             storage.set('preferred-api', api);
             state.preferredApi = api;
-            setPreferredApi(api, customApiUrlInput?.value || '');
+            setPreferredApi(api, customApiUrlInput?.value || '', {
+                customApiKey: state.customApiKey,
+                deeplApiKey: state.deeplApiKey,
+                openaiApiKey: state.openaiApiKey,
+                openaiModel: state.openaiModel
+            });
             
-            if (customApiRow) {
-                customApiRow.style.display = api === 'custom' ? 'flex' : 'none';
-            }
+            if (customApiRow) customApiRow.style.display = api === 'custom' ? 'flex' : 'none';
+            if (customApiKeyRow) customApiKeyRow.style.display = api === 'custom' ? 'flex' : 'none';
+            if (deeplKeyRow) deeplKeyRow.style.display = api === 'deepl' ? 'flex' : 'none';
+            if (openaiKeyRow) openaiKeyRow.style.display = api === 'openai' ? 'flex' : 'none';
+            if (openaiModelRow) openaiModelRow.style.display = api === 'openai' ? 'flex' : 'none';
         });
         
         customApiUrlInput?.addEventListener('change', () => {
             storage.set('custom-api-url', customApiUrlInput.value);
             state.customApiUrl = customApiUrlInput.value;
-            setPreferredApi(state.preferredApi, customApiUrlInput.value);
+            setPreferredApi(state.preferredApi, customApiUrlInput.value, {
+                customApiKey: state.customApiKey,
+                deeplApiKey: state.deeplApiKey,
+                openaiApiKey: state.openaiApiKey,
+                openaiModel: state.openaiModel
+            });
+        });
+
+        customApiKeyInput?.addEventListener('change', () => {
+            storage.set('custom-api-key', customApiKeyInput.value);
+            state.customApiKey = customApiKeyInput.value;
+            setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
+        });
+
+        deeplApiKeyInput?.addEventListener('change', () => {
+            storage.set('deepl-api-key', deeplApiKeyInput.value);
+            state.deeplApiKey = deeplApiKeyInput.value;
+            setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplApiKeyInput.value });
+        });
+
+        openaiApiKeyInput?.addEventListener('change', () => {
+            storage.set('openai-api-key', openaiApiKeyInput.value);
+            state.openaiApiKey = openaiApiKeyInput.value;
+            setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiApiKeyInput.value });
+        });
+
+        openaiModelInput?.addEventListener('change', () => {
+            storage.set('openai-model', openaiModelInput.value);
+            state.openaiModel = openaiModelInput.value;
+            setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
         });
         
         autoTranslateCheckbox?.addEventListener('change', () => {
@@ -729,7 +940,20 @@ function createSettingsUI(): HTMLElement {
             storage.set('show-notifications', String(showNotificationsCheckbox.checked));
             state.showNotifications = showNotificationsCheckbox.checked;
         });
-        
+
+        showQualityIndicatorCheckbox?.addEventListener('change', () => {
+            storage.set('show-quality-indicator', String(showQualityIndicatorCheckbox.checked));
+            state.showQualityIndicator = showQualityIndicatorCheckbox.checked;
+            document.body.classList.toggle('slt-hide-quality-indicator', !showQualityIndicatorCheckbox.checked);
+        });
+
+        vocabularyModeCheckbox?.addEventListener('change', () => {
+            storage.set('vocabulary-mode', String(vocabularyModeCheckbox.checked));
+            state.vocabularyMode = vocabularyModeCheckbox.checked;
+            document.body.classList.toggle('slt-vocabulary-mode', vocabularyModeCheckbox.checked);
+            reapplyTranslations();
+        });
+
         debugModeCheckbox?.addEventListener('change', () => {
             setDebugMode(debugModeCheckbox.checked);
         });
@@ -930,6 +1154,24 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             .slt-lyrics-toolbar {
                 display: flex;
                 justify-content: flex-end;
+                gap: 8px;
+            }
+            .slt-lyrics-copy {
+                padding: 8px 14px;
+                border-radius: 999px;
+                border: none;
+                background: var(--spice-button);
+                color: var(--spice-text);
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+            }
+            .slt-lyrics-copy:hover {
+                opacity: 0.85;
+            }
+            .slt-lyrics-copy.slt-copied {
+                background: #1db954;
             }
             .slt-lyrics-back {
                 padding: 8px 14px;
@@ -978,6 +1220,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             }
         </style>
         <div class="slt-lyrics-toolbar">
+            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">📋 Copy Lyrics</button>
             <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">← Back to Cache</button>
         </div>
         <div class="slt-lyrics-header">Track ID: ${escapeHtml(getTrackIdFromUri(trackUri))}</div>
@@ -1004,6 +1247,44 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
     backToCacheBtn?.addEventListener('click', () => {
         Spicetify.PopupModal?.hide();
         setTimeout(() => openCacheViewer(), 120);
+    });
+
+    const copyBtn = content.querySelector('#slt-lyrics-copy-all') as HTMLButtonElement;
+    copyBtn?.addEventListener('click', async () => {
+        const rows = content.querySelectorAll('#slt-lyrics-rows .slt-lyrics-row');
+        const lines: string[] = [];
+        const trackTitle = trackCache.trackName || getTrackIdFromUri(trackUri);
+        const trackArtist = trackCache.artistName || '';
+        lines.push(`${trackTitle}${trackArtist ? ' — ' + trackArtist : ''}`);
+        lines.push(`${sourceLang.toUpperCase()} → ${targetLang.toUpperCase()}`);
+        lines.push('─'.repeat(40));
+        rows.forEach(row => {
+            const cols = row.querySelectorAll('.slt-lyrics-col');
+            if (cols.length >= 2) {
+                const src = (cols[0].textContent || '').trim();
+                const tgt = (cols[1].textContent || '').trim();
+                if (src || tgt) {
+                    lines.push(src || '♪');
+                    if (tgt && tgt !== src) lines.push(`  → ${tgt}`);
+                    lines.push('');
+                }
+            }
+        });
+        lines.push('─'.repeat(40));
+        lines.push('Exported from Spicy Lyric Translator');
+        const text = lines.join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            copyBtn.textContent = '✓ Copied!';
+            copyBtn.classList.add('slt-copied');
+            setTimeout(() => {
+                copyBtn.textContent = '📋 Copy Lyrics';
+                copyBtn.classList.remove('slt-copied');
+            }, 2000);
+        } catch (e) {
+            copyBtn.textContent = '✗ Failed';
+            setTimeout(() => { copyBtn.textContent = '📋 Copy Lyrics'; }, 2000);
+        }
     });
 
     try {

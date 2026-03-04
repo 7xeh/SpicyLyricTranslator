@@ -1,7 +1,9 @@
 import { debug, warn } from './debug';
 import type { LyricLineData, WordTimingData } from './lyricsFetcher';
+import type { TranslationQualityMeta } from './state';
+import { storage } from './storage';
 
-export type OverlayMode = 'replace' | 'interleaved' | 'synced';
+export type OverlayMode = 'replace' | 'interleaved';
 
 export interface OverlayConfig {
     mode: OverlayMode;
@@ -20,6 +22,7 @@ let currentConfig: OverlayConfig = {
 let isOverlayEnabled = false;
 let translationMap: Map<number, string> = new Map();
 let lineTimingData: LyricLineData[] = [];
+let qualityMap: Map<number, TranslationQualityMeta> = new Map();
 
 let cachedLines: NodeListOf<Element> | null = null;
 let cachedTranslationMap: Map<number, HTMLElement> | null = null;
@@ -217,7 +220,11 @@ function applyReplaceMode(doc: Document): void {
             replaceEl.textContent = '♪ ♪ ♪';
             replaceEl.classList.add('slt-replace-instrumental');
         } else {
-            if (currentConfig.syncWordHighlight) {
+            const vocabEnabled = storage.get('vocabulary-mode') === 'true';
+            if (vocabEnabled) {
+                replaceEl.classList.add('slt-vocab-line');
+                appendVocabularyPairs(doc, replaceEl, originalText, translation, line, 'slt-replace-word');
+            } else if (currentConfig.syncWordHighlight) {
                 appendTranslationWordSpans(doc, replaceEl, translation, line, 'slt-replace-word');
             } else {
                 replaceEl.textContent = translation;
@@ -234,7 +241,7 @@ function applyReplaceMode(doc: Document): void {
             e.stopPropagation();
             
             let seekTarget = replaceEl.dataset.startTime;
-            const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word');
+            const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word, .slt-vocab-pair');
             if (clickedWord) {
                 seekTarget = (clickedWord as HTMLElement).dataset.startTime || seekTarget;
             }
@@ -264,6 +271,11 @@ function applyReplaceMode(doc: Document): void {
         
         if (isLineActive(line)) {
             replaceEl.classList.add('active');
+        }
+        
+        const qualityIndicator = createQualityIndicator(doc, index);
+        if (qualityIndicator) {
+            replaceEl.appendChild(qualityIndicator);
         }
         
         line.parentNode.insertBefore(replaceEl, line.nextSibling);
@@ -310,6 +322,89 @@ function appendTranslationWordSpans(
         }
         container.appendChild(span);
     });
+}
+
+function appendVocabularyPairs(
+    doc: Document,
+    container: HTMLElement,
+    originalText: string,
+    translatedText: string,
+    originalLine: Element,
+    wordClassName: 'slt-sync-word' | 'slt-replace-word'
+): void {
+    const origWords = originalText.trim().split(/\s+/).filter(Boolean);
+    const transWords = translatedText.trim().split(/\s+/).filter(Boolean);
+
+    if (origWords.length === 0 || transWords.length === 0) {
+        container.textContent = translatedText;
+        return;
+    }
+
+    const originalWordUnits = getWordUnits(originalLine);
+
+    // Use the shorter list to determine pair count, distribute longer list across pairs
+    const pairCount = Math.min(origWords.length, transWords.length);
+    const origChunks = distributeWords(origWords, pairCount);
+    const transChunks = distributeWords(transWords, pairCount);
+
+    const transRatio = transWords.length / Math.max(originalWordUnits.length, 1);
+
+    let globalWordIndex = 0;
+
+    for (let i = 0; i < pairCount; i++) {
+        const pair = doc.createElement('span');
+        pair.className = 'slt-vocab-pair';
+
+        // Translated word(s) — gradient-synced span
+        const chunkWords = transChunks[i].split(/\s+/).filter(Boolean);
+        const transSpan = doc.createElement('span');
+        transSpan.className = `slt-vocab-translated ${wordClassName}`;
+
+        if (wordClassName === 'slt-sync-word') {
+            transSpan.classList.add('slt-word-future');
+        } else {
+            transSpan.classList.add('word-notsng');
+        }
+
+        const mappedOriginalIndex = originalWordUnits.length > 0
+            ? Math.min(Math.floor(globalWordIndex / Math.max(transRatio, 0.01)), originalWordUnits.length - 1)
+            : globalWordIndex;
+        transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
+        transSpan.dataset.wordIndex = globalWordIndex.toString();
+        transSpan.textContent = transChunks[i];
+        pair.appendChild(transSpan);
+
+        globalWordIndex += chunkWords.length;
+
+        // Original annotation — blurred below
+        const origSpan = doc.createElement('span');
+        origSpan.className = 'slt-vocab-original';
+        origSpan.textContent = origChunks[i];
+        pair.appendChild(origSpan);
+
+        pair.title = `${origChunks[i]}  →  ${transChunks[i]}`;
+        container.appendChild(pair);
+    }
+}
+
+function distributeWords(words: string[], buckets: number): string[] {
+    if (buckets >= words.length) {
+        // More buckets than words: pad with empty at the end (shouldn't happen with our logic)
+        const result = words.map(w => w);
+        while (result.length < buckets) result.push('');
+        return result;
+    }
+    // Fewer buckets than words: distribute extras across the first N buckets
+    const base = Math.floor(words.length / buckets);
+    const extra = words.length % buckets;
+    const result: string[] = [];
+    let idx = 0;
+    for (let b = 0; b < buckets; b++) {
+        const count = base + (b < extra ? 1 : 0);
+        result.push(words.slice(idx, idx + count).join(' '));
+        idx += count;
+    }
+    return result;
 }
 
 function lineHasSyllableStructure(line: Element): boolean {
@@ -564,9 +659,15 @@ function applyInterleavedMode(doc: Document): void {
                 translationEl.dataset.forLine = index.toString();
                 translationEl.dataset.lineIndex = index.toString();
                 
+                const isVocabMode = storage.get('vocabulary-mode') === 'true';
+                
                 if (isBreak) {
                     translationEl.textContent = '• • •';
                     translationEl.classList.add('slt-music-break');
+                } else if (isVocabMode && translation) {
+                    translationEl.classList.add('slt-vocab-line');
+                    translationEl.classList.add('slt-sync-translation');
+                    appendVocabularyPairs(doc, translationEl, originalText, translation, line, 'slt-sync-word');
                 } else {
                     translationEl.classList.add('slt-sync-translation');
                     if (currentConfig.syncWordHighlight && translation) {
@@ -583,6 +684,11 @@ function applyInterleavedMode(doc: Document): void {
                 }
                 
                 if (isLineActive(line)) translationEl.classList.add('active');
+                
+                const qualityIndicator = createQualityIndicator(doc, index);
+                if (qualityIndicator) {
+                    translationEl.appendChild(qualityIndicator);
+                }
                 
                 line.parentNode.insertBefore(translationEl, line.nextSibling);
 
@@ -616,62 +722,7 @@ function initOverlayContainer(doc: Document): HTMLElement | null {
     return container;
 }
 
-function applySyncedMode(doc: Document): void {
-    try {
-        const lines = getLyricLines(doc);
-        if (!lines || lines.length === 0) {
-            debug('No lyrics lines found for synced mode');
-            return;
-        }
-        
-        doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
-        
-        lines.forEach((line, index) => {
-            try {
-                const translation = translationMap.get(index);
-                const originalText = extractLineText(line);
-                
-                const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
-                
-                if (!translation && !isBreak) return;
-                if (translation === originalText) return;
-                
-                if (!line.parentNode) return;
-                
-                line.classList.add('slt-overlay-parent');
-                (line as HTMLElement).dataset.sltIndex = index.toString();
-                
-                const translationEl = doc.createElement('div');
-                translationEl.className = 'slt-sync-translation slt-interleaved-translation';
-                translationEl.dataset.lineIndex = index.toString();
-                
-                if (isBreak) {
-                    translationEl.textContent = '• • •';
-                    translationEl.classList.add('slt-music-break');
-                } else if (currentConfig.syncWordHighlight) {
-                    appendTranslationWordSpans(doc, translationEl, translation || '', line, 'slt-sync-word');
-                } else {
-                    translationEl.textContent = translation || '';
-                }
-                
-                if (isLineActive(line)) {
-                    translationEl.classList.add('active');
-                }
-                
-                line.parentNode.insertBefore(translationEl, line.nextSibling);
 
-                if (!isBreak && currentConfig.syncWordHighlight) {
-                    fallbackToContinuousMultilineGradient(translationEl, translation || '', line);
-                }
-            } catch (lineErr) {
-                warn('Failed to process line for synced mode', index, ':', lineErr);
-            }
-        });
-        
-    } catch (err) {
-        warn('Failed to apply synced mode:', err);
-    }
-}
 
 const MIRRORED_LINE_STYLE_PROPS = [
     '--gradient-position',
@@ -971,7 +1022,9 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
     return true;
 }
 
-function updateSyncedWordStates(doc: Document): void {
+
+
+function updateWordSyncStates(doc: Document): void {
     if (!isOverlayEnabled) return;
 
     const lyricsContainer = doc.querySelector('.SpicyLyricsScrollContainer');
@@ -1061,9 +1114,6 @@ function renderTranslations(doc: Document): void {
             break;
         case 'interleaved':
             applyInterleavedMode(doc);
-            break;
-        case 'synced':
-            applySyncedMode(doc);
             break;
     }
 }
@@ -1159,7 +1209,7 @@ function syncLoop(): void {
     
     try {
         onActiveLineChanged(document);
-        updateSyncedWordStates(document);
+        updateWordSyncStates(document);
         syncBlurToTranslations(document);
         
         const pipWindow = getPIPWindow();
@@ -1168,7 +1218,7 @@ function syncLoop(): void {
                 const pipDoc = pipWindow.document;
                 if (pipDoc && pipDoc.body) {
                     onActiveLineChanged(pipDoc);
-                    updateSyncedWordStates(pipDoc);
+                    updateWordSyncStates(pipDoc);
                     syncBlurToTranslations(pipDoc);
                     
                     if (!activeLineObservers.has(pipDoc)) {
@@ -1295,6 +1345,11 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
     }
     
     document.body.classList.add('slt-overlay-active');
+
+    try {
+        const qiVal = localStorage.getItem('spicy-lyric-translator:show-quality-indicator');
+        document.body.classList.toggle('slt-hide-quality-indicator', qiVal === 'false');
+    } catch {}
     
     const pipWindow = getPIPWindow();
     if (pipWindow) {
@@ -1476,6 +1531,46 @@ export function setLineTimingData(data: LyricLineData[]): void {
     lineTimingData = data;
 }
 
+export function setQualityMetadata(metadata: Map<number, TranslationQualityMeta>): void {
+    qualityMap = new Map(metadata);
+}
+
+function createQualityIndicator(doc: Document, index: number): HTMLElement | null {
+    const meta = qualityMap.get(index);
+    if (!meta) return null;
+
+    const indicator = doc.createElement('span');
+    indicator.className = 'slt-quality-indicator';
+
+    const isCached = meta.source === 'cache';
+    const apiLabel = meta.api === 'google' ? 'Google'
+        : meta.api === 'libretranslate' ? 'LibreTranslate'
+        : meta.api === 'custom' ? 'Custom'
+        : meta.api || 'Unknown';
+
+    indicator.dataset.source = meta.source;
+    indicator.dataset.api = meta.api || '';
+
+    const dot = doc.createElement('span');
+    dot.className = `slt-qi-dot ${isCached ? 'slt-qi-cached' : 'slt-qi-fresh'}`;
+    indicator.appendChild(dot);
+
+    const label = doc.createElement('span');
+    label.className = 'slt-qi-label';
+    label.textContent = isCached ? `Cached · ${apiLabel}` : `Fresh · ${apiLabel}`;
+    indicator.appendChild(label);
+
+    const tooltipParts: string[] = [];
+    tooltipParts.push(`Source: ${isCached ? 'Cached' : 'Live API'}`);
+    tooltipParts.push(`Provider: ${apiLabel}`);
+    if (meta.detectedLanguage) {
+        tooltipParts.push(`Detected: ${meta.detectedLanguage.toUpperCase()}`);
+    }
+    indicator.title = tooltipParts.join(' | ');
+
+    return indicator;
+}
+
 export function initPIPOverlay(): void {
     if (!isOverlayEnabled) return;
     
@@ -1540,6 +1635,7 @@ export default {
     getOverlayConfig,
     setOverlayConfig,
     setLineTimingData,
+    setQualityMetadata,
     initPIPOverlay,
     getOverlayStyles
 };

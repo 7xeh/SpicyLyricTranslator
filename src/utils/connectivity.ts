@@ -1,6 +1,18 @@
 import { storage } from './storage';
 
 const API_BASE = 'https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php';
+const CLIENT_ID_KEY = 'client-id';
+
+function getOrCreateClientId(): string {
+    let clientId = storage.get(CLIENT_ID_KEY);
+    if (!clientId) {
+        clientId = crypto.randomUUID?.() ?? 
+            (Array.from(crypto.getRandomValues(new Uint8Array(16)))
+                .map(b => b.toString(16).padStart(2, '0')).join(''));
+        storage.set(CLIENT_ID_KEY, clientId);
+    }
+    return clientId;
+}
 const HEARTBEAT_INTERVAL = 30000;
 const LATENCY_CHECK_INTERVAL = 15000;
 const CONNECTION_TIMEOUT = 5000;
@@ -230,7 +242,8 @@ async function sendHeartbeat(): Promise<boolean> {
             action: 'heartbeat',
             session: indicatorState.sessionId || '',
             version: storage.get('extension-version') || '1.0.0',
-            active: indicatorState.isViewingLyrics ? 'true' : 'false'
+            active: indicatorState.isViewingLyrics ? 'true' : 'false',
+            clientId: getOrCreateClientId()
         });
 
         const response = await fetchWithTimeout(`${API_BASE}?${params}`);
@@ -265,7 +278,8 @@ async function connect(): Promise<boolean> {
     try {
         const params = new URLSearchParams({
             action: 'connect',
-            version: storage.get('extension-version') || '1.0.0'
+            version: storage.get('extension-version') || '1.0.0',
+            clientId: getOrCreateClientId()
         });
 
         const response = await fetchWithTimeout(`${API_BASE}?${params}`);

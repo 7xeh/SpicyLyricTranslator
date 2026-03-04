@@ -1,4 +1,4 @@
-import { state } from './state';
+import { state, TranslationQualityMeta } from './state';
 import { Icons } from './icons';
 import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats } from './translator';
@@ -9,7 +9,8 @@ import {
     disableOverlay, 
     updateOverlayContent, 
     isOverlayActive,
-    setLineTimingData
+    setLineTimingData,
+    setQualityMetadata
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, isSameLanguage } from './languageDetection';
 import { openSettingsModal } from './settings';
@@ -501,11 +502,12 @@ export async function translateCurrentLyrics(): Promise<void> {
                 state.detectedLanguage || undefined
             );
 
-            const translatedByIndex = new Map<number, { translatedText: string; source?: 'cache' | 'api' }>();
+            const translatedByIndex = new Map<number, { translatedText: string; source?: 'cache' | 'api'; apiProvider?: string }>();
             partialTranslations.forEach((result, idx) => {
                 translatedByIndex.set(nonTargetIndexes[idx], {
                     translatedText: result.translatedText,
-                    source: result.source
+                    source: result.source,
+                    apiProvider: result.apiProvider
                 });
             });
 
@@ -518,7 +520,9 @@ export async function translateCurrentLyrics(): Promise<void> {
                     translatedText,
                     targetLanguage: state.targetLanguage,
                     wasTranslated,
-                    source: partial?.source
+                    source: partial?.source,
+                    apiProvider: partial?.apiProvider,
+                    detectedLanguage: state.detectedLanguage || undefined
                 };
             });
         } else {
@@ -540,6 +544,18 @@ export async function translateCurrentLyrics(): Promise<void> {
         state._translationsByIndex = new Map();
         translations.forEach((result, index) => {
             state._translationsByIndex!.set(index, result.translatedText);
+        });
+        
+        state._qualityByIndex = new Map();
+        translations.forEach((result, index) => {
+            if (result.wasTranslated) {
+                const meta: TranslationQualityMeta = {
+                    source: result.source || 'api',
+                    api: result.apiProvider || state.preferredApi,
+                    detectedLanguage: state.detectedLanguage || result.detectedLanguage || undefined
+                };
+                state._qualityByIndex!.set(index, meta);
+            }
         });
         
         state.lastTranslatedSongUri = currentTrackUri;
@@ -598,6 +614,9 @@ function applyTranslations(lines: NodeListOf<Element>): void {
             syncWordHighlight: state.syncWordHighlight
         });
     }
+    if (state._qualityByIndex) {
+        setQualityMetadata(state._qualityByIndex);
+    }
     updateOverlayContent(translationMapByIndex);
 }
 
@@ -606,12 +625,14 @@ export function reapplyTranslations(): void {
     
     const savedTranslations = new Map(state.translatedLyrics);
     const savedIndexMap = state._translationsByIndex ? new Map(state._translationsByIndex) : undefined;
+    const savedQualityMap = state._qualityByIndex ? new Map(state._qualityByIndex) : undefined;
     const savedUri = state.lastTranslatedSongUri;
     
     removeTranslations();
     
     state.translatedLyrics = savedTranslations;
     state._translationsByIndex = savedIndexMap;
+    state._qualityByIndex = savedQualityMap;
     state.lastTranslatedSongUri = savedUri;
     
     const lines = getLyricsLines();
@@ -668,6 +689,7 @@ export function removeTranslations(): void {
     
     state.translatedLyrics.clear();
     state._translationsByIndex = undefined;
+    state._qualityByIndex = undefined;
 }
 
 export function setupLyricsObserver(): void {

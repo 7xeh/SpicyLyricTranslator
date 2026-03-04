@@ -28,7 +28,12 @@ export async function initialize(): Promise<void> {
     
     info('Initializing...');
     
-    setPreferredApi(state.preferredApi, state.customApiUrl);
+    setPreferredApi(state.preferredApi, state.customApiUrl, {
+        customApiKey: state.customApiKey,
+        deeplApiKey: state.deeplApiKey,
+        openaiApiKey: state.openaiApiKey,
+        openaiModel: state.openaiModel
+    });
     injectStyles();
     initConnectionIndicator();
     
