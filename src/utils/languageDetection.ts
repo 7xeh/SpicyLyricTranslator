@@ -23,6 +23,7 @@ const LATIN_LANGUAGE_WORDS: { code: string; words: string[] }[] = [
     { code: 'it', words: ['il', 'la', 'lo', 'gli', 'le', 'di', 'che', 'e', 'un', 'una', 'è', 'non', 'io', 'tu', 'lui', 'lei', 'noi', 'voi', 'con', 'per', 'anche', 'ancora', 'molto', 'bene', 'quando', 'dove', 'sempre', 'mai', 'tutto', 'mio', 'mia', 'tuo', 'suo'] },
     { code: 'nl', words: ['de', 'het', 'een', 'en', 'van', 'is', 'dat', 'op', 'te', 'in', 'voor', 'niet', 'met', 'zijn', 'maar', 'ook', 'als', 'dit'] },
     { code: 'pl', words: ['i', 'w', 'na', 'nie', 'do', 'to', 'że', 'co', 'jest', 'się', 'ja', 'ty', 'on', 'my', 'wy', 'ale', 'jak', 'tak'] },
+    { code: 'hi', words: ['hai', 'hain', 'hoon', 'tha', 'thi', 'nahi', 'nahin', 'kya', 'kaise', 'kaisa', 'kaisi', 'kahan', 'kyun', 'kab', 'mera', 'meri', 'tera', 'teri', 'tere', 'tumhara', 'hamara', 'apna', 'apni', 'apne', 'tujhe', 'mujhe', 'mujhko', 'tujhko', 'tumhe', 'hume', 'unhe', 'isko', 'usko', 'uski', 'iski', 'iske', 'uske', 'dil', 'pyar', 'ishq', 'mohabbat', 'zindagi', 'duniya', 'sapna', 'sapne', 'raat', 'din', 'aankh', 'aankhein', 'ankhiyo', 'nazar', 'waqt', 'gham', 'khushi', 'dard', 'rang', 'dhoop', 'chand', 'sitara', 'dekho', 'dekh', 'dekhna', 'suno', 'sun', 'sunna', 'bolo', 'bol', 'bolna', 'chalo', 'chal', 'chalna', 'jao', 'jana', 'aao', 'aaja', 'aana', 'karo', 'karna', 'milna', 'mila', 'milo', 'ruk', 'ruko', 'rukna', 'jeena', 'jee', 'nach', 'nachle', 'gaana', 'gana', 'bajao', 'baja', 'dikha', 'dikhao', 'dikhaa', 'parda', 'nakhre', 'mein', 'pe', 'par', 'wala', 'wali', 'wale', 'bhi', 'aur', 'lekin', 'magar', 'phir', 'abhi', 'kabhi', 'hamesha', 'humesha', 'sirf', 'bas', 'bahut', 'bohot', 'zyada', 'kuch', 'sab', 'koi', 'kaun', 'yahan', 'wahan', 'udhar', 'idhar', 'accha', 'acha', 'theek', 'bilkul', 'zaroor', 'sach', 'jhooth', 'alag', 'saath', 'mann', 'mehboob', 'dilbar', 'sanam', 'jannat', 'husn', 'jaane', 'jaana', 'toh', 'se', 'ke', 'ka', 'ki', 'ko', 'ne', 'tu', 'hum', 'tum', 'main', 'yeh', 'woh', 'ab', 'jab', 'tab', 'agar', 'mat', 'ya'] },
     { code: 'en', words: ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'my', 'your', 'his', 'her', 'our', 'their', 'do', 'did', 'not', 'no', 'have', 'has', 'had', 'be', 'been', 'will', 'would', 'can', 'could', 'just', 'like', 'so', 'this', 'that', 'what', 'when', 'how', 'all', 'if', 'there', 'them', 'from', 'about', 'up', 'out', 'know', 'only', 'into', 'than', 'then', 'its', 'who', 'which', 'more', 'some', 'these', 'those', 'here'] },
 ];
 
@@ -247,7 +248,7 @@ export function assessMixedLanguageContent(
     let uncertainCount = 0;
     let targetCount = 0;
     const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
-    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'el'].includes(targetBase);
     
     for (const line of lines) {
         const trimmed = (line || '').trim();
