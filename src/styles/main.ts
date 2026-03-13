@@ -360,21 +360,18 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
 .slt-ci-button {
     display: flex;
     align-items: center;
-    gap: 0;
-    padding: 6px;
-    border-radius: 50%;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
     background: transparent;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.25s ease;
     overflow: visible;
     white-space: nowrap;
 }
 
 .slt-ci-button:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 6px 10px;
-    gap: 8px;
+    background: rgba(255, 255, 255, 0.07);
 }
 
 .slt-ci-dot {
@@ -382,8 +379,8 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     height: 8px;
     min-width: 8px;
     border-radius: 50%;
-    background: #666;
-    transition: all 0.2s ease;
+    background: #555;
+    transition: background 0.3s ease, box-shadow 0.3s ease;
     flex-shrink: 0;
 }
 
@@ -394,26 +391,32 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
 
 .slt-ci-dot.slt-ci-connected {
     background: #1db954;
+    box-shadow: 0 0 6px rgba(29, 185, 84, 0.4);
 }
 
 .slt-ci-dot.slt-ci-error {
     background: #e74c3c;
+    box-shadow: 0 0 6px rgba(231, 76, 60, 0.4);
 }
 
 .slt-ci-dot.slt-ci-great {
     background: #1db954;
+    box-shadow: 0 0 6px rgba(29, 185, 84, 0.4);
 }
 
 .slt-ci-dot.slt-ci-ok {
     background: #ffe666;
+    box-shadow: 0 0 6px rgba(255, 230, 102, 0.35);
 }
 
 .slt-ci-dot.slt-ci-bad {
     background: #ff944d;
+    box-shadow: 0 0 6px rgba(255, 148, 77, 0.35);
 }
 
 .slt-ci-dot.slt-ci-horrible {
     background: #e74c3c;
+    box-shadow: 0 0 6px rgba(231, 76, 60, 0.4);
 }
 
 @keyframes slt-ci-pulse {
@@ -424,58 +427,60 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
 .slt-ci-expanded {
     display: flex;
     align-items: center;
-    opacity: 0;
-    width: 0;
-    overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    white-space: nowrap;
-}
-
-.slt-ci-button:hover .slt-ci-expanded {
     opacity: 1;
-    width: auto;
-    margin-left: 8px;
+    white-space: nowrap;
 }
 
 .slt-ci-stats-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 0.65rem;
     color: var(--spice-subtext, #b3b3b3);
 }
 
 .slt-ci-ping {
     font-family: 'JetBrains Mono', 'Consolas', monospace;
-    font-size: 0.6rem;
+    font-size: 0.62rem;
+    font-weight: 600;
     color: var(--spice-text, #fff);
+    letter-spacing: -0.01em;
+    transition: color 0.3s ease;
 }
 
-.slt-ci-divider {
-    opacity: 0.3;
-    font-size: 0.5rem;
+.slt-ci-ping.slt-ci-great { color: #1db954; }
+.slt-ci-ping.slt-ci-ok { color: #ffe666; }
+.slt-ci-ping.slt-ci-bad { color: #ff944d; }
+.slt-ci-ping.slt-ci-horrible { color: #e74c3c; }
+
+.slt-ci-sep {
+    width: 1px;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
 }
 
 .slt-ci-users-count {
     display: flex;
     align-items: center;
-    gap: 3px;
-    color: var(--spice-text, #fff);
-    font-size: 0.6rem;
+    gap: 4px;
+    color: var(--spice-subtext, #b3b3b3);
+    font-size: 0.62rem;
+    font-weight: 500;
 }
 
 .slt-ci-users-count svg {
-    color: var(--spice-subtext, #b3b3b3);
-    opacity: 0.7;
+    opacity: 0.55;
 }
 
 .slt-ci-users-count.slt-ci-active .slt-ci-active-count {
     color: #1db954;
+    font-weight: 600;
 }
 
 .slt-ci-users-count.slt-ci-active svg {
     color: #1db954;
-    opacity: 0.9;
+    opacity: 0.8;
 }
 
 body.slt-overlay-active .LyricsContent {}

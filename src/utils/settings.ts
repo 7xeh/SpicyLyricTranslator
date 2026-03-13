@@ -397,6 +397,15 @@ function createNativeSettingsSection(): HTMLElement {
         }
     ));
 
+    sectionContent.appendChild(createNativeToggle(
+        'slt-settings.share-usage-data',
+        'Share Active Viewing Status',
+        storage.get('share-usage-data') !== 'false',
+        (checked) => {
+            storage.set('share-usage-data', String(checked));
+        }
+    ));
+
     if (areDevToolsEnabled()) {
         sectionContent.appendChild(createNativeToggle(
             'slt-settings.debug-mode',
@@ -845,6 +854,14 @@ function createSettingsUI(): HTMLElement {
             </label>
         </div>
 
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-share-usage-data">Share Active Viewing Status</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-share-usage-data" ${storage.get('share-usage-data') !== 'false' ? 'checked' : ''}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
         ${showDebugToggle ? `
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
@@ -896,6 +913,7 @@ function createSettingsUI(): HTMLElement {
         const showNotificationsCheckbox = container.querySelector('#slt-show-notifications') as HTMLInputElement;
         const showQualityIndicatorCheckbox = container.querySelector('#slt-show-quality-indicator') as HTMLInputElement;
         const vocabularyModeCheckbox = container.querySelector('#slt-vocabulary-mode') as HTMLInputElement;
+        const shareUsageDataCheckbox = container.querySelector('#slt-share-usage-data') as HTMLInputElement;
         const debugModeCheckbox = container.querySelector('#slt-debug-mode') as HTMLInputElement;
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
@@ -996,6 +1014,10 @@ function createSettingsUI(): HTMLElement {
             state.vocabularyMode = vocabularyModeCheckbox.checked;
             document.body.classList.toggle('slt-vocabulary-mode', vocabularyModeCheckbox.checked);
             reapplyTranslations();
+        });
+
+        shareUsageDataCheckbox?.addEventListener('change', () => {
+            storage.set('share-usage-data', String(shareUsageDataCheckbox.checked));
         });
 
         debugModeCheckbox?.addEventListener('change', () => {

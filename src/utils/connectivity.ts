@@ -72,18 +72,22 @@ function createIndicatorElement(): HTMLElement {
             <div class="slt-ci-dot"></div>
             <div class="slt-ci-expanded">
                 <div class="slt-ci-stats-row">
-                    <span class="slt-ci-ping">--ms</span>
-                    <span class="slt-ci-divider">•</span>
-                    <span class="slt-ci-users-count slt-ci-total" title="Total installed">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    <span class="slt-ci-ping" title="Round-trip latency to SLT server">--ms</span>
+                    <span class="slt-ci-sep"></span>
+                    <span class="slt-ci-users-count slt-ci-total" title="Total users with extension installed">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                         </svg>
                         <span class="slt-ci-total-count">0</span>
                     </span>
-                    <span class="slt-ci-divider">•</span>
-                    <span class="slt-ci-users-count slt-ci-active" title="Viewing lyrics">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                    <span class="slt-ci-sep"></span>
+                    <span class="slt-ci-users-count slt-ci-active" title="Users currently viewing lyrics">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
                         </svg>
                         <span class="slt-ci-active-count">0</span>
                     </span>
@@ -112,29 +116,32 @@ function updateUI(): void {
             dot.classList.add('slt-ci-connected');
             if (indicatorState.latencyMs !== null) {
                 dot.classList.add(getLatencyClass(indicatorState.latencyMs));
-                if (pingEl) pingEl.textContent = `${indicatorState.latencyMs}ms`;
+                if (pingEl) {
+                    pingEl.textContent = `${indicatorState.latencyMs}ms`;
+                    pingEl.className = `slt-ci-ping ${getLatencyClass(indicatorState.latencyMs)}`;
+                }
             }
             if (totalCountEl) totalCountEl.textContent = `${indicatorState.totalUsers}`;
             if (activeCountEl) activeCountEl.textContent = `${indicatorState.activeUsers}`;
-            button.setAttribute('title', `Connected • ${indicatorState.latencyMs}ms • ${indicatorState.totalUsers} installed • ${indicatorState.activeUsers} viewing`);
+            button.setAttribute('title', `Connected · ${indicatorState.latencyMs}ms · ${indicatorState.totalUsers} installed · ${indicatorState.activeUsers} viewing`);
             break;
 
         case 'connecting':
         case 'reconnecting':
             dot.classList.add('slt-ci-connecting');
-            if (pingEl) pingEl.textContent = '--ms';
+            if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
             button.setAttribute('title', 'Connecting...');
             break;
 
         case 'error':
             dot.classList.add('slt-ci-error');
-            if (pingEl) pingEl.textContent = 'Error';
-            button.setAttribute('title', 'Connection error - retrying...');
+            if (pingEl) { pingEl.textContent = 'ERR'; pingEl.className = 'slt-ci-ping slt-ci-horrible'; }
+            button.setAttribute('title', 'Connection error — retrying...');
             break;
 
         case 'disconnected':
         default:
-            if (pingEl) pingEl.textContent = '--ms';
+            if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
             button.setAttribute('title', 'Disconnected');
             break;
     }
@@ -142,7 +149,9 @@ function updateUI(): void {
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy && button && !(button as any)._tippy) {
         Spicetify.Tippy(button, {
             ...Spicetify.TippyProps,
-            delay: [200, 0],
+            interactive: true,
+            appendTo: document.body,
+            delay: [200, 100],
             allowHTML: true,
             content: getTooltipContent(),
             onShow(instance: any) {
@@ -154,34 +163,67 @@ function updateUI(): void {
     }
 }
 
+function getLatencyColor(ms: number): string {
+    if (ms <= LATENCY_THRESHOLDS.GREAT) return '#1db954';
+    if (ms <= LATENCY_THRESHOLDS.OK) return '#ffe666';
+    if (ms <= LATENCY_THRESHOLDS.BAD) return '#ff944d';
+    return '#e74c3c';
+}
+
+function getLatencyLabel(ms: number): string {
+    if (ms <= LATENCY_THRESHOLDS.GREAT) return 'Excellent';
+    if (ms <= LATENCY_THRESHOLDS.OK) return 'Good';
+    if (ms <= LATENCY_THRESHOLDS.BAD) return 'Fair';
+    return 'Poor';
+}
+
 function getTooltipContent(): string {
     switch (indicatorState.state) {
-        case 'connected':
+        case 'connected': {
+            const latencyColor = indicatorState.latencyMs !== null ? getLatencyColor(indicatorState.latencyMs) : '#888';
+            const latencyLabel = indicatorState.latencyMs !== null ? getLatencyLabel(indicatorState.latencyMs) : '...';
+            const regionText = indicatorState.region ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${indicatorState.region}</span>` : '';
             return `
-                <div style="display:flex;flex-direction:column;gap:6px;padding:4px 0;font-size:12px;">
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <span style="width:6px;height:6px;border-radius:50%;background:#1db954;"></span>
-                        <span>Connected to <b>SLT Server</b></span>
+                <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;font-size:12px;min-width:160px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:default;" title="Connection status: ${latencyLabel}">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="width:7px;height:7px;border-radius:50%;background:${latencyColor};box-shadow:0 0 6px ${latencyColor}80;"></span>
+                            <span style="font-weight:600;">SLT Server</span>
+                        </div>
+                        ${regionText}
                     </div>
-                    <div style="display:flex;gap:12px;color:rgba(255,255,255,0.7);">
-                        <span>Ping: <b style="color:#fff">${indicatorState.latencyMs}ms</b></span>
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.06);">
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Round-trip latency to SLT server">
+                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Ping</span>
+                            <span style="font-weight:700;color:${latencyColor};font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;">${indicatorState.latencyMs}ms</span>
+                            <span style="font-size:9px;opacity:0.4;">${latencyLabel}</span>
+                        </div>
+                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Total users with the extension installed">
+                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Users</span>
+                            <span style="font-weight:700;font-size:13px;">${indicatorState.totalUsers}</span>
+                            <span style="font-size:9px;opacity:0.4;">installed</span>
+                        </div>
+                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Users currently viewing lyrics">
+                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Active</span>
+                            <span style="font-weight:700;color:#1db954;font-size:13px;">${indicatorState.activeUsers}</span>
+                            <span style="font-size:9px;opacity:0.4;">viewing</span>
+                        </div>
                     </div>
-                    <div style="display:flex;gap:12px;color:rgba(255,255,255,0.7);">
-                        <span>Installed: <b style="color:#fff">${indicatorState.totalUsers}</b></span>
-                        <span>Viewing: <b style="color:#1db954">${indicatorState.activeUsers}</b></span>
-                    </div>
-                    <div style="font-size:10px;color:rgba(255,255,255,0.5);border-top:1px solid rgba(255,255,255,0.1);padding-top:6px;margin-top:2px;">
-                        No personal data collected.
+                    <div style="font-size:10px;color:rgba(255,255,255,0.35);text-align:center;padding-top:2px;border-top:1px solid rgba(255,255,255,0.06);cursor:default;" title="No tracking or personal information is collected">
+                        No personal data collected
                     </div>
                 </div>
             `;
+        }
         case 'connecting':
         case 'reconnecting':
-            return `<span style="font-size:12px;">Connecting to SLT server...</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;"><span style="width:6px;height:6px;border-radius:50%;background:#888;animation:slt-ci-pulse 1.5s ease-in-out infinite;"></span>Connecting to SLT server...</div>`;
         case 'error':
-            return `<span style="font-size:12px;color:#e74c3c;">Connection error - retrying...</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;color:#e74c3c;"><span style="width:6px;height:6px;border-radius:50%;background:#e74c3c;"></span>Connection error — retrying...</div>`;
         default:
-            return `<span style="font-size:12px;">Disconnected</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;opacity:0.7;"><span style="width:6px;height:6px;border-radius:50%;background:#666;"></span>Disconnected</div>`;
     }
 }
 
@@ -235,14 +277,13 @@ async function measureLatencyAccurate(): Promise<number | null> {
 }
 
 async function sendHeartbeat(): Promise<boolean> {
-    if (storage.get('share-usage-data') === 'false') return false;
-
     try {
+        const shareData = storage.get('share-usage-data') !== 'false';
         const params = new URLSearchParams({
             action: 'heartbeat',
             session: indicatorState.sessionId || '',
             version: storage.get('extension-version') || '1.0.0',
-            active: indicatorState.isViewingLyrics ? 'true' : 'false',
+            active: (shareData && indicatorState.isViewingLyrics) ? 'true' : 'false',
             clientId: getOrCreateClientId()
         });
 
@@ -270,8 +311,6 @@ async function sendHeartbeat(): Promise<boolean> {
 }
 
 async function connect(): Promise<boolean> {
-    if (storage.get('share-usage-data') === 'false') return false;
-
     indicatorState.state = 'connecting';
     updateUI();
 
@@ -316,7 +355,7 @@ async function connect(): Promise<boolean> {
         updateUI();
         
         setTimeout(() => {
-            if (indicatorState.state === 'error' && storage.get('share-usage-data') !== 'false') {
+            if (indicatorState.state === 'error') {
                 indicatorState.state = 'reconnecting';
                 updateUI();
                 connect();
@@ -437,11 +476,6 @@ function removeFromDOM(): void {
 }
 
 export async function initConnectionIndicator(): Promise<void> {
-    if (storage.get('share-usage-data') === 'false') {
-        cleanupConnectionIndicator();
-        return;
-    }
-
     if (indicatorState.isInitialized) return;
     
     const appended = await appendToDOM();
@@ -450,11 +484,6 @@ export async function initConnectionIndicator(): Promise<void> {
     indicatorState.isInitialized = true;
     
     await new Promise(resolve => setTimeout(resolve, INITIAL_DELAY));
-    
-    if (storage.get('share-usage-data') === 'false') {
-        cleanupConnectionIndicator();
-        return;
-    }
     
     const connected = await connect();
     
@@ -502,7 +531,6 @@ export function getConnectionState(): ConnectionIndicatorState {
 }
 
 export async function refreshConnection(): Promise<void> {
-    if (storage.get('share-usage-data') === 'false') return;
     await disconnect();
     await connect();
     if (indicatorState.state === 'connected') {
