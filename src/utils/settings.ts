@@ -7,6 +7,7 @@ import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog
 import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
+import { notifyShareDataChanged } from './connectivity';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 
@@ -403,6 +404,7 @@ function createNativeSettingsSection(): HTMLElement {
         storage.get('share-usage-data') !== 'false',
         (checked) => {
             storage.set('share-usage-data', String(checked));
+            notifyShareDataChanged();
         }
     ));
 
@@ -1018,6 +1020,7 @@ function createSettingsUI(): HTMLElement {
 
         shareUsageDataCheckbox?.addEventListener('change', () => {
             storage.set('share-usage-data', String(shareUsageDataCheckbox.checked));
+            notifyShareDataChanged();
         });
 
         debugModeCheckbox?.addEventListener('change', () => {

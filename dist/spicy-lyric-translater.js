@@ -5519,6 +5519,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     }
   }
+  function notifyShareDataChanged() {
+    if (indicatorState.state === "connected") {
+      sendHeartbeat().then(() => updateUI());
+    }
+  }
 
   // src/utils/core.ts
   var lyricsObserver = null;
@@ -6556,6 +6561,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       storage.get("share-usage-data") !== "false",
       (checked) => {
         storage.set("share-usage-data", String(checked));
+        notifyShareDataChanged();
       }
     ));
     if (areDevToolsEnabled()) {
@@ -7126,6 +7132,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       });
       shareUsageDataCheckbox?.addEventListener("change", () => {
         storage.set("share-usage-data", String(shareUsageDataCheckbox.checked));
+        notifyShareDataChanged();
       });
       debugModeCheckbox?.addEventListener("change", () => {
         setDebugMode(debugModeCheckbox.checked);

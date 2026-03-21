@@ -547,10 +547,17 @@ export function setViewingLyrics(isViewing: boolean): void {
     }
 }
 
+export function notifyShareDataChanged(): void {
+    if (indicatorState.state === 'connected') {
+        sendHeartbeat().then(() => updateUI());
+    }
+}
+
 export default {
     init: initConnectionIndicator,
     cleanup: cleanupConnectionIndicator,
     getState: getConnectionState,
     refresh: refreshConnection,
-    setViewingLyrics: setViewingLyrics
+    setViewingLyrics: setViewingLyrics,
+    notifyShareDataChanged: notifyShareDataChanged
 };
