@@ -21,6 +21,8 @@ let viewControlsObserver: MutationObserver | null = null;
 let lyricsObserver: MutationObserver | null = null;
 let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let viewModeIntervalId: ReturnType<typeof setInterval> | null = null;
+let romanizationToggleListener: (() => void) | null = null;
+let lastKnownRomanizationState: boolean = false;
 
 function getPIPWindow(): Window | null {
     try {
@@ -28,6 +30,27 @@ function getPIPWindow(): Window | null {
         if (docPiP && docPiP.window) return docPiP.window;
     } catch (e) {}
     return null;
+}
+
+export function isRomanizationActive(): boolean {
+    try {
+        const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
+        if (spicetifyStorage?.get) {
+            const val = spicetifyStorage.get('romanization');
+            if (val === 'true') return true;
+            if (val === 'false') return false;
+        }
+    } catch (e) {}
+    try {
+        const val = localStorage.getItem('romanization');
+        if (val === 'true') return true;
+    } catch (e) {}
+    return false;
+}
+
+function isRomanizationAvailable(): boolean {
+    const page = document.querySelector('#SpicyLyricsPage');
+    return !!page?.classList.contains('Lyrics_RomanizationAvailable');
 }
 
 export function isSpicyLyricsOpen(): boolean {
@@ -368,10 +391,15 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
 
         const currentTrackUri = getCurrentTrackUri();
-        const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
+        const romanizationOn = isRomanizationActive();
 
-        if (preApiSkipCheck.detectedLanguage) {
-            state.detectedLanguage = preApiSkipCheck.detectedLanguage;
+        if (romanizationOn) {
+            debug('Romanization is active — skipping pre-API language detection on DOM text');
+        } else {
+            const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
+            if (preApiSkipCheck.detectedLanguage) {
+                state.detectedLanguage = preApiSkipCheck.detectedLanguage;
+            }
         }
 
         let apiLineTexts: string[] | null = null;
@@ -404,6 +432,11 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
         
         let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
+
+        if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
+            debug('Romanization active: forcing API text for translation (API vocal: ' + apiVocalTexts.length + ', DOM: ' + lines.length + ')');
+            useApiLines = true;
+        }
         
         if (!useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
             for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
@@ -475,7 +508,17 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
         
         const detectedLang = apiLanguage || state.detectedLanguage || undefined;
-        const skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
+
+        let skipCheck: { skip: boolean; reason?: string; detectedLanguage?: string };
+        if (romanizationOn && apiLanguage) {
+            const apiLangSame = (await import('./languageDetection')).isSameLanguage(apiLanguage, state.targetLanguage);
+            skipCheck = apiLangSame
+                ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
+                : { skip: false, detectedLanguage: apiLanguage };
+            debug('Romanization active: using API language (' + apiLanguage + ') for skip check instead of text analysis');
+        } else {
+            skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
+        }
         
         if (skipCheck.detectedLanguage) state.detectedLanguage = skipCheck.detectedLanguage;
         
@@ -750,6 +793,7 @@ export async function onSpicyLyricsOpen(): Promise<void> {
     
     if (viewControls) insertTranslateButton();
     setupLyricsObserver();
+    setupRomanizationWatcher();
     
     const pipWindow = getPIPWindow();
     if (pipWindow) {
@@ -781,6 +825,46 @@ export function onSpicyLyricsClose(): void {
         lyricsObserver.disconnect();
         lyricsObserver = null;
     }
+    cleanupRomanizationWatcher();
+}
+
+function setupRomanizationWatcher(): void {
+    cleanupRomanizationWatcher();
+    lastKnownRomanizationState = isRomanizationActive();
+
+    const handler = () => {
+        setTimeout(() => {
+            const newState = isRomanizationActive();
+            if (newState !== lastKnownRomanizationState) {
+                lastKnownRomanizationState = newState;
+                debug('Romanization toggled to: ' + (newState ? 'ON' : 'OFF'));
+
+                if (state.isEnabled && !state.isTranslating) {
+                    state.lastTranslatedSongUri = null;
+                    state.translatedLyrics.clear();
+                    state._translationsByIndex = undefined;
+                    removeTranslations();
+                    waitForLyricsAndTranslate(10, 400);
+                }
+            }
+        }, 300);
+    };
+
+    const btn = document.querySelector('#RomanizationToggle');
+    if (btn) {
+        btn.addEventListener('click', handler);
+        romanizationToggleListener = handler;
+    }
+}
+
+function cleanupRomanizationWatcher(): void {
+    if (romanizationToggleListener) {
+        const btn = document.querySelector('#RomanizationToggle');
+        if (btn) {
+            btn.removeEventListener('click', romanizationToggleListener);
+        }
+        romanizationToggleListener = null;
+    }
 }
 
 export function setupViewModeObserver(): void {
@@ -791,6 +875,10 @@ export function setupViewModeObserver(): void {
         if (isOpen) {
             if (!document.querySelector('#TranslateToggle')) {
                 insertTranslateButton();
+            }
+            
+            if (!romanizationToggleListener && document.querySelector('#RomanizationToggle')) {
+                setupRomanizationWatcher();
             }
             
             const pipWindow = getPIPWindow();

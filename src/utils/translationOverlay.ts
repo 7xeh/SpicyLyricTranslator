@@ -253,34 +253,24 @@ function applyReplaceMode(doc: Document): void {
         
         replaceEl.addEventListener('click', (e) => {
             e.preventDefault();
-            e.stopPropagation();
             
-            let seekTarget = replaceEl.dataset.startTime;
+            // Map click to corresponding original word for word-level seek precision
             const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word, .slt-vocab-pair');
             if (clickedWord) {
-                seekTarget = (clickedWord as HTMLElement).dataset.startTime || seekTarget;
-            }
-            
-            if (seekTarget !== undefined && seekTarget !== '') {
-                const timeSec = parseFloat(seekTarget);
-                if (!isNaN(timeSec) && timeSec >= 0) {
-                    const timeMs = Math.round(timeSec * 1000);
-                    try {
-                        const Spicetify = (globalThis as any).Spicetify;
-                        if (Spicetify?.Player?.origin?.seekTo) {
-                            Spicetify.Player.origin.seekTo(timeMs);
-                        } else if (Spicetify?.Player?.seek) {
-                            Spicetify.Player.seek(timeMs);
-                        }
-                    } catch (err) {
-                        warn('Failed to seek:', err);
-                    }
+                const originalIndex = parseInt((clickedWord as HTMLElement).dataset.originalIndex || '-1', 10);
+                const originalWords = getWordUnits(line);
+                if (originalIndex >= 0 && originalIndex < originalWords.length) {
+                    (originalWords[originalIndex] as HTMLElement).click();
                     return;
                 }
             }
-            const firstWord = line.querySelector('.word:not(.dot)') || line.querySelector('.letterGroup');
-            if (firstWord) {
-                (firstWord as HTMLElement).click();
+            
+            // Fall back to clicking the first word or the line itself
+            const firstClickable = line.querySelector('.word:not(.dot)') || line.querySelector('.letterGroup');
+            if (firstClickable) {
+                (firstClickable as HTMLElement).click();
+            } else {
+                (line as HTMLElement).click();
             }
         });
         

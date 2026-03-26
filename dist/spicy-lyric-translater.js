@@ -4,6 +4,9 @@ var SpicyLyricTranslater = (() => {
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  };
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
@@ -18,15 +21,7 @@ var SpicyLyricTranslater = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // src/app.ts
-  var app_exports = {};
-  __export(app_exports, {
-    default: () => app_default
-  });
-
   // src/utils/storage.ts
-  var STORAGE_PREFIX = "spicy-lyric-translator:";
-  var MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
   function isLocalStorageAvailable() {
     try {
       const test = "__storage_test__";
@@ -53,99 +48,485 @@ var SpicyLyricTranslater = (() => {
     }
     return total * 2;
   }
-  var storage = {
-    get(key) {
-      try {
-        if (!isLocalStorageAvailable())
-          return null;
-        return localStorage.getItem(STORAGE_PREFIX + key);
-      } catch (e) {
-        console.error("[SpicyLyricTranslator] Storage get error:", e);
-        return null;
-      }
-    },
-    set(key, value) {
-      try {
-        if (!isLocalStorageAvailable())
-          return false;
-        if (value.length > 1e4) {
-          const currentSize = getStorageSize();
-          if (currentSize + value.length * 2 > MAX_STORAGE_SIZE_BYTES) {
-            console.warn("[SpicyLyricTranslator] Storage limit approaching, clearing old cache");
-            this.remove("translation-cache");
-          }
-        }
-        localStorage.setItem(STORAGE_PREFIX + key, value);
-        return true;
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "QuotaExceededError") {
-          console.warn("[SpicyLyricTranslator] Storage quota exceeded, clearing cache");
-          this.remove("translation-cache");
+  var STORAGE_PREFIX, MAX_STORAGE_SIZE_BYTES, storage, storage_default;
+  var init_storage = __esm({
+    "src/utils/storage.ts"() {
+      "use strict";
+      STORAGE_PREFIX = "spicy-lyric-translator:";
+      MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
+      storage = {
+        get(key) {
           try {
+            if (!isLocalStorageAvailable())
+              return null;
+            return localStorage.getItem(STORAGE_PREFIX + key);
+          } catch (e) {
+            console.error("[SpicyLyricTranslator] Storage get error:", e);
+            return null;
+          }
+        },
+        set(key, value) {
+          try {
+            if (!isLocalStorageAvailable())
+              return false;
+            if (value.length > 1e4) {
+              const currentSize = getStorageSize();
+              if (currentSize + value.length * 2 > MAX_STORAGE_SIZE_BYTES) {
+                console.warn("[SpicyLyricTranslator] Storage limit approaching, clearing old cache");
+                this.remove("translation-cache");
+              }
+            }
             localStorage.setItem(STORAGE_PREFIX + key, value);
             return true;
-          } catch {
+          } catch (e) {
+            if (e instanceof DOMException && e.name === "QuotaExceededError") {
+              console.warn("[SpicyLyricTranslator] Storage quota exceeded, clearing cache");
+              this.remove("translation-cache");
+              try {
+                localStorage.setItem(STORAGE_PREFIX + key, value);
+                return true;
+              } catch {
+                return false;
+              }
+            }
+            console.error("[SpicyLyricTranslator] Storage set error:", e);
             return false;
           }
-        }
-        console.error("[SpicyLyricTranslator] Storage set error:", e);
-        return false;
-      }
-    },
-    remove(key) {
-      try {
-        if (!isLocalStorageAvailable())
-          return;
-        localStorage.removeItem(STORAGE_PREFIX + key);
-      } catch (e) {
-        console.error("[SpicyLyricTranslator] Storage remove error:", e);
-      }
-    },
-    getJSON(key, defaultValue) {
-      try {
-        const value = this.get(key);
-        if (value === null)
-          return defaultValue;
-        return JSON.parse(value);
-      } catch (e) {
-        console.error("[SpicyLyricTranslator] Storage getJSON error:", e);
-        return defaultValue;
-      }
-    },
-    setJSON(key, value) {
-      try {
-        return this.set(key, JSON.stringify(value));
-      } catch (e) {
-        console.error("[SpicyLyricTranslator] Storage setJSON error:", e);
-        return false;
-      }
-    },
-    getStats() {
-      const used = getStorageSize();
-      return {
-        usedBytes: used,
-        maxBytes: MAX_STORAGE_SIZE_BYTES,
-        percentUsed: Math.round(used / MAX_STORAGE_SIZE_BYTES * 100)
-      };
-    },
-    clearAll() {
-      try {
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key?.startsWith(STORAGE_PREFIX)) {
-            keysToRemove.push(key);
+        },
+        remove(key) {
+          try {
+            if (!isLocalStorageAvailable())
+              return;
+            localStorage.removeItem(STORAGE_PREFIX + key);
+          } catch (e) {
+            console.error("[SpicyLyricTranslator] Storage remove error:", e);
+          }
+        },
+        getJSON(key, defaultValue) {
+          try {
+            const value = this.get(key);
+            if (value === null)
+              return defaultValue;
+            return JSON.parse(value);
+          } catch (e) {
+            console.error("[SpicyLyricTranslator] Storage getJSON error:", e);
+            return defaultValue;
+          }
+        },
+        setJSON(key, value) {
+          try {
+            return this.set(key, JSON.stringify(value));
+          } catch (e) {
+            console.error("[SpicyLyricTranslator] Storage setJSON error:", e);
+            return false;
+          }
+        },
+        getStats() {
+          const used = getStorageSize();
+          return {
+            usedBytes: used,
+            maxBytes: MAX_STORAGE_SIZE_BYTES,
+            percentUsed: Math.round(used / MAX_STORAGE_SIZE_BYTES * 100)
+          };
+        },
+        clearAll() {
+          try {
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key?.startsWith(STORAGE_PREFIX)) {
+                keysToRemove.push(key);
+              }
+            }
+            keysToRemove.forEach((key) => localStorage.removeItem(key));
+          } catch (e) {
+            console.error("[SpicyLyricTranslator] Storage clearAll error:", e);
           }
         }
-        keysToRemove.forEach((key) => localStorage.removeItem(key));
-      } catch (e) {
-        console.error("[SpicyLyricTranslator] Storage clearAll error:", e);
+      };
+      storage_default = storage;
+    }
+  });
+
+  // src/utils/debug.ts
+  function setDebugMode(enabled) {
+    debugMode = enabled;
+    storage.set("debug-mode", enabled.toString());
+    if (enabled) {
+      console.log(`${PREFIX} Debug mode enabled`);
+    }
+  }
+  function debug(...args) {
+    if (debugMode) {
+      console.log(PREFIX, ...args);
+    }
+  }
+  function info(...args) {
+    console.log(PREFIX, ...args);
+  }
+  function warn(...args) {
+    console.warn(PREFIX, ...args);
+  }
+  function error(...args) {
+    console.error(PREFIX, ...args);
+  }
+  var debugMode, PREFIX;
+  var init_debug = __esm({
+    "src/utils/debug.ts"() {
+      "use strict";
+      init_storage();
+      debugMode = storage.get("debug-mode") === "true";
+      PREFIX = "[SpicyLyricTranslator]";
+    }
+  });
+
+  // src/utils/languageDetection.ts
+  var languageDetection_exports = {};
+  __export(languageDetection_exports, {
+    assessMixedLanguageContent: () => assessMixedLanguageContent,
+    clearDetectionCache: () => clearDetectionCache,
+    default: () => languageDetection_default,
+    detectLanguageHeuristic: () => detectLanguageHeuristic,
+    detectLyricsLanguage: () => detectLyricsLanguage,
+    getLanguageName: () => getLanguageName,
+    isSameLanguage: () => isSameLanguage,
+    shouldSkipTranslation: () => shouldSkipTranslation
+  });
+  function getSampleIndices(length) {
+    if (length <= 0)
+      return [];
+    const indices = /* @__PURE__ */ new Set();
+    for (let i = 0; i < Math.min(5, length); i++) {
+      indices.add(i);
+    }
+    const middle = Math.floor(length / 2);
+    for (let i = middle - 2; i <= middle + 2; i++) {
+      if (i >= 0 && i < length) {
+        indices.add(i);
       }
     }
-  };
-  var storage_default = storage;
+    for (let i = Math.max(0, length - 5); i < length; i++) {
+      indices.add(i);
+    }
+    return [...indices].sort((a, b) => a - b);
+  }
+  function buildSampleText(lines) {
+    const indices = getSampleIndices(lines.length);
+    return indices.map((i) => lines[i]).filter((line) => line && line.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(line.trim())).join(" ");
+  }
+  function tokenizeWords(text) {
+    const matches = text.toLowerCase().match(/[\p{L}']+/gu);
+    if (!matches)
+      return [];
+    return matches.filter((word) => word.length > 1);
+  }
+  function detectLanguageHeuristic(text) {
+    if (!text || text.length < 10) {
+      return null;
+    }
+    const normalizedText = text.trim();
+    let totalChars = 0;
+    const scriptCounts = {};
+    for (const char of normalizedText) {
+      if (/\s/.test(char))
+        continue;
+      totalChars++;
+      for (const lang of LANGUAGE_PATTERNS) {
+        if (lang.scripts.test(char)) {
+          scriptCounts[lang.code] = (scriptCounts[lang.code] || 0) + 1;
+        }
+      }
+    }
+    if (totalChars === 0)
+      return null;
+    const dominantScript = Object.entries(scriptCounts).map(([code, count]) => ({ code, count, ratio: count / totalChars })).sort((a, b) => b.count - a.count)[0];
+    if (dominantScript && dominantScript.ratio > 0.2) {
+      if (dominantScript.code === "zh") {
+        const japaneseKana = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
+        if (japaneseKana > 0) {
+          return { code: "ja", confidence: 0.9 };
+        }
+      }
+      return {
+        code: dominantScript.code,
+        confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)
+      };
+    }
+    const words = tokenizeWords(normalizedText);
+    if (words.length < 3) {
+      return null;
+    }
+    const wordCounts = {};
+    let maxCount = 0;
+    let maxLang = "en";
+    for (const lang of LATIN_LANGUAGE_WORD_SETS) {
+      let count = 0;
+      for (const word of words) {
+        if (lang.words.has(word)) {
+          count++;
+        }
+      }
+      wordCounts[lang.code] = count;
+      if (count > maxCount) {
+        maxCount = count;
+        maxLang = lang.code;
+      }
+    }
+    const matchRatio = maxCount / words.length;
+    const minMatchCount = words.length <= 6 ? 2 : 3;
+    if (matchRatio > 0.12 && maxCount >= minMatchCount) {
+      const sortedCounts = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
+      if (sortedCounts.length < 2 || sortedCounts[1][1] === 0) {
+        return { code: maxLang, confidence: Math.min(0.75, 0.35 + matchRatio) };
+      }
+      const disambiguationRatio = words.length <= 6 ? 1.3 : 1.5;
+      if (sortedCounts[0][1] >= sortedCounts[1][1] * disambiguationRatio) {
+        return { code: maxLang, confidence: Math.min(0.8, 0.4 + matchRatio) };
+      }
+    }
+    return null;
+  }
+  async function detectLanguageViaAPI(text) {
+    const sample = text.slice(0, 500);
+    const params = new URLSearchParams({
+      client: "gtx",
+      sl: "auto",
+      tl: "en",
+      dt: "t",
+      q: sample
+    });
+    const url = `https://translate.googleapis.com/translate_a/single?${params.toString()}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Language detection API error: ${response.status}`);
+    }
+    const data = await response.json();
+    const detectedLang = typeof data?.[2] === "string" ? data[2] : "unknown";
+    const confidence = detectedLang !== "unknown" ? 0.9 : 0.5;
+    return { code: detectedLang, confidence };
+  }
+  async function detectLyricsLanguage(lyrics, trackUri) {
+    if (trackUri) {
+      const cached = detectionCache.get(trackUri);
+      if (cached && Date.now() - cached.timestamp < DETECTION_CACHE_TTL) {
+        debug(`Language detection cache hit: ${cached.language}`);
+        return { code: cached.language, confidence: cached.confidence };
+      }
+    }
+    const sampleText = buildSampleText(lyrics);
+    if (sampleText.length < 20) {
+      return { code: "unknown", confidence: 0 };
+    }
+    const heuristic = detectLanguageHeuristic(sampleText);
+    if (heuristic && heuristic.confidence >= 0.7) {
+      debug(`Heuristic language detection: ${heuristic.code} (${(heuristic.confidence * 100).toFixed(0)}%)`);
+      if (trackUri) {
+        detectionCache.set(trackUri, {
+          language: heuristic.code,
+          confidence: heuristic.confidence,
+          timestamp: Date.now()
+        });
+      }
+      return heuristic;
+    }
+    try {
+      const apiResult = await detectLanguageViaAPI(sampleText);
+      debug(`API language detection: ${apiResult.code} (${(apiResult.confidence * 100).toFixed(0)}%)`);
+      if (trackUri) {
+        detectionCache.set(trackUri, {
+          language: apiResult.code,
+          confidence: apiResult.confidence,
+          timestamp: Date.now()
+        });
+      }
+      return apiResult;
+    } catch (error2) {
+      warn("API language detection failed:", error2);
+      return heuristic || { code: "unknown", confidence: 0 };
+    }
+  }
+  function isSameLanguage(source, target) {
+    if (!source || source === "unknown")
+      return false;
+    const normalizeCode = (code) => {
+      return code.toLowerCase().split("-")[0].split("_")[0];
+    };
+    return normalizeCode(source) === normalizeCode(target);
+  }
+  function assessMixedLanguageContent(lines, targetLanguage) {
+    let nonTargetCount = 0;
+    let uncertainCount = 0;
+    let targetCount = 0;
+    const targetBase = targetLanguage.toLowerCase().split("-")[0].split("_")[0];
+    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "el"].includes(targetBase);
+    for (const line of lines) {
+      const trimmed = (line || "").trim();
+      if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed))
+        continue;
+      if (targetIsLatin) {
+        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
+        if (hasNonLatin) {
+          nonTargetCount++;
+          continue;
+        }
+      }
+      const detected = detectLanguageHeuristic(trimmed);
+      if (!detected) {
+        if (trimmed.length >= 10) {
+          uncertainCount++;
+        }
+        continue;
+      }
+      if (isSameLanguage(detected.code, targetLanguage)) {
+        targetCount++;
+      } else if (detected.confidence >= 0.65) {
+        nonTargetCount++;
+      } else {
+        uncertainCount++;
+      }
+    }
+    const totalChecked = targetCount + nonTargetCount + uncertainCount;
+    if (totalChecked === 0)
+      return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
+    const hasMixedContent = nonTargetCount >= 2 || nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3;
+    return { hasMixedContent, nonTargetCount, uncertainCount };
+  }
+  async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
+    const nonEmptyLyrics = lyrics.filter((l) => l && l.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(l.trim()));
+    if (nonEmptyLyrics.length === 0) {
+      return { skip: false };
+    }
+    const sampleText = buildSampleText(nonEmptyLyrics);
+    const quickHeuristic = detectLanguageHeuristic(sampleText);
+    if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
+      if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
+        const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+        if (mixedCheck.hasMixedContent) {
+          debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
+          return { skip: false, detectedLanguage: quickHeuristic.code };
+        }
+        return {
+          skip: true,
+          reason: `Lyrics already in ${quickHeuristic.code.toUpperCase()}`,
+          detectedLanguage: quickHeuristic.code
+        };
+      }
+      return { skip: false, detectedLanguage: quickHeuristic.code };
+    }
+    const detection = await detectLyricsLanguage(lyrics, trackUri);
+    if (detection.code === "unknown" || detection.confidence < 0.6) {
+      return { skip: false };
+    }
+    if (isSameLanguage(detection.code, targetLanguage)) {
+      const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+      if (mixedCheck.hasMixedContent) {
+        debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
+        return { skip: false, detectedLanguage: detection.code };
+      }
+      return {
+        skip: true,
+        reason: `Lyrics already in ${detection.code.toUpperCase()}`,
+        detectedLanguage: detection.code
+      };
+    }
+    return {
+      skip: false,
+      detectedLanguage: detection.code
+    };
+  }
+  function clearDetectionCache() {
+    detectionCache.clear();
+  }
+  function getLanguageName(code) {
+    const languageNames = {
+      "en": "English",
+      "es": "Spanish",
+      "fr": "French",
+      "de": "German",
+      "it": "Italian",
+      "pt": "Portuguese",
+      "nl": "Dutch",
+      "pl": "Polish",
+      "ru": "Russian",
+      "ja": "Japanese",
+      "zh": "Chinese",
+      "ko": "Korean",
+      "ar": "Arabic",
+      "he": "Hebrew",
+      "hi": "Hindi",
+      "th": "Thai",
+      "el": "Greek",
+      "tr": "Turkish",
+      "vi": "Vietnamese",
+      "id": "Indonesian",
+      "ms": "Malay",
+      "tl": "Tagalog",
+      "sv": "Swedish",
+      "no": "Norwegian",
+      "da": "Danish",
+      "fi": "Finnish",
+      "uk": "Ukrainian",
+      "cs": "Czech",
+      "ro": "Romanian",
+      "hu": "Hungarian",
+      "unknown": "Unknown"
+    };
+    const baseCode = code.toLowerCase().split("-")[0];
+    return languageNames[baseCode] || code.toUpperCase();
+  }
+  var detectionCache, DETECTION_CACHE_TTL, LANGUAGE_PATTERNS, LATIN_LANGUAGE_WORDS, LATIN_LANGUAGE_WORD_SETS, languageDetection_default;
+  var init_languageDetection = __esm({
+    "src/utils/languageDetection.ts"() {
+      "use strict";
+      init_debug();
+      detectionCache = /* @__PURE__ */ new Map();
+      DETECTION_CACHE_TTL = 30 * 60 * 1e3;
+      LANGUAGE_PATTERNS = [
+        { code: "ja", scripts: /[\u3040-\u30FF\u4E00-\u9FAF]/ },
+        { code: "zh", scripts: /[\u4E00-\u9FFF]/ },
+        { code: "ko", scripts: /[\uAC00-\uD7AF\u1100-\u11FF]/ },
+        { code: "ar", scripts: /[\u0600-\u06FF]/ },
+        { code: "he", scripts: /[\u0590-\u05FF]/ },
+        { code: "ru", scripts: /[\u0400-\u04FF]/ },
+        { code: "th", scripts: /[\u0E00-\u0E7F]/ },
+        { code: "hi", scripts: /[\u0900-\u097F]/ },
+        { code: "el", scripts: /[\u0370-\u03FF]/ }
+      ];
+      LATIN_LANGUAGE_WORDS = [
+        { code: "es", words: ["el", "la", "los", "las", "que", "de", "en", "un", "una", "es", "no", "por", "con", "para", "como", "pero", "m\xE1s", "yo", "tu", "mi", "muy", "hay", "donde", "cuando", "siempre", "nunca", "todo", "nada", "sin", "sobre", "soy", "estoy", "tengo", "aqu\xED", "porque", "te", "se", "le", "nos", "ya", "del", "al"] },
+        { code: "fr", words: ["le", "la", "les", "de", "et", "en", "un", "une", "est", "que", "je", "tu", "il", "elle", "nous", "vous", "ne", "pas", "pour", "avec", "mais", "aussi", "tr\xE8s", "mon", "ton", "son", "mes", "ses", "sur", "dans", "qui", "au", "du", "des", "ce", "cette", "\xE7a"] },
+        { code: "de", words: ["der", "die", "das", "und", "ist", "ich", "du", "er", "sie", "wir", "ihr", "nicht", "ein", "eine", "mit", "auf", "f\xFCr", "von", "auch", "noch", "nur", "sehr", "wie", "doch", "dann", "nein", "ja", "wenn", "mein", "dein", "sein", "kein"] },
+        { code: "pt", words: ["o", "a", "os", "as", "de", "que", "e", "em", "um", "uma", "\xE9", "n\xE3o", "eu", "tu", "ele", "ela", "n\xF3s", "voc\xEA", "com", "para", "meu", "seu", "muito", "bem", "sim", "aqui", "agora", "onde", "quando", "sempre", "tamb\xE9m", "porque", "mais", "nunca", "tudo", "nada", "sem"] },
+        { code: "it", words: ["il", "la", "lo", "gli", "le", "di", "che", "e", "un", "una", "\xE8", "non", "io", "tu", "lui", "lei", "noi", "voi", "con", "per", "anche", "ancora", "molto", "bene", "quando", "dove", "sempre", "mai", "tutto", "mio", "mia", "tuo", "suo"] },
+        { code: "nl", words: ["de", "het", "een", "en", "van", "is", "dat", "op", "te", "in", "voor", "niet", "met", "zijn", "maar", "ook", "als", "dit"] },
+        { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak"] },
+        { code: "hi", words: ["hai", "hain", "hoon", "tha", "thi", "nahi", "nahin", "kya", "kaise", "kaisa", "kaisi", "kahan", "kyun", "kab", "mera", "meri", "tera", "teri", "tere", "tumhara", "hamara", "apna", "apni", "apne", "tujhe", "mujhe", "mujhko", "tujhko", "tumhe", "hume", "unhe", "isko", "usko", "uski", "iski", "iske", "uske", "dil", "pyar", "ishq", "mohabbat", "zindagi", "duniya", "sapna", "sapne", "raat", "din", "aankh", "aankhein", "ankhiyo", "nazar", "waqt", "gham", "khushi", "dard", "rang", "dhoop", "chand", "sitara", "dekho", "dekh", "dekhna", "suno", "sun", "sunna", "bolo", "bol", "bolna", "chalo", "chal", "chalna", "jao", "jana", "aao", "aaja", "aana", "karo", "karna", "milna", "mila", "milo", "ruk", "ruko", "rukna", "jeena", "jee", "nach", "nachle", "gaana", "gana", "bajao", "baja", "dikha", "dikhao", "dikhaa", "parda", "nakhre", "mein", "pe", "par", "wala", "wali", "wale", "bhi", "aur", "lekin", "magar", "phir", "abhi", "kabhi", "hamesha", "humesha", "sirf", "bas", "bahut", "bohot", "zyada", "kuch", "sab", "koi", "kaun", "yahan", "wahan", "udhar", "idhar", "accha", "acha", "theek", "bilkul", "zaroor", "sach", "jhooth", "alag", "saath", "mann", "mehboob", "dilbar", "sanam", "jannat", "husn", "jaane", "jaana", "toh", "se", "ke", "ka", "ki", "ko", "ne", "tu", "hum", "tum", "main", "yeh", "woh", "ab", "jab", "tab", "agar", "mat", "ya"] },
+        { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
+      ];
+      LATIN_LANGUAGE_WORD_SETS = LATIN_LANGUAGE_WORDS.map((lang) => ({
+        code: lang.code,
+        words: new Set(lang.words)
+      }));
+      languageDetection_default = {
+        detectLanguageHeuristic,
+        detectLyricsLanguage,
+        isSameLanguage,
+        assessMixedLanguageContent,
+        shouldSkipTranslation,
+        clearDetectionCache,
+        getLanguageName
+      };
+    }
+  });
+
+  // src/app.ts
+  var app_exports = {};
+  __export(app_exports, {
+    default: () => app_default
+  });
 
   // src/utils/state.ts
+  init_storage();
   var state = {
     isEnabled: storage.get("translation-enabled") === "true",
     isTranslating: false,
@@ -172,32 +553,15 @@ var SpicyLyricTranslater = (() => {
     _qualityByIndex: void 0
   };
 
-  // src/utils/debug.ts
-  var debugMode = storage.get("debug-mode") === "true";
-  var PREFIX = "[SpicyLyricTranslator]";
-  function setDebugMode(enabled) {
-    debugMode = enabled;
-    storage.set("debug-mode", enabled.toString());
-    if (enabled) {
-      console.log(`${PREFIX} Debug mode enabled`);
-    }
-  }
-  function debug(...args) {
-    if (debugMode) {
-      console.log(PREFIX, ...args);
-    }
-  }
-  function info(...args) {
-    console.log(PREFIX, ...args);
-  }
-  function warn(...args) {
-    console.warn(PREFIX, ...args);
-  }
-  function error(...args) {
-    console.error(PREFIX, ...args);
-  }
+  // src/utils/initialize.ts
+  init_storage();
+
+  // src/utils/translator.ts
+  init_storage();
+  init_debug();
 
   // src/utils/trackCache.ts
+  init_debug();
   var CACHE_KEY_PREFIX = "slt-track-cache:";
   var CACHE_INDEX_KEY = "slt-track-cache-index";
   var CACHE_MAX_TRACKS = 100;
@@ -519,279 +883,8 @@ var SpicyLyricTranslater = (() => {
     return {};
   }
 
-  // src/utils/languageDetection.ts
-  var detectionCache = /* @__PURE__ */ new Map();
-  var DETECTION_CACHE_TTL = 30 * 60 * 1e3;
-  var LANGUAGE_PATTERNS = [
-    { code: "ja", scripts: /[\u3040-\u30FF\u4E00-\u9FAF]/ },
-    { code: "zh", scripts: /[\u4E00-\u9FFF]/ },
-    { code: "ko", scripts: /[\uAC00-\uD7AF\u1100-\u11FF]/ },
-    { code: "ar", scripts: /[\u0600-\u06FF]/ },
-    { code: "he", scripts: /[\u0590-\u05FF]/ },
-    { code: "ru", scripts: /[\u0400-\u04FF]/ },
-    { code: "th", scripts: /[\u0E00-\u0E7F]/ },
-    { code: "hi", scripts: /[\u0900-\u097F]/ },
-    { code: "el", scripts: /[\u0370-\u03FF]/ }
-  ];
-  var LATIN_LANGUAGE_WORDS = [
-    { code: "es", words: ["el", "la", "los", "las", "que", "de", "en", "un", "una", "es", "no", "por", "con", "para", "como", "pero", "m\xE1s", "yo", "tu", "mi", "muy", "hay", "donde", "cuando", "siempre", "nunca", "todo", "nada", "sin", "sobre", "soy", "estoy", "tengo", "aqu\xED", "porque", "te", "se", "le", "nos", "ya", "del", "al"] },
-    { code: "fr", words: ["le", "la", "les", "de", "et", "en", "un", "une", "est", "que", "je", "tu", "il", "elle", "nous", "vous", "ne", "pas", "pour", "avec", "mais", "aussi", "tr\xE8s", "mon", "ton", "son", "mes", "ses", "sur", "dans", "qui", "au", "du", "des", "ce", "cette", "\xE7a"] },
-    { code: "de", words: ["der", "die", "das", "und", "ist", "ich", "du", "er", "sie", "wir", "ihr", "nicht", "ein", "eine", "mit", "auf", "f\xFCr", "von", "auch", "noch", "nur", "sehr", "wie", "doch", "dann", "nein", "ja", "wenn", "mein", "dein", "sein", "kein"] },
-    { code: "pt", words: ["o", "a", "os", "as", "de", "que", "e", "em", "um", "uma", "\xE9", "n\xE3o", "eu", "tu", "ele", "ela", "n\xF3s", "voc\xEA", "com", "para", "meu", "seu", "muito", "bem", "sim", "aqui", "agora", "onde", "quando", "sempre", "tamb\xE9m", "porque", "mais", "nunca", "tudo", "nada", "sem"] },
-    { code: "it", words: ["il", "la", "lo", "gli", "le", "di", "che", "e", "un", "una", "\xE8", "non", "io", "tu", "lui", "lei", "noi", "voi", "con", "per", "anche", "ancora", "molto", "bene", "quando", "dove", "sempre", "mai", "tutto", "mio", "mia", "tuo", "suo"] },
-    { code: "nl", words: ["de", "het", "een", "en", "van", "is", "dat", "op", "te", "in", "voor", "niet", "met", "zijn", "maar", "ook", "als", "dit"] },
-    { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak"] },
-    { code: "hi", words: ["hai", "hain", "hoon", "tha", "thi", "nahi", "nahin", "kya", "kaise", "kaisa", "kaisi", "kahan", "kyun", "kab", "mera", "meri", "tera", "teri", "tere", "tumhara", "hamara", "apna", "apni", "apne", "tujhe", "mujhe", "mujhko", "tujhko", "tumhe", "hume", "unhe", "isko", "usko", "uski", "iski", "iske", "uske", "dil", "pyar", "ishq", "mohabbat", "zindagi", "duniya", "sapna", "sapne", "raat", "din", "aankh", "aankhein", "ankhiyo", "nazar", "waqt", "gham", "khushi", "dard", "rang", "dhoop", "chand", "sitara", "dekho", "dekh", "dekhna", "suno", "sun", "sunna", "bolo", "bol", "bolna", "chalo", "chal", "chalna", "jao", "jana", "aao", "aaja", "aana", "karo", "karna", "milna", "mila", "milo", "ruk", "ruko", "rukna", "jeena", "jee", "nach", "nachle", "gaana", "gana", "bajao", "baja", "dikha", "dikhao", "dikhaa", "parda", "nakhre", "mein", "pe", "par", "wala", "wali", "wale", "bhi", "aur", "lekin", "magar", "phir", "abhi", "kabhi", "hamesha", "humesha", "sirf", "bas", "bahut", "bohot", "zyada", "kuch", "sab", "koi", "kaun", "yahan", "wahan", "udhar", "idhar", "accha", "acha", "theek", "bilkul", "zaroor", "sach", "jhooth", "alag", "saath", "mann", "mehboob", "dilbar", "sanam", "jannat", "husn", "jaane", "jaana", "toh", "se", "ke", "ka", "ki", "ko", "ne", "tu", "hum", "tum", "main", "yeh", "woh", "ab", "jab", "tab", "agar", "mat", "ya"] },
-    { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
-  ];
-  var LATIN_LANGUAGE_WORD_SETS = LATIN_LANGUAGE_WORDS.map((lang) => ({
-    code: lang.code,
-    words: new Set(lang.words)
-  }));
-  function getSampleIndices(length) {
-    if (length <= 0)
-      return [];
-    const indices = /* @__PURE__ */ new Set();
-    for (let i = 0; i < Math.min(5, length); i++) {
-      indices.add(i);
-    }
-    const middle = Math.floor(length / 2);
-    for (let i = middle - 2; i <= middle + 2; i++) {
-      if (i >= 0 && i < length) {
-        indices.add(i);
-      }
-    }
-    for (let i = Math.max(0, length - 5); i < length; i++) {
-      indices.add(i);
-    }
-    return [...indices].sort((a, b) => a - b);
-  }
-  function buildSampleText(lines) {
-    const indices = getSampleIndices(lines.length);
-    return indices.map((i) => lines[i]).filter((line) => line && line.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(line.trim())).join(" ");
-  }
-  function tokenizeWords(text) {
-    const matches = text.toLowerCase().match(/[\p{L}']+/gu);
-    if (!matches)
-      return [];
-    return matches.filter((word) => word.length > 1);
-  }
-  function detectLanguageHeuristic(text) {
-    if (!text || text.length < 10) {
-      return null;
-    }
-    const normalizedText = text.trim();
-    let totalChars = 0;
-    const scriptCounts = {};
-    for (const char of normalizedText) {
-      if (/\s/.test(char))
-        continue;
-      totalChars++;
-      for (const lang of LANGUAGE_PATTERNS) {
-        if (lang.scripts.test(char)) {
-          scriptCounts[lang.code] = (scriptCounts[lang.code] || 0) + 1;
-        }
-      }
-    }
-    if (totalChars === 0)
-      return null;
-    const dominantScript = Object.entries(scriptCounts).map(([code, count]) => ({ code, count, ratio: count / totalChars })).sort((a, b) => b.count - a.count)[0];
-    if (dominantScript && dominantScript.ratio > 0.2) {
-      if (dominantScript.code === "zh") {
-        const japaneseKana = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
-        if (japaneseKana > 0) {
-          return { code: "ja", confidence: 0.9 };
-        }
-      }
-      return {
-        code: dominantScript.code,
-        confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)
-      };
-    }
-    const words = tokenizeWords(normalizedText);
-    if (words.length < 3) {
-      return null;
-    }
-    const wordCounts = {};
-    let maxCount = 0;
-    let maxLang = "en";
-    for (const lang of LATIN_LANGUAGE_WORD_SETS) {
-      let count = 0;
-      for (const word of words) {
-        if (lang.words.has(word)) {
-          count++;
-        }
-      }
-      wordCounts[lang.code] = count;
-      if (count > maxCount) {
-        maxCount = count;
-        maxLang = lang.code;
-      }
-    }
-    const matchRatio = maxCount / words.length;
-    const minMatchCount = words.length <= 6 ? 2 : 3;
-    if (matchRatio > 0.12 && maxCount >= minMatchCount) {
-      const sortedCounts = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
-      if (sortedCounts.length < 2 || sortedCounts[1][1] === 0) {
-        return { code: maxLang, confidence: Math.min(0.75, 0.35 + matchRatio) };
-      }
-      const disambiguationRatio = words.length <= 6 ? 1.3 : 1.5;
-      if (sortedCounts[0][1] >= sortedCounts[1][1] * disambiguationRatio) {
-        return { code: maxLang, confidence: Math.min(0.8, 0.4 + matchRatio) };
-      }
-    }
-    return null;
-  }
-  async function detectLanguageViaAPI(text) {
-    const sample = text.slice(0, 500);
-    const params = new URLSearchParams({
-      client: "gtx",
-      sl: "auto",
-      tl: "en",
-      dt: "t",
-      q: sample
-    });
-    const url = `https://translate.googleapis.com/translate_a/single?${params.toString()}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Language detection API error: ${response.status}`);
-    }
-    const data = await response.json();
-    const detectedLang = typeof data?.[2] === "string" ? data[2] : "unknown";
-    const confidence = detectedLang !== "unknown" ? 0.9 : 0.5;
-    return { code: detectedLang, confidence };
-  }
-  async function detectLyricsLanguage(lyrics, trackUri) {
-    if (trackUri) {
-      const cached = detectionCache.get(trackUri);
-      if (cached && Date.now() - cached.timestamp < DETECTION_CACHE_TTL) {
-        debug(`Language detection cache hit: ${cached.language}`);
-        return { code: cached.language, confidence: cached.confidence };
-      }
-    }
-    const sampleText = buildSampleText(lyrics);
-    if (sampleText.length < 20) {
-      return { code: "unknown", confidence: 0 };
-    }
-    const heuristic = detectLanguageHeuristic(sampleText);
-    if (heuristic && heuristic.confidence >= 0.7) {
-      debug(`Heuristic language detection: ${heuristic.code} (${(heuristic.confidence * 100).toFixed(0)}%)`);
-      if (trackUri) {
-        detectionCache.set(trackUri, {
-          language: heuristic.code,
-          confidence: heuristic.confidence,
-          timestamp: Date.now()
-        });
-      }
-      return heuristic;
-    }
-    try {
-      const apiResult = await detectLanguageViaAPI(sampleText);
-      debug(`API language detection: ${apiResult.code} (${(apiResult.confidence * 100).toFixed(0)}%)`);
-      if (trackUri) {
-        detectionCache.set(trackUri, {
-          language: apiResult.code,
-          confidence: apiResult.confidence,
-          timestamp: Date.now()
-        });
-      }
-      return apiResult;
-    } catch (error2) {
-      warn("API language detection failed:", error2);
-      return heuristic || { code: "unknown", confidence: 0 };
-    }
-  }
-  function isSameLanguage(source, target) {
-    if (!source || source === "unknown")
-      return false;
-    const normalizeCode = (code) => {
-      return code.toLowerCase().split("-")[0].split("_")[0];
-    };
-    return normalizeCode(source) === normalizeCode(target);
-  }
-  function assessMixedLanguageContent(lines, targetLanguage) {
-    let nonTargetCount = 0;
-    let uncertainCount = 0;
-    let targetCount = 0;
-    const targetBase = targetLanguage.toLowerCase().split("-")[0].split("_")[0];
-    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "el"].includes(targetBase);
-    for (const line of lines) {
-      const trimmed = (line || "").trim();
-      if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed))
-        continue;
-      if (targetIsLatin) {
-        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
-        if (hasNonLatin) {
-          nonTargetCount++;
-          continue;
-        }
-      }
-      const detected = detectLanguageHeuristic(trimmed);
-      if (!detected) {
-        if (trimmed.length >= 10) {
-          uncertainCount++;
-        }
-        continue;
-      }
-      if (isSameLanguage(detected.code, targetLanguage)) {
-        targetCount++;
-      } else if (detected.confidence >= 0.65) {
-        nonTargetCount++;
-      } else {
-        uncertainCount++;
-      }
-    }
-    const totalChecked = targetCount + nonTargetCount + uncertainCount;
-    if (totalChecked === 0)
-      return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
-    const hasMixedContent = nonTargetCount >= 2 || nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3;
-    return { hasMixedContent, nonTargetCount, uncertainCount };
-  }
-  async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
-    const nonEmptyLyrics = lyrics.filter((l) => l && l.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(l.trim()));
-    if (nonEmptyLyrics.length === 0) {
-      return { skip: false };
-    }
-    const sampleText = buildSampleText(nonEmptyLyrics);
-    const quickHeuristic = detectLanguageHeuristic(sampleText);
-    if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
-      if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
-        const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
-        if (mixedCheck.hasMixedContent) {
-          debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
-          return { skip: false, detectedLanguage: quickHeuristic.code };
-        }
-        return {
-          skip: true,
-          reason: `Lyrics already in ${quickHeuristic.code.toUpperCase()}`,
-          detectedLanguage: quickHeuristic.code
-        };
-      }
-      return { skip: false, detectedLanguage: quickHeuristic.code };
-    }
-    const detection = await detectLyricsLanguage(lyrics, trackUri);
-    if (detection.code === "unknown" || detection.confidence < 0.6) {
-      return { skip: false };
-    }
-    if (isSameLanguage(detection.code, targetLanguage)) {
-      const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
-      if (mixedCheck.hasMixedContent) {
-        debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
-        return { skip: false, detectedLanguage: detection.code };
-      }
-      return {
-        skip: true,
-        reason: `Lyrics already in ${detection.code.toUpperCase()}`,
-        detectedLanguage: detection.code
-      };
-    }
-    return {
-      skip: false,
-      detectedLanguage: detection.code
-    };
-  }
-
   // src/utils/translator.ts
+  init_languageDetection();
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
@@ -1797,6 +1890,7 @@ ${text}`
   }
 
   // src/utils/lyricsFetcher.ts
+  init_debug();
   var SPICY_LYRICS_API = "https://api.spicylyrics.org";
   async function getSpotifyAccessToken() {
     try {
@@ -2105,6 +2199,8 @@ ${text}`
   }
 
   // src/utils/translationOverlay.ts
+  init_debug();
+  init_storage();
   var currentConfig = {
     mode: "replace",
     opacity: 0.85,
@@ -2313,32 +2409,20 @@ ${text}`
       }
       replaceEl.addEventListener("click", (e) => {
         e.preventDefault();
-        e.stopPropagation();
-        let seekTarget = replaceEl.dataset.startTime;
         const clickedWord = e.target?.closest?.(".slt-replace-word, .slt-vocab-pair");
         if (clickedWord) {
-          seekTarget = clickedWord.dataset.startTime || seekTarget;
-        }
-        if (seekTarget !== void 0 && seekTarget !== "") {
-          const timeSec = parseFloat(seekTarget);
-          if (!isNaN(timeSec) && timeSec >= 0) {
-            const timeMs = Math.round(timeSec * 1e3);
-            try {
-              const Spicetify2 = globalThis.Spicetify;
-              if (Spicetify2?.Player?.origin?.seekTo) {
-                Spicetify2.Player.origin.seekTo(timeMs);
-              } else if (Spicetify2?.Player?.seek) {
-                Spicetify2.Player.seek(timeMs);
-              }
-            } catch (err) {
-              warn("Failed to seek:", err);
-            }
+          const originalIndex = parseInt(clickedWord.dataset.originalIndex || "-1", 10);
+          const originalWords = getWordUnits(line);
+          if (originalIndex >= 0 && originalIndex < originalWords.length) {
+            originalWords[originalIndex].click();
             return;
           }
         }
-        const firstWord = line.querySelector(".word:not(.dot)") || line.querySelector(".letterGroup");
-        if (firstWord) {
-          firstWord.click();
+        const firstClickable = line.querySelector(".word:not(.dot)") || line.querySelector(".letterGroup");
+        if (firstClickable) {
+          firstClickable.click();
+        } else {
+          line.click();
         }
       });
       if (isLineActive(line)) {
@@ -4166,7 +4250,6 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
 }
 
 
-/* Hide quality indicators when toggled off */
 body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
 }
@@ -4175,9 +4258,6 @@ body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
     display: none !important;
 }
 
-/* Translation Quality Indicator */
-
-/* Lines that hold the indicator need relative positioning */
 .slt-replace-line,
 .slt-interleaved-translation,
 .slt-sync-translation {
@@ -4212,7 +4292,6 @@ body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
     cursor: default;
 }
 
-/* Show the dot on active/hover line */
 .slt-replace-line:hover .slt-quality-indicator,
 .slt-interleaved-translation:hover .slt-quality-indicator,
 .slt-sync-translation:hover .slt-quality-indicator,
@@ -4226,7 +4305,6 @@ body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
     pointer-events: auto;
 }
 
-/* Expand label on indicator hover */
 .slt-quality-indicator:hover {
     opacity: 0.85 !important;
     gap: 4px;
@@ -4268,7 +4346,6 @@ body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
     -webkit-background-clip: border-box !important;
 }
 
-/* Sidebar: smaller quality indicators */
 body.SpicySidebarLyrics__Active .slt-quality-indicator {
     font-size: 7px;
     padding: 1px 3px;
@@ -4280,13 +4357,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     height: 4px;
 }
 
-/* PiP: adjust size */
 .spicy-pip-wrapper .slt-quality-indicator {
     font-size: 7px;
     padding: 1px 4px;
 }
 
-/* \u2500\u2500\u2500 Vocabulary / Learning Mode \u2500\u2500\u2500 */
 .slt-vocab-line {
     display: flex;
     flex-wrap: wrap;
@@ -4379,7 +4454,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     color: rgba(255, 255, 255, 0.65);
 }
 
-/* Active line: reveal originals */
 .active .slt-vocab-original,
 .Active .slt-vocab-original,
 .slt-interleaved-translation.active .slt-vocab-original {
@@ -4387,7 +4461,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     color: rgba(255, 255, 255, 0.5);
 }
 
-/* PiP vocab adjustments */
 .spicy-pip-wrapper .slt-vocab-pair {
     padding: 1px 3px 2px;
     border-bottom-width: 1px;
@@ -4401,7 +4474,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     font-size: 0.55em;
 }
 
-/* Reduce motion for accessibility */
 @media (prefers-reduced-motion: reduce) {
     .slt-vocab-original {
         filter: none !important;
@@ -4419,7 +4491,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     document.head.appendChild(styleElement);
   }
 
+  // src/utils/settings.ts
+  init_storage();
+  init_debug();
+
   // src/utils/updater.ts
+  init_storage();
+  init_debug();
   var getLoadedVersion = () => {
     const metadata = window._spicy_lyric_translator_metadata;
     if (metadata?.LoadedVersion) {
@@ -5058,7 +5136,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     </svg>`
   };
 
+  // src/utils/core.ts
+  init_storage();
+
   // src/utils/connectivity.ts
+  init_storage();
   var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
   var CLIENT_ID_KEY = "client-id";
   function getOrCreateClientId() {
@@ -5553,9 +5635,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/utils/core.ts
+  init_languageDetection();
+  init_debug();
   var lyricsObserver = null;
   var translateDebounceTimer = null;
   var viewModeIntervalId = null;
+  var romanizationToggleListener = null;
+  var lastKnownRomanizationState = false;
   function getPIPWindow2() {
     try {
       const docPiP = globalThis.documentPictureInPicture;
@@ -5564,6 +5650,26 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     } catch (e) {
     }
     return null;
+  }
+  function isRomanizationActive() {
+    try {
+      const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
+      if (spicetifyStorage?.get) {
+        const val = spicetifyStorage.get("romanization");
+        if (val === "true")
+          return true;
+        if (val === "false")
+          return false;
+      }
+    } catch (e) {
+    }
+    try {
+      const val = localStorage.getItem("romanization");
+      if (val === "true")
+        return true;
+    } catch (e) {
+    }
+    return false;
   }
   function isSpicyLyricsOpen() {
     if (document.querySelector("#SpicyLyricsPage") || document.querySelector(".spicy-pip-wrapper #SpicyLyricsPage") || document.querySelector(".Cinema--Container") || document.querySelector(".spicy-lyrics-cinema") || document.body.classList.contains("SpicySidebarLyrics__Active")) {
@@ -5843,9 +5949,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return;
       }
       const currentTrackUri2 = getCurrentTrackUri();
-      const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri2 || void 0);
-      if (preApiSkipCheck.detectedLanguage) {
-        state.detectedLanguage = preApiSkipCheck.detectedLanguage;
+      const romanizationOn = isRomanizationActive();
+      if (romanizationOn) {
+        debug("Romanization is active \u2014 skipping pre-API language detection on DOM text");
+      } else {
+        const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri2 || void 0);
+        if (preApiSkipCheck.detectedLanguage) {
+          state.detectedLanguage = preApiSkipCheck.detectedLanguage;
+        }
       }
       let apiLineTexts = null;
       let apiLanguage;
@@ -5875,6 +5986,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         debug(`API: ${apiLineTexts.length} total, ${apiVocalTexts.length} vocal (DOM: ${lines.length})`);
       }
       let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
+      if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
+        debug("Romanization active: forcing API text for translation (API vocal: " + apiVocalTexts.length + ", DOM: " + lines.length + ")");
+        useApiLines = true;
+      }
       if (!useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
         for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
           await new Promise((resolve) => setTimeout(resolve, 600));
@@ -5937,7 +6052,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return;
       }
       const detectedLang = apiLanguage || state.detectedLanguage || void 0;
-      const skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
+      let skipCheck;
+      if (romanizationOn && apiLanguage) {
+        const apiLangSame = (await Promise.resolve().then(() => (init_languageDetection(), languageDetection_exports))).isSameLanguage(apiLanguage, state.targetLanguage);
+        skipCheck = apiLangSame ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage } : { skip: false, detectedLanguage: apiLanguage };
+        debug("Romanization active: using API language (" + apiLanguage + ") for skip check instead of text analysis");
+      } else {
+        skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
+      }
       if (skipCheck.detectedLanguage)
         state.detectedLanguage = skipCheck.detectedLanguage;
       let translations;
@@ -6178,6 +6300,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (viewControls)
       insertTranslateButton();
     setupLyricsObserver();
+    setupRomanizationWatcher();
     const pipWindow = getPIPWindow2();
     if (pipWindow) {
       setTimeout(() => {
@@ -6206,6 +6329,41 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       lyricsObserver.disconnect();
       lyricsObserver = null;
     }
+    cleanupRomanizationWatcher();
+  }
+  function setupRomanizationWatcher() {
+    cleanupRomanizationWatcher();
+    lastKnownRomanizationState = isRomanizationActive();
+    const handler = () => {
+      setTimeout(() => {
+        const newState = isRomanizationActive();
+        if (newState !== lastKnownRomanizationState) {
+          lastKnownRomanizationState = newState;
+          debug("Romanization toggled to: " + (newState ? "ON" : "OFF"));
+          if (state.isEnabled && !state.isTranslating) {
+            state.lastTranslatedSongUri = null;
+            state.translatedLyrics.clear();
+            state._translationsByIndex = void 0;
+            removeTranslations();
+            waitForLyricsAndTranslate(10, 400);
+          }
+        }
+      }, 300);
+    };
+    const btn = document.querySelector("#RomanizationToggle");
+    if (btn) {
+      btn.addEventListener("click", handler);
+      romanizationToggleListener = handler;
+    }
+  }
+  function cleanupRomanizationWatcher() {
+    if (romanizationToggleListener) {
+      const btn = document.querySelector("#RomanizationToggle");
+      if (btn) {
+        btn.removeEventListener("click", romanizationToggleListener);
+      }
+      romanizationToggleListener = null;
+    }
   }
   function setupViewModeObserver() {
     if (viewModeIntervalId)
@@ -6215,6 +6373,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (isOpen) {
         if (!document.querySelector("#TranslateToggle")) {
           insertTranslateButton();
+        }
+        if (!romanizationToggleListener && document.querySelector("#RomanizationToggle")) {
+          setupRomanizationWatcher();
         }
         const pipWindow = getPIPWindow2();
         if (pipWindow && !pipWindow.document.querySelector("#TranslateToggle")) {
@@ -7883,6 +8044,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/utils/initialize.ts
+  init_debug();
   async function initialize() {
     while (typeof Spicetify === "undefined" || !Spicetify.Platform) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -7971,6 +8133,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/app.ts
+  init_debug();
   initialize().catch(error);
   var app_default = initialize;
   return __toCommonJS(app_exports);
