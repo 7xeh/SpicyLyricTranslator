@@ -22,7 +22,6 @@ let lyricsObserver: MutationObserver | null = null;
 let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let viewModeIntervalId: ReturnType<typeof setInterval> | null = null;
 let romanizationToggleListener: (() => void) | null = null;
-let lastKnownRomanizationState: boolean = false;
 
 function getPIPWindow(): Window | null {
     try {
@@ -33,24 +32,34 @@ function getPIPWindow(): Window | null {
 }
 
 export function isRomanizationActive(): boolean {
+    const page = document.querySelector('#SpicyLyricsPage');
+    if (!page?.classList.contains('Lyrics_RomanizationAvailable')) {
+        return false;
+    }
+
+    const btn = document.querySelector('#RomanizationToggle');
+    if (btn) {
+        if (btn.classList.contains('active')) return true;
+    }
+
     try {
         const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
         if (spicetifyStorage?.get) {
-            const val = spicetifyStorage.get('romanization');
+            const val = spicetifyStorage.get('SpicyLyrics:romanization');
             if (val === 'true') return true;
             if (val === 'false') return false;
         }
     } catch (e) {}
-    try {
-        const val = localStorage.getItem('romanization');
-        if (val === 'true') return true;
-    } catch (e) {}
-    return false;
-}
 
-function isRomanizationAvailable(): boolean {
-    const page = document.querySelector('#SpicyLyricsPage');
-    return !!page?.classList.contains('Lyrics_RomanizationAvailable');
+    try {
+        for (const key of ['SpicyLyrics:romanization', 'romanization']) {
+            const val = localStorage.getItem(key);
+            if (val === 'true') return true;
+            if (val === 'false') return false;
+        }
+    } catch (e) {}
+
+    return false;
 }
 
 export function isSpicyLyricsOpen(): boolean {
@@ -432,12 +441,34 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
         
         let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
-
-        if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
-            debug('Romanization active: forcing API text for translation (API vocal: ' + apiVocalTexts.length + ', DOM: ' + lines.length + ')');
-            useApiLines = true;
-        }
         
+        if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
+            for (let retryAttempt = 0; retryAttempt < 4; retryAttempt++) {
+                await new Promise(resolve => setTimeout(resolve, 400));
+                lines = getLyricsLines();
+                if (lines.length === 0) break;
+                
+                domLineTexts = [];
+                lines.forEach(line => domLineTexts.push(extractLineText(line)));
+                
+                if (apiVocalTexts.length === lines.length) {
+                    useApiLines = true;
+                    debug(`Romanization: DOM count matches API vocal count (${lines.length}) on retry ${retryAttempt + 1}`);
+                    break;
+                }
+            }
+            
+            if (!useApiLines && apiVocalTexts.length > 0 && lines.length > 0) {
+                debug(`Romanization: API vocal (${apiVocalTexts.length}) vs DOM (${lines.length}) — using API text mapped to DOM count`);
+                useApiLines = true;
+                const domCount = lines.length;
+                if (apiVocalTexts.length > domCount) {
+                    apiVocalTexts = apiVocalTexts.slice(0, domCount);
+                    if (apiVocalLineData) apiVocalLineData = apiVocalLineData.slice(0, domCount);
+                }
+            }
+        }
+
         if (!useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
             for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
                 await new Promise(resolve => setTimeout(resolve, 600));
@@ -511,7 +542,7 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         let skipCheck: { skip: boolean; reason?: string; detectedLanguage?: string };
         if (romanizationOn && apiLanguage) {
-            const apiLangSame = (await import('./languageDetection')).isSameLanguage(apiLanguage, state.targetLanguage);
+            const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
             skipCheck = apiLangSame
                 ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
                 : { skip: false, detectedLanguage: apiLanguage };
@@ -830,24 +861,20 @@ export function onSpicyLyricsClose(): void {
 
 function setupRomanizationWatcher(): void {
     cleanupRomanizationWatcher();
-    lastKnownRomanizationState = isRomanizationActive();
 
     const handler = () => {
         setTimeout(() => {
-            const newState = isRomanizationActive();
-            if (newState !== lastKnownRomanizationState) {
-                lastKnownRomanizationState = newState;
-                debug('Romanization toggled to: ' + (newState ? 'ON' : 'OFF'));
+            debug('Romanization toggle clicked — refreshing translations');
 
-                if (state.isEnabled && !state.isTranslating) {
-                    state.lastTranslatedSongUri = null;
-                    state.translatedLyrics.clear();
-                    state._translationsByIndex = undefined;
-                    removeTranslations();
-                    waitForLyricsAndTranslate(10, 400);
-                }
+            if (state.isEnabled && !state.isTranslating) {
+                state.lastTranslatedSongUri = null;
+                state.translatedLyrics.clear();
+                state._translationsByIndex = undefined;
+                clearLyricsCache();
+                removeTranslations();
+                waitForLyricsAndTranslate(15, 500);
             }
-        }, 300);
+        }, 600);
     };
 
     const btn = document.querySelector('#RomanizationToggle');

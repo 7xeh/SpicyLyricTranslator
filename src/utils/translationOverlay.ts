@@ -254,7 +254,6 @@ function applyReplaceMode(doc: Document): void {
         replaceEl.addEventListener('click', (e) => {
             e.preventDefault();
             
-            // Map click to corresponding original word for word-level seek precision
             const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word, .slt-vocab-pair');
             if (clickedWord) {
                 const originalIndex = parseInt((clickedWord as HTMLElement).dataset.originalIndex || '-1', 10);
@@ -265,7 +264,6 @@ function applyReplaceMode(doc: Document): void {
                 }
             }
             
-            // Fall back to clicking the first word or the line itself
             const firstClickable = line.querySelector('.word:not(.dot)') || line.querySelector('.letterGroup');
             if (firstClickable) {
                 (firstClickable as HTMLElement).click();
