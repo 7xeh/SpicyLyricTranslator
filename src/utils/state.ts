@@ -31,6 +31,7 @@ export interface ExtensionState {
     syncWordHighlight: boolean;
     showQualityIndicator: boolean;
     vocabularyMode: boolean;
+    hideConnectionIndicator: boolean;
     _translationsByIndex?: Map<number, string>;
     _qualityByIndex?: Map<number, TranslationQualityMeta>;
 }
@@ -57,5 +58,6 @@ export const state: ExtensionState = {
     syncWordHighlight: storage.get('sync-word-highlight') !== 'false',
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',
     vocabularyMode: storage.get('vocabulary-mode') === 'true',
+    hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
     _qualityByIndex: undefined
 };

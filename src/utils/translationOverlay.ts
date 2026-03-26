@@ -24,9 +24,26 @@ let translationMap: Map<number, string> = new Map();
 let lineTimingData: LyricLineData[] = [];
 let qualityMap: Map<number, TranslationQualityMeta> = new Map();
 
-let cachedLines: NodeListOf<Element> | null = null;
-let cachedTranslationMap: Map<number, HTMLElement> | null = null;
-let lastActiveIndex = -1;
+interface DocCache {
+    lines: NodeListOf<Element> | null;
+    translationMap: Map<number, HTMLElement> | null;
+    lastActiveIndex: number;
+}
+
+const docCacheMap = new WeakMap<Document, DocCache>();
+
+function getDocCache(doc: Document): DocCache {
+    let cache = docCacheMap.get(doc);
+    if (!cache) {
+        cache = { lines: null, translationMap: null, lastActiveIndex: -1 };
+        docCacheMap.set(doc, cache);
+    }
+    return cache;
+}
+
+function resetDocCache(doc: Document): void {
+    docCacheMap.set(doc, { lines: null, translationMap: null, lastActiveIndex: -1 });
+}
 
 function getPIPWindow(): Window | null {
     try {
@@ -182,9 +199,7 @@ function isLineActive(line: Element): boolean {
 }
 
 function applyReplaceMode(doc: Document): void {
-    cachedLines = null;
-    cachedTranslationMap = null;
-    lastActiveIndex = -1;
+    resetDocCache(doc);
 
     const lines = getLyricLines(doc);
     
@@ -623,9 +638,7 @@ function fallbackToContinuousMultilineGradient(
 }
 
 function applyInterleavedMode(doc: Document): void {
-    cachedLines = null;
-    cachedTranslationMap = null;
-    lastActiveIndex = -1;
+    resetDocCache(doc);
 
     try {
         const lines = getLyricLines(doc);
@@ -1149,38 +1162,40 @@ function onActiveLineChanged(doc: Document): void {
     
     try {
         if (currentConfig.mode === 'interleaved' || currentConfig.mode === 'replace') {
-            if (!cachedLines) {
-                cachedLines = getLyricLines(doc);
+            const cache = getDocCache(doc);
+
+            if (!cache.lines) {
+                cache.lines = getLyricLines(doc);
             }
             
-            if (!cachedLines || cachedLines.length === 0) return;
+            if (!cache.lines || cache.lines.length === 0) return;
 
-            if (!cachedTranslationMap) {
-                cachedTranslationMap = new Map();
+            if (!cache.translationMap) {
+                cache.translationMap = new Map();
                 const selector = currentConfig.mode === 'replace' ? '.slt-replace-line' : '.slt-interleaved-translation';
                 const translationEls = doc.querySelectorAll(selector);
                 translationEls.forEach(el => {
                     const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
-                    if (idx >= 0) cachedTranslationMap!.set(idx, el as HTMLElement);
+                    if (idx >= 0) cache.translationMap!.set(idx, el as HTMLElement);
                 });
             }
 
             let currentActiveIndex = -1;
-            for (let i = 0; i < cachedLines.length; i++) {
-                if (isLineActive(cachedLines[i])) {
+            for (let i = 0; i < cache.lines.length; i++) {
+                if (isLineActive(cache.lines[i])) {
                     currentActiveIndex = i;
                     break;
                 }
             }
 
-            if (currentActiveIndex !== lastActiveIndex) {
-                if (lastActiveIndex !== -1) {
-                    const oldEl = cachedTranslationMap.get(lastActiveIndex);
+            if (currentActiveIndex !== cache.lastActiveIndex) {
+                if (cache.lastActiveIndex !== -1) {
+                    const oldEl = cache.translationMap.get(cache.lastActiveIndex);
                     if (oldEl) oldEl.classList.remove('active');
                 }
 
                 if (currentActiveIndex !== -1) {
-                    const newEl = cachedTranslationMap.get(currentActiveIndex);
+                    const newEl = cache.translationMap.get(currentActiveIndex);
                     if (newEl) {
                         newEl.classList.add('active');
                         if (currentConfig.mode === 'replace') {
@@ -1191,7 +1206,7 @@ function onActiveLineChanged(doc: Document): void {
                     }
                 }
 
-                lastActiveIndex = currentActiveIndex;
+                cache.lastActiveIndex = currentActiveIndex;
             }
         }
     } catch (err) { }
@@ -1217,6 +1232,15 @@ function syncLoop(): void {
             try {
                 const pipDoc = pipWindow.document;
                 if (pipDoc && pipDoc.body) {
+                    ensurePIPStyles(pipDoc);
+
+                    if (translationMap.size > 0) {
+                        const hasTranslations = pipDoc.querySelector('.slt-replace-line, .slt-interleaved-translation');
+                        if (!hasTranslations) {
+                            renderTranslations(pipDoc);
+                        }
+                    }
+
                     onActiveLineChanged(pipDoc);
                     updateWordSyncStates(pipDoc);
                     syncBlurToTranslations(pipDoc);
@@ -1300,9 +1324,7 @@ function setupActiveLineObserver(doc: Document): void {
                 }
 
                 if (structureChanged) {
-                    cachedLines = null;
-                    cachedTranslationMap = null;
-                    lastActiveIndex = -1;
+                    resetDocCache(doc);
                 }
                 
                 if (activeChanged) {
@@ -1353,6 +1375,7 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
     
     const pipWindow = getPIPWindow();
     if (pipWindow) {
+        ensurePIPStyles(pipWindow.document);
         initOverlayContainer(pipWindow.document);
         setupActiveLineObserver(pipWindow.document);
         if (translationMap.size > 0) {
@@ -1571,12 +1594,23 @@ function createQualityIndicator(doc: Document, index: number): HTMLElement | nul
     return indicator;
 }
 
+function ensurePIPStyles(pipDoc: Document): void {
+    if (pipDoc.getElementById('slt-pip-styles')) return;
+    const mainStyle = document.getElementById('spicy-lyric-translator-styles');
+    if (mainStyle) {
+        const clone = mainStyle.cloneNode(true) as HTMLElement;
+        clone.id = 'slt-pip-styles';
+        pipDoc.head.appendChild(clone);
+    }
+}
+
 export function initPIPOverlay(): void {
     if (!isOverlayEnabled) return;
     
     const pipWindow = getPIPWindow();
     if (!pipWindow) return;
     
+    ensurePIPStyles(pipWindow.document);
     initOverlayContainer(pipWindow.document);
     setupActiveLineObserver(pipWindow.document);
     

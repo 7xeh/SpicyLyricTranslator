@@ -813,14 +813,14 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
 }
 
 
-/* Hide quality indicators when toggled off */
 body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
 }
 
-/* Translation Quality Indicator */
+body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
+    display: none !important;
+}
 
-/* Lines that hold the indicator need relative positioning */
 .slt-replace-line,
 .slt-interleaved-translation,
 .slt-sync-translation {
@@ -855,7 +855,6 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     cursor: default;
 }
 
-/* Show the dot on active/hover line */
 .slt-replace-line:hover .slt-quality-indicator,
 .slt-interleaved-translation:hover .slt-quality-indicator,
 .slt-sync-translation:hover .slt-quality-indicator,
@@ -869,7 +868,6 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     pointer-events: auto;
 }
 
-/* Expand label on indicator hover */
 .slt-quality-indicator:hover {
     opacity: 0.85 !important;
     gap: 4px;
@@ -911,7 +909,6 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     -webkit-background-clip: border-box !important;
 }
 
-/* Sidebar: smaller quality indicators */
 body.SpicySidebarLyrics__Active .slt-quality-indicator {
     font-size: 7px;
     padding: 1px 3px;
@@ -923,13 +920,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     height: 4px;
 }
 
-/* PiP: adjust size */
 .spicy-pip-wrapper .slt-quality-indicator {
     font-size: 7px;
     padding: 1px 4px;
 }
 
-/* ─── Vocabulary / Learning Mode ─── */
 .slt-vocab-line {
     display: flex;
     flex-wrap: wrap;
@@ -1022,7 +1017,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     color: rgba(255, 255, 255, 0.65);
 }
 
-/* Active line: reveal originals */
 .active .slt-vocab-original,
 .Active .slt-vocab-original,
 .slt-interleaved-translation.active .slt-vocab-original {
@@ -1030,7 +1024,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     color: rgba(255, 255, 255, 0.5);
 }
 
-/* PiP vocab adjustments */
 .spicy-pip-wrapper .slt-vocab-pair {
     padding: 1px 3px 2px;
     border-bottom-width: 1px;
@@ -1044,7 +1037,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     font-size: 0.55em;
 }
 
-/* Reduce motion for accessibility */
 @media (prefers-reduced-motion: reduce) {
     .slt-vocab-original {
         filter: none !important;

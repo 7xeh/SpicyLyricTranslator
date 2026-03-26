@@ -168,6 +168,7 @@ var SpicyLyricTranslater = (() => {
     syncWordHighlight: storage.get("sync-word-highlight") !== "false",
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
     vocabularyMode: storage.get("vocabulary-mode") === "true",
+    hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
     _qualityByIndex: void 0
   };
 
@@ -2114,9 +2115,18 @@ ${text}`
   var translationMap = /* @__PURE__ */ new Map();
   var lineTimingData = [];
   var qualityMap = /* @__PURE__ */ new Map();
-  var cachedLines = null;
-  var cachedTranslationMap = null;
-  var lastActiveIndex = -1;
+  var docCacheMap = /* @__PURE__ */ new WeakMap();
+  function getDocCache(doc) {
+    let cache = docCacheMap.get(doc);
+    if (!cache) {
+      cache = { lines: null, translationMap: null, lastActiveIndex: -1 };
+      docCacheMap.set(doc, cache);
+    }
+    return cache;
+  }
+  function resetDocCache(doc) {
+    docCacheMap.set(doc, { lines: null, translationMap: null, lastActiveIndex: -1 });
+  }
   function getPIPWindow() {
     try {
       const docPiP = globalThis.documentPictureInPicture;
@@ -2258,9 +2268,7 @@ ${text}`
     return line.classList.contains("Active") || line.classList.contains("playing") || line.getAttribute("data-active") === "true" || line.dataset.active === "true";
   }
   function applyReplaceMode(doc) {
-    cachedLines = null;
-    cachedTranslationMap = null;
-    lastActiveIndex = -1;
+    resetDocCache(doc);
     const lines = getLyricLines(doc);
     doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
     doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
@@ -2549,9 +2557,7 @@ ${text}`
     translationEl.dataset.sltGradientMode = "continuous-multiline";
   }
   function applyInterleavedMode(doc) {
-    cachedLines = null;
-    cachedTranslationMap = null;
-    lastActiveIndex = -1;
+    resetDocCache(doc);
     try {
       const lines = getLyricLines(doc);
       if (!lines || lines.length === 0) {
@@ -2990,36 +2996,37 @@ ${text}`
     lastActiveLineUpdate = now;
     try {
       if (currentConfig.mode === "interleaved" || currentConfig.mode === "replace") {
-        if (!cachedLines) {
-          cachedLines = getLyricLines(doc);
+        const cache = getDocCache(doc);
+        if (!cache.lines) {
+          cache.lines = getLyricLines(doc);
         }
-        if (!cachedLines || cachedLines.length === 0)
+        if (!cache.lines || cache.lines.length === 0)
           return;
-        if (!cachedTranslationMap) {
-          cachedTranslationMap = /* @__PURE__ */ new Map();
+        if (!cache.translationMap) {
+          cache.translationMap = /* @__PURE__ */ new Map();
           const selector = currentConfig.mode === "replace" ? ".slt-replace-line" : ".slt-interleaved-translation";
           const translationEls = doc.querySelectorAll(selector);
           translationEls.forEach((el) => {
             const idx = parseInt(el.dataset.forLine || el.dataset.lineIndex || "-1", 10);
             if (idx >= 0)
-              cachedTranslationMap.set(idx, el);
+              cache.translationMap.set(idx, el);
           });
         }
         let currentActiveIndex = -1;
-        for (let i = 0; i < cachedLines.length; i++) {
-          if (isLineActive(cachedLines[i])) {
+        for (let i = 0; i < cache.lines.length; i++) {
+          if (isLineActive(cache.lines[i])) {
             currentActiveIndex = i;
             break;
           }
         }
-        if (currentActiveIndex !== lastActiveIndex) {
-          if (lastActiveIndex !== -1) {
-            const oldEl = cachedTranslationMap.get(lastActiveIndex);
+        if (currentActiveIndex !== cache.lastActiveIndex) {
+          if (cache.lastActiveIndex !== -1) {
+            const oldEl = cache.translationMap.get(cache.lastActiveIndex);
             if (oldEl)
               oldEl.classList.remove("active");
           }
           if (currentActiveIndex !== -1) {
-            const newEl = cachedTranslationMap.get(currentActiveIndex);
+            const newEl = cache.translationMap.get(currentActiveIndex);
             if (newEl) {
               newEl.classList.add("active");
               if (currentConfig.mode === "replace") {
@@ -3030,7 +3037,7 @@ ${text}`
               }
             }
           }
-          lastActiveIndex = currentActiveIndex;
+          cache.lastActiveIndex = currentActiveIndex;
         }
       }
     } catch (err) {
@@ -3053,6 +3060,13 @@ ${text}`
         try {
           const pipDoc = pipWindow.document;
           if (pipDoc && pipDoc.body) {
+            ensurePIPStyles(pipDoc);
+            if (translationMap.size > 0) {
+              const hasTranslations = pipDoc.querySelector(".slt-replace-line, .slt-interleaved-translation");
+              if (!hasTranslations) {
+                renderTranslations(pipDoc);
+              }
+            }
             onActiveLineChanged(pipDoc);
             updateWordSyncStates(pipDoc);
             syncBlurToTranslations(pipDoc);
@@ -3125,9 +3139,7 @@ ${text}`
             }
           }
           if (structureChanged) {
-            cachedLines = null;
-            cachedTranslationMap = null;
-            lastActiveIndex = -1;
+            resetDocCache(doc);
           }
           if (activeChanged) {
             onActiveLineChanged(doc);
@@ -3167,6 +3179,7 @@ ${text}`
     }
     const pipWindow = getPIPWindow();
     if (pipWindow) {
+      ensurePIPStyles(pipWindow.document);
       initOverlayContainer(pipWindow.document);
       setupActiveLineObserver(pipWindow.document);
       if (translationMap.size > 0) {
@@ -3285,6 +3298,16 @@ ${text}`
     }
     indicator.title = tooltipParts.join(" | ");
     return indicator;
+  }
+  function ensurePIPStyles(pipDoc) {
+    if (pipDoc.getElementById("slt-pip-styles"))
+      return;
+    const mainStyle = document.getElementById("spicy-lyric-translator-styles");
+    if (mainStyle) {
+      const clone = mainStyle.cloneNode(true);
+      clone.id = "slt-pip-styles";
+      pipDoc.head.appendChild(clone);
+    }
   }
   function getOverlayStyles() {
     return `
@@ -4148,6 +4171,10 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
 }
 
+body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
+    display: none !important;
+}
+
 /* Translation Quality Indicator */
 
 /* Lines that hold the indicator need relative positioning */
@@ -4398,7 +4425,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.3" : "0.0.0";
+    return true ? "1.9.4" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6564,6 +6591,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         notifyShareDataChanged();
       }
     ));
+    sectionContent.appendChild(createNativeToggle(
+      "slt-settings.hide-connection-indicator",
+      "Hide Connection Status",
+      storage.get("hide-connection-indicator") === "true",
+      (checked) => {
+        storage.set("hide-connection-indicator", String(checked));
+        state.hideConnectionIndicator = checked;
+        document.body.classList.toggle("slt-hide-connection-indicator", checked);
+      }
+    ));
     if (areDevToolsEnabled()) {
       sectionContent.appendChild(createNativeToggle(
         "slt-settings.debug-mode",
@@ -6986,6 +7023,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             </label>
         </div>
 
+        <div class="slt-setting-row slt-toggle-row">
+            <label for="slt-hide-connection-indicator">Hide Connection Status</label>
+            <label class="slt-toggle">
+                <input type="checkbox" id="slt-hide-connection-indicator" ${storage.get("hide-connection-indicator") === "true" ? "checked" : ""}>
+                <span class="slt-toggle-slider"></span>
+            </label>
+        </div>
+
         ${showDebugToggle ? `
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
@@ -7037,6 +7082,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const showQualityIndicatorCheckbox = container.querySelector("#slt-show-quality-indicator");
       const vocabularyModeCheckbox = container.querySelector("#slt-vocabulary-mode");
       const shareUsageDataCheckbox = container.querySelector("#slt-share-usage-data");
+      const hideConnectionIndicatorCheckbox = container.querySelector("#slt-hide-connection-indicator");
       const debugModeCheckbox = container.querySelector("#slt-debug-mode");
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
@@ -7133,6 +7179,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       shareUsageDataCheckbox?.addEventListener("change", () => {
         storage.set("share-usage-data", String(shareUsageDataCheckbox.checked));
         notifyShareDataChanged();
+      });
+      hideConnectionIndicatorCheckbox?.addEventListener("change", () => {
+        storage.set("hide-connection-indicator", String(hideConnectionIndicatorCheckbox.checked));
+        state.hideConnectionIndicator = hideConnectionIndicatorCheckbox.checked;
+        document.body.classList.toggle("slt-hide-connection-indicator", hideConnectionIndicatorCheckbox.checked);
       });
       debugModeCheckbox?.addEventListener("change", () => {
         setDebugMode(debugModeCheckbox.checked);
@@ -7846,6 +7897,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     });
     injectStyles();
     initConnectionIndicator();
+    if (state.hideConnectionIndicator) {
+      document.body.classList.add("slt-hide-connection-indicator");
+    }
     await registerSettings();
     startUpdateChecker(30 * 60 * 1e3);
     setupKeyboardShortcut();

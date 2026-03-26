@@ -37,6 +37,10 @@ export async function initialize(): Promise<void> {
     });
     injectStyles();
     initConnectionIndicator();
+
+    if (state.hideConnectionIndicator) {
+        document.body.classList.add('slt-hide-connection-indicator');
+    }
     
     await registerSettings();
     
