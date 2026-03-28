@@ -9,11 +9,14 @@
     const HOTFIX_INITIAL_DELAY_MS = 5 * 60 * 1000;
     const HOTFIX_JITTER_MS = 60 * 1000;
     
+    const TAG = '%c[SLT-Loader]';
+    const TAG_STYLE = 'color: #FF69B4; font-weight: bold;';
+
     const log = {
-        debug: (...args) => DEBUG_MODE && console.log('[SLT-Loader]', ...args),
-        info: (...args) => console.log('[SLT-Loader]', ...args),
-        warn: (...args) => console.warn('[SLT-Loader]', ...args),
-        error: (...args) => console.error('[SLT-Loader]', ...args)
+        debug: (...args) => DEBUG_MODE && console.log(TAG, TAG_STYLE, ...args),
+        info: (...args) => console.log(TAG, TAG_STYLE, ...args),
+        warn: (...args) => console.warn(TAG, TAG_STYLE, ...args),
+        error: (...args) => console.error(TAG, TAG_STYLE, ...args)
     };
 
     const storageGet = (key) => localStorage.getItem(STORAGE_PREFIX + key);
@@ -335,6 +338,7 @@
                 waitForSpicyLyrics,
                 resetSpicyLyricsCheck,
                 observer: SLT_Observer,
+                runHotfixCheck: () => runHotfixCheck(),
                 log
             }
         };

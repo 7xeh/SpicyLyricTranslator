@@ -408,6 +408,12 @@ function createNativeSettingsSection(): HTMLElement {
                 if (updateInfo?.hasUpdate) {
                     checkForUpdates(true);
                 } else {
+                    try {
+                        const metadata = (window as any)._spicy_lyric_translater_metadata;
+                        if (metadata?.utils?.runHotfixCheck) {
+                            metadata.utils.runHotfixCheck();
+                        }
+                    } catch (_) {}
                     if (btn) btn.textContent = 'Up to date!';
                     setTimeout(() => {
                         if (btn) {
@@ -970,6 +976,12 @@ function createSettingsUI(): HTMLElement {
                     Spicetify.PopupModal?.hide();
                     setTimeout(() => checkForUpdates(true), 150);
                 } else {
+                    try {
+                        const metadata = (window as any)._spicy_lyric_translater_metadata;
+                        if (metadata?.utils?.runHotfixCheck) {
+                            metadata.utils.runHotfixCheck();
+                        }
+                    } catch (_) {}
                     checkUpdatesButton.textContent = 'Up to date!';
                     setTimeout(() => {
                         checkUpdatesButton.textContent = 'Check for Updates';

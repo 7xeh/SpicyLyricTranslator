@@ -174,12 +174,13 @@ var SpicyLyricTranslater = (() => {
 
   // src/utils/debug.ts
   var debugMode = storage.get("debug-mode") === "true";
-  var PREFIX = "[SpicyLyricTranslator]";
+  var TAG = "%c[SpicyLyricTranslator]";
+  var TAG_STYLE = "color: #FF69B4; font-weight: bold;";
   function warn(...args) {
-    console.warn(PREFIX, ...args);
+    console.warn(TAG, TAG_STYLE, ...args);
   }
   function error(...args) {
-    console.error(PREFIX, ...args);
+    console.error(TAG, TAG_STYLE, ...args);
   }
 
   // src/utils/trackCache.ts
@@ -6925,6 +6926,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           if (updateInfo?.hasUpdate) {
             checkForUpdates(true);
           } else {
+            try {
+              const metadata = window._spicy_lyric_translater_metadata;
+              if (metadata?.utils?.runHotfixCheck) {
+                metadata.utils.runHotfixCheck();
+              }
+            } catch (_) {
+            }
             if (btn)
               btn.textContent = "Up to date!";
             setTimeout(() => {
@@ -7446,6 +7454,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             Spicetify.PopupModal?.hide();
             setTimeout(() => checkForUpdates(true), 150);
           } else {
+            try {
+              const metadata = window._spicy_lyric_translater_metadata;
+              if (metadata?.utils?.runHotfixCheck) {
+                metadata.utils.runHotfixCheck();
+              }
+            } catch (_) {
+            }
             checkUpdatesButton.textContent = "Up to date!";
             setTimeout(() => {
               checkUpdatesButton.textContent = "Check for Updates";
