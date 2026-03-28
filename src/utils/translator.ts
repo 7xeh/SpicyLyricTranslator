@@ -1,5 +1,5 @@
 import storage from './storage';
-import { debug, warn, error as logError, info } from './debug';
+import { warn, error as logError } from './debug';
 import { 
     getTrackCache, 
     setTrackCache, 
@@ -207,7 +207,6 @@ async function retryWithBackoff<T>(
                     baseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
                     RATE_LIMIT.maxDelayMs
                 );
-                debug(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
@@ -228,7 +227,6 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         if (apiKeys.openaiModel !== undefined) openaiModel = apiKeys.openaiModel;
         if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
     }
-    info(`API preference set to: ${api}${api === 'custom' ? ` (${customUrl})` : ''}`);
 }
 
 export function getPreferredApi(): { api: ApiPreference; customUrl: string } {
@@ -368,7 +366,6 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
             if (isSuspiciousMixedLineTranslation(text, normalized)) {
                 delete cache[key];
                 storage.setJSON('translation-cache', cache);
-                debug(`Invalidated mixed-line cache for ${targetLang}: ${text.slice(0, 40)}`);
                 return null;
             }
 
@@ -377,7 +374,6 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
                 if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
                     delete cache[key];
                     storage.setJSON('translation-cache', cache);
-                    debug(`Invalidated stale line cache for ${targetLang}: ${text.slice(0, 40)}`);
                     return null;
                 }
             }
@@ -1025,7 +1021,6 @@ export async function translateLyrics(
         if (trackCache && trackCache.lines.length === lines.length) {
             if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
                 if (!shouldInvalidateTrackCacheForMixedContent(lines, trackCache.lines, targetLang)) {
-                    debug(`Full track cache hit: ${currentTrackUri} (${trackCache.lines.length} lines)`);
                     return lines.map((line, index) => ({
                         originalText: line,
                         translatedText: trackCache.lines[index] || line,
@@ -1037,10 +1032,8 @@ export async function translateLyrics(
                 }
 
                 deleteTrackCache(currentTrackUri, targetLang);
-                debug(`Invalidated mixed-content stale track cache for ${currentTrackUri}:${targetLang}`);
             } else {
                 deleteTrackCache(currentTrackUri, targetLang);
-                debug(`Invalidated stale track cache for ${currentTrackUri}:${targetLang}`);
             }
         }
     }
@@ -1079,7 +1072,6 @@ export async function translateLyrics(
     });
     
     if (uncachedLines.length === 0) {
-        debug('All lines found in cache');
         const finalResults = lines.map((_, index) => cachedResults.get(index)!);
         
         if (currentTrackUri) {
@@ -1089,8 +1081,6 @@ export async function translateLyrics(
         
         return finalResults;
     }
-    
-    debug(`${cachedResults.size} cached, ${uncachedLines.length} to translate`);
     
     let detectedLang = detectedSourceLang || 'auto';
     

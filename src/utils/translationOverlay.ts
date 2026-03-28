@@ -1,4 +1,4 @@
-import { debug, warn } from './debug';
+import { warn } from './debug';
 import type { LyricLineData, WordTimingData } from './lyricsFetcher';
 import type { TranslationQualityMeta } from './state';
 import { storage } from './storage';
@@ -631,7 +631,6 @@ function applyInterleavedMode(doc: Document): void {
     try {
         const lines = getLyricLines(doc);
         if (!lines || lines.length === 0) {
-            debug('No lyrics lines found for interleaved mode');
             return;
         }
         
@@ -1264,7 +1263,6 @@ function stopActiveSyncInterval(): void {
 function setupActiveLineObserver(doc: Document): void {
     try {
         if (!isDocumentValid(doc)) {
-            debug('Document not valid for observer setup');
             return;
         }
         
@@ -1289,7 +1287,6 @@ function setupActiveLineObserver(doc: Document): void {
         }
         
         if (!lyricsContainer) {
-            debug('No lyrics container found for observer setup');
             startActiveSyncInterval();
             return;
         }
@@ -1371,7 +1368,6 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
         }
     }
     
-    debug('Overlay enabled:', currentConfig.mode);
 }
 
 export function disableOverlay(): void {
@@ -1450,7 +1446,6 @@ export function disableOverlay(): void {
     translationMap.clear();
     document.body.classList.remove('slt-overlay-active');
     
-    debug('Overlay disabled');
 }
 
 export function updateOverlayContent(translations: Map<number, string>): void {

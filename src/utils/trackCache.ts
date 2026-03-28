@@ -1,4 +1,4 @@
-import { debug, warn, info } from './debug';
+import { warn } from './debug';
 
 const CACHE_KEY_PREFIX = 'slt-track-cache:';
 const CACHE_INDEX_KEY = 'slt-track-cache-index';
@@ -75,12 +75,10 @@ export function getTrackCache(trackUri: string, targetLang: string): TrackCacheE
         const entry: TrackCacheEntry = JSON.parse(entryStr);
         
         if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
-            debug(`Track cache expired for ${trackUri}`);
             storage.removeItem(cacheKey);
             return null;
         }
         
-        debug(`Track cache hit: ${trackUri} (${entry.lines.length} lines, target: ${targetLang})`);
         return entry;
     } catch (e) {
         warn('Failed to read track cache:', e);
@@ -118,8 +116,6 @@ export function setTrackCache(
     
     try {
         storage.setItem(cacheKey, JSON.stringify(entry));
-        debug(`Track cache set: ${trackUri} (${lines.length} lines, ${sourceLang} -> ${targetLang})`);
-        
         const index = getCacheIndex();
         const fullKey = `${trackUri}:${targetLang}`;
         
@@ -132,7 +128,6 @@ export function setTrackCache(
                     const [oldUri, oldLang] = oldestKey.split(':').slice(0, -1).join(':').split(':');
                     const oldCacheKey = getCacheKey(oldUri || oldestKey, oldLang || targetLang);
                     storage.removeItem(oldCacheKey);
-                    debug(`Evicted oldest track cache: ${oldestKey}`);
                 }
             }
             
@@ -179,7 +174,6 @@ export function deleteTrackCache(trackUri: string, targetLang?: string): void {
     }
     
     saveCacheIndex(index);
-    debug(`Deleted track cache for ${trackUri}${targetLang ? `:${targetLang}` : ' (all languages)'}`);
 }
 
 function pruneOldestEntries(count: number): void {
@@ -198,7 +192,6 @@ function pruneOldestEntries(count: number): void {
     });
     
     saveCacheIndex(index);
-    debug(`Pruned ${toRemove.length} oldest cache entries`);
 }
 
 export function clearAllTrackCache(): void {
@@ -216,7 +209,6 @@ export function clearAllTrackCache(): void {
     });
     
     storage.removeItem(CACHE_INDEX_KEY);
-    info('Track cache cleared');
 }
 
 export function getTrackCacheStats(): { 

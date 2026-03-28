@@ -182,14 +182,6 @@ var SpicyLyricTranslater = (() => {
       console.log(`${PREFIX} Debug mode enabled`);
     }
   }
-  function debug(...args) {
-    if (debugMode) {
-      console.log(PREFIX, ...args);
-    }
-  }
-  function info(...args) {
-    console.log(PREFIX, ...args);
-  }
   function warn(...args) {
     console.warn(PREFIX, ...args);
   }
@@ -250,11 +242,9 @@ var SpicyLyricTranslater = (() => {
         return null;
       const entry = JSON.parse(entryStr);
       if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
-        debug(`Track cache expired for ${trackUri}`);
         storage2.removeItem(cacheKey);
         return null;
       }
-      debug(`Track cache hit: ${trackUri} (${entry.lines.length} lines, target: ${targetLang})`);
       return entry;
     } catch (e) {
       warn("Failed to read track cache:", e);
@@ -279,7 +269,6 @@ var SpicyLyricTranslater = (() => {
     };
     try {
       storage2.setItem(cacheKey, JSON.stringify(entry));
-      debug(`Track cache set: ${trackUri} (${lines.length} lines, ${sourceLang} -> ${targetLang})`);
       const index = getCacheIndex();
       const fullKey = `${trackUri}:${targetLang}`;
       if (!index.trackUris.includes(fullKey)) {
@@ -290,7 +279,6 @@ var SpicyLyricTranslater = (() => {
             const [oldUri, oldLang] = oldestKey.split(":").slice(0, -1).join(":").split(":");
             const oldCacheKey = getCacheKey(oldUri || oldestKey, oldLang || targetLang);
             storage2.removeItem(oldCacheKey);
-            debug(`Evicted oldest track cache: ${oldestKey}`);
           }
         }
         saveCacheIndex(index);
@@ -327,7 +315,6 @@ var SpicyLyricTranslater = (() => {
       index.trackUris = index.trackUris.filter((k) => !k.startsWith(trackUri + ":"));
     }
     saveCacheIndex(index);
-    debug(`Deleted track cache for ${trackUri}${targetLang ? `:${targetLang}` : " (all languages)"}`);
   }
   function pruneOldestEntries(count) {
     const storage2 = getStorage();
@@ -343,7 +330,6 @@ var SpicyLyricTranslater = (() => {
       storage2.removeItem(cacheKey);
     });
     saveCacheIndex(index);
-    debug(`Pruned ${toRemove.length} oldest cache entries`);
   }
   function clearAllTrackCache() {
     const storage2 = getStorage();
@@ -358,7 +344,6 @@ var SpicyLyricTranslater = (() => {
       storage2.removeItem(cacheKey);
     });
     storage2.removeItem(CACHE_INDEX_KEY);
-    info("Track cache cleared");
   }
   function getTrackCacheStats() {
     const storage2 = getStorage();
@@ -665,7 +650,6 @@ var SpicyLyricTranslater = (() => {
     if (trackUri) {
       const cached = detectionCache.get(trackUri);
       if (cached && Date.now() - cached.timestamp < DETECTION_CACHE_TTL) {
-        debug(`Language detection cache hit: ${cached.language}`);
         return { code: cached.language, confidence: cached.confidence };
       }
     }
@@ -675,7 +659,6 @@ var SpicyLyricTranslater = (() => {
     }
     const heuristic = detectLanguageHeuristic(sampleText);
     if (heuristic && heuristic.confidence >= 0.7) {
-      debug(`Heuristic language detection: ${heuristic.code} (${(heuristic.confidence * 100).toFixed(0)}%)`);
       if (trackUri) {
         detectionCache.set(trackUri, {
           language: heuristic.code,
@@ -687,7 +670,6 @@ var SpicyLyricTranslater = (() => {
     }
     try {
       const apiResult = await detectLanguageViaAPI(sampleText);
-      debug(`API language detection: ${apiResult.code} (${(apiResult.confidence * 100).toFixed(0)}%)`);
       if (trackUri) {
         detectionCache.set(trackUri, {
           language: apiResult.code,
@@ -758,7 +740,6 @@ var SpicyLyricTranslater = (() => {
       if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
         const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
         if (mixedCheck.hasMixedContent) {
-          debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
           return { skip: false, detectedLanguage: quickHeuristic.code };
         }
         return {
@@ -776,7 +757,6 @@ var SpicyLyricTranslater = (() => {
     if (isSameLanguage(detection.code, targetLanguage)) {
       const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
       if (mixedCheck.hasMixedContent) {
-        debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) \u2014 will not skip`);
         return { skip: false, detectedLanguage: detection.code };
       }
       return {
@@ -922,7 +902,6 @@ var SpicyLyricTranslater = (() => {
             baseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
             RATE_LIMIT.maxDelayMs
           );
-          debug(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
@@ -946,7 +925,6 @@ var SpicyLyricTranslater = (() => {
       if (apiKeys.geminiApiKey !== void 0)
         geminiApiKey = apiKeys.geminiApiKey;
     }
-    info(`API preference set to: ${api}${api === "custom" ? ` (${customUrl})` : ""}`);
   }
   var CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1e3;
   var MAX_CACHE_ENTRIES = 500;
@@ -1077,7 +1055,6 @@ var SpicyLyricTranslater = (() => {
         if (isSuspiciousMixedLineTranslation(text, normalized)) {
           delete cache[key];
           storage_default.setJSON("translation-cache", cache);
-          debug(`Invalidated mixed-line cache for ${targetLang}: ${text.slice(0, 40)}`);
           return null;
         }
         if (normalized === text) {
@@ -1085,7 +1062,6 @@ var SpicyLyricTranslater = (() => {
           if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
             delete cache[key];
             storage_default.setJSON("translation-cache", cache);
-            debug(`Invalidated stale line cache for ${targetLang}: ${text.slice(0, 40)}`);
             return null;
           }
         }
@@ -1602,7 +1578,6 @@ ${text}`
       if (trackCache && trackCache.lines.length === lines.length) {
         if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
           if (!shouldInvalidateTrackCacheForMixedContent(lines, trackCache.lines, targetLang)) {
-            debug(`Full track cache hit: ${currentTrackUri} (${trackCache.lines.length} lines)`);
             return lines.map((line, index) => ({
               originalText: line,
               translatedText: trackCache.lines[index] || line,
@@ -1613,10 +1588,8 @@ ${text}`
             }));
           }
           deleteTrackCache(currentTrackUri, targetLang);
-          debug(`Invalidated mixed-content stale track cache for ${currentTrackUri}:${targetLang}`);
         } else {
           deleteTrackCache(currentTrackUri, targetLang);
-          debug(`Invalidated stale track cache for ${currentTrackUri}:${targetLang}`);
         }
       }
     }
@@ -1652,7 +1625,6 @@ ${text}`
       }
     });
     if (uncachedLines.length === 0) {
-      debug("All lines found in cache");
       const finalResults = lines.map((_, index) => cachedResults.get(index));
       if (currentTrackUri) {
         const translatedLines = finalResults.map((r) => r.translatedText);
@@ -1660,7 +1632,6 @@ ${text}`
       }
       return finalResults;
     }
-    debug(`${cachedResults.size} cached, ${uncachedLines.length} to translate`);
     let detectedLang = detectedSourceLang || "auto";
     try {
       let translatedLines = null;
@@ -1807,7 +1778,6 @@ ${text}`
         }
       }
     } catch (e) {
-      debug("CosmosAsync token fetch failed, trying fallback:", e);
     }
     try {
       const session = globalThis.Spicetify?.Platform?.Session;
@@ -1815,7 +1785,6 @@ ${text}`
         return session.accessToken;
       }
     } catch (e) {
-      debug("Platform.Session token fetch failed:", e);
     }
     throw new Error("Could not obtain Spotify access token");
   }
@@ -1879,7 +1848,6 @@ ${text}`
         version: spicyVersion
       }
     };
-    debug("Fetching lyrics from SpicyLyrics API for track:", trackId, "version:", spicyVersion);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5e3);
     try {
@@ -1904,7 +1872,6 @@ ${text}`
         return null;
       }
       if (lyricsResult.httpStatus !== 200) {
-        debug("SpicyLyrics API returned non-200 status:", lyricsResult.httpStatus);
         return null;
       }
       let lyricsData;
@@ -1914,18 +1881,15 @@ ${text}`
         try {
           lyricsData = JSON.parse(lyricsResult.data);
         } catch {
-          debug("Failed to parse text-format lyrics data");
           return null;
         }
       } else {
-        debug("Unexpected lyrics format:", lyricsResult.format);
         return null;
       }
       return lyricsData;
     } catch (err) {
       clearTimeout(timeoutId);
       if (err.name === "AbortError") {
-        debug("SpicyLyrics API request timed out after 5s");
       }
       throw err;
     }
@@ -1994,7 +1958,6 @@ ${text}`
           continue;
         }
       }
-      debug("Skipping unrecognized Content item:", JSON.stringify(group).substring(0, 200));
     }
     return lineData;
   }
@@ -2017,7 +1980,6 @@ ${text}`
         return extractStaticLinesData(lyrics);
       default:
         if (lyrics.Content && lyrics.Content.length > 0) {
-          debug("Unknown lyrics type:", lyrics.Type, "- trying Content extraction");
           return extractContentLinesData(lyrics);
         }
         warn("Unknown lyrics type and no Content:", lyrics.Type, JSON.stringify(Object.keys(lyrics)));
@@ -2030,11 +1992,9 @@ ${text}`
   async function fetchLyricsFromAPI() {
     const trackId = getCurrentTrackId();
     if (!trackId) {
-      debug("No current track ID available");
       return null;
     }
     if (trackId === cachedTrackId && cachedLineData) {
-      debug("Returning cached API lyrics for track:", trackId);
       return {
         lines: cachedLineData.map((l) => l.text),
         lineData: cachedLineData,
@@ -2044,19 +2004,16 @@ ${text}`
     try {
       const lyrics = await querySpicyLyricsAPI(trackId);
       if (!lyrics) {
-        debug("No lyrics data from API");
         return null;
       }
       const lineData = extractLinesData(lyrics);
       if (lineData.length === 0) {
-        debug("No text lines extracted from API lyrics");
         return null;
       }
       cachedTrackId = trackId;
       cachedLineData = lineData;
       cachedLanguage = lyrics.Language || null;
       const lines = lineData.map((l) => l.text);
-      debug(`Fetched ${lines.length} lyrics lines from API (type: ${lyrics.Type}, lang: ${lyrics.Language || "unknown"})`);
       return { lines, lineData, language: lyrics.Language || void 0 };
     } catch (err) {
       warn("Failed to fetch lyrics from SpicyLyrics API:", err);
@@ -2066,7 +2023,6 @@ ${text}`
   async function fetchLyricsForTrackUri(trackUri) {
     const trackId = getTrackIdFromUri(trackUri);
     if (!trackId) {
-      debug("No valid track ID in URI:", trackUri);
       return null;
     }
     if (trackId === cachedTrackId && cachedLineData) {
@@ -2549,7 +2505,6 @@ ${text}`
     try {
       const lines = getLyricLines(doc);
       if (!lines || lines.length === 0) {
-        debug("No lyrics lines found for interleaved mode");
         return;
       }
       doc.querySelectorAll(".slt-interleaved-translation").forEach((el) => el.remove());
@@ -3087,7 +3042,6 @@ ${text}`
   function setupActiveLineObserver(doc) {
     try {
       if (!isDocumentValid(doc)) {
-        debug("Document not valid for observer setup");
         return;
       }
       const existingObserver = activeLineObservers.get(doc);
@@ -3106,7 +3060,6 @@ ${text}`
         lyricsContainer = doc.querySelector("#SpicyLyricsPage");
       }
       if (!lyricsContainer) {
-        debug("No lyrics container found for observer setup");
         startActiveSyncInterval();
         return;
       }
@@ -3174,7 +3127,6 @@ ${text}`
         renderTranslations(pipWindow.document);
       }
     }
-    debug("Overlay enabled:", currentConfig.mode);
   }
   function disableOverlay() {
     isOverlayEnabled = false;
@@ -3240,7 +3192,6 @@ ${text}`
     }
     translationMap.clear();
     document.body.classList.remove("slt-overlay-active");
-    debug("Overlay disabled");
   }
   function updateOverlayContent(translations) {
     translationMap = new Map(translations);
@@ -4401,7 +4352,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.4" : "0.0.0";
+    return true ? "1.9.5" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -4503,7 +4454,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         releaseNotes = githubRelease?.body || "";
       }
     } catch (e) {
-      debug("Could not fetch GitHub release notes:", e);
     }
     try {
       const response = await fetchWithTimeout(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
@@ -4511,7 +4461,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const data = await response.json();
         const version = parseVersion(data.version);
         if (version) {
-          debug("Got version from self-hosted API:", data.version);
           return {
             version,
             release: {
@@ -4730,15 +4679,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
       const current = getCurrentVersion();
       if (compareVersions(latest.version, current) > 0) {
-        debug(`Update available: ${current.text} \u2192 ${latest.version.text}`);
         if (!hasShownUpdateNotice) {
           hasShownUpdateNotice = true;
-          info(`Auto-updating Spicy Lyric Translator to ${latest.version.text}`);
         }
         await performSilentAutoUpdate(latest.version, latest.release.body);
         hasShownUpdateNotice = true;
       } else {
-        debug("Already on latest version:", current.text);
         resetBackoff();
         hasShownUpdateNotice = false;
       }
@@ -4769,7 +4715,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     });
     scheduleNextCheck(5e3);
-    info("Update checker started");
   }
   async function getUpdateInfo() {
     try {
@@ -4798,104 +4743,187 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     content.className = "slt-changelog-modal";
     content.innerHTML = `
         <style>
-            .slt-changelog-modal {
-                padding: 16px;
-                color: var(--spice-text);
+            @keyframes slt-cl-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
             }
-            .slt-changelog-modal .changelog-header {
+            @keyframes slt-confetti-float {
+                0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+                100% { transform: translateY(-20px) rotate(180deg); opacity: 0; }
+            }
+            .slt-changelog-modal {
+                padding: 20px;
+                color: var(--spice-text);
+                animation: slt-cl-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .slt-changelog-modal .changelog-hero {
                 display: flex;
                 align-items: center;
-                gap: 12px;
-                margin-bottom: 16px;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.12) 0%, rgba(99, 102, 241, 0.08) 100%);
+                border: 1px solid rgba(29, 185, 84, 0.15);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-changelog-modal .changelog-hero::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(29, 185, 84, 0.4), transparent);
+            }
+            .slt-changelog-modal .changelog-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #1db954, #1ed760);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
+            }
+            .slt-changelog-modal .changelog-hero-text {
+                flex: 1;
+            }
+            .slt-changelog-modal .changelog-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+                display: flex;
+                align-items: center;
+                gap: 8px;
             }
             .slt-changelog-modal .changelog-badge {
-                background: #1db954;
+                background: linear-gradient(135deg, #1db954, #1ed760);
                 color: #000;
-                padding: 4px 12px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 800;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+                letter-spacing: 0.3px;
+                box-shadow: 0 2px 8px rgba(29, 185, 84, 0.2);
             }
-            .slt-changelog-modal .changelog-subtitle {
+            .slt-changelog-modal .changelog-hero-subtitle {
+                font-size: 12px;
                 color: var(--spice-subtext);
-                font-size: 13px;
+                margin-top: 3px;
             }
             .slt-changelog-modal .changelog-content {
-                background: var(--spice-card);
-                padding: 16px;
-                border-radius: 8px;
-                margin-bottom: 16px;
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 16px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
                 max-height: 400px;
                 overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.06);
                 font-size: 13px;
-                line-height: 1.6;
+                line-height: 1.65;
                 color: var(--spice-subtext);
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar {
-                width: 6px;
+                width: 5px;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-track {
                 background: transparent;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 3px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.3);
+                background: rgba(255, 255, 255, 0.25);
             }
             .slt-changelog-modal .changelog-content a {
-                color: #1db954;
+                color: #1ed760;
                 text-decoration: none;
+                border-bottom: 1px solid rgba(30, 215, 96, 0.3);
+                transition: border-color 0.2s;
             }
             .slt-changelog-modal .changelog-content a:hover {
-                text-decoration: underline;
+                border-color: #1ed760;
             }
             .slt-changelog-modal .changelog-content img {
                 max-width: 100%;
-                border-radius: 6px;
+                border-radius: 8px;
                 margin: 8px 0;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-changelog-modal .changelog-content strong {
                 color: var(--spice-text);
             }
             .slt-changelog-modal .changelog-content del {
-                opacity: 0.6;
+                opacity: 0.5;
             }
             .slt-changelog-modal .changelog-buttons {
                 display: flex;
-                gap: 12px;
+                gap: 10px;
                 justify-content: flex-end;
             }
             .slt-changelog-modal .changelog-btn {
                 padding: 10px 24px;
-                border-radius: 20px;
+                border-radius: 24px;
                 border: none;
                 cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.2s;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-changelog-modal .changelog-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-changelog-modal .changelog-btn:hover::after {
+                opacity: 1;
             }
             .slt-changelog-modal .changelog-btn.primary {
-                background: #1db954;
+                background: linear-gradient(135deg, #1db954, #1ed760);
                 color: #000;
+                box-shadow: 0 2px 12px rgba(29, 185, 84, 0.25);
             }
             .slt-changelog-modal .changelog-btn.primary:hover {
-                background: #1ed760;
-                transform: scale(1.02);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(29, 185, 84, 0.35);
+            }
+            .slt-changelog-modal .changelog-btn.primary:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(29, 185, 84, 0.2);
             }
             .slt-changelog-modal .changelog-btn.secondary {
-                background: var(--spice-card);
+                background: rgba(255, 255, 255, 0.06);
                 color: var(--spice-text);
+                border: 1px solid rgba(255, 255, 255, 0.08);
             }
             .slt-changelog-modal .changelog-btn.secondary:hover {
-                background: var(--spice-button);
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.14);
             }
         </style>
-        <div class="changelog-header">
-            <span class="changelog-badge">v${version}</span>
-            <span class="changelog-subtitle">Here's what's new in this update</span>
+        <div class="changelog-hero">
+            <div class="changelog-hero-icon">\u2728</div>
+            <div class="changelog-hero-text">
+                <div class="changelog-hero-title">
+                    Updated Successfully
+                    <span class="changelog-badge">v${version}</span>
+                </div>
+                <div class="changelog-hero-subtitle">Here's what's new in this release</div>
+            </div>
         </div>
         <div class="changelog-content">${formatReleaseNotes(changelog)}</div>
         <div class="changelog-buttons">
@@ -4907,7 +4935,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     `;
     if (Spicetify.PopupModal) {
       Spicetify.PopupModal.display({
-        title: "\u{1F389} Spicy Lyric Translator Updated!",
+        title: "Spicy Lyric Translator",
         content,
         isLarge: true
       });
@@ -4933,7 +4961,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           return release.body;
       }
     } catch (e) {
-      debug("Could not fetch changelog for version", version, ":", e);
     }
     try {
       const response = await fetchWithTimeout(GITHUB_API_URL, {
@@ -4945,9 +4972,171 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           return release.body;
       }
     } catch (e) {
-      debug("Could not fetch latest release changelog:", e);
     }
     return "";
+  }
+  function showHotfixModal(version, hashShort) {
+    const hashLabel = hashShort ? ` [${hashShort}]` : "";
+    const content = document.createElement("div");
+    content.className = "slt-hotfix-modal";
+    content.innerHTML = `
+        <style>
+            @keyframes slt-hf-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .slt-hotfix-modal {
+                padding: 20px;
+                color: var(--spice-text);
+                animation: slt-hf-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .slt-hotfix-modal .hotfix-hero {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(255, 170, 51, 0.12) 0%, rgba(255, 136, 0, 0.06) 100%);
+                border: 1px solid rgba(255, 170, 51, 0.18);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-hotfix-modal .hotfix-hero::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(255, 170, 51, 0.4), transparent);
+            }
+            .slt-hotfix-modal .hotfix-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #ff9800, #ffb74d);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-hero-text {
+                flex: 1;
+            }
+            .slt-hotfix-modal .hotfix-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+            }
+            .slt-hotfix-modal .hotfix-hero-subtitle {
+                font-size: 12px;
+                color: var(--spice-subtext);
+                margin-top: 3px;
+            }
+            .slt-hotfix-modal .hotfix-info {
+                background: rgba(255, 255, 255, 0.04);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+            }
+            .slt-hotfix-modal .hotfix-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 12px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            }
+            .slt-hotfix-modal .hotfix-badge.version {
+                background: linear-gradient(135deg, rgba(255, 152, 0, 0.2), rgba(255, 183, 77, 0.12));
+                color: #ffb74d;
+                border: 1px solid rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-badge.hash {
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--spice-subtext);
+                font-size: 11px;
+            }
+            .slt-hotfix-modal .hotfix-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: flex-end;
+            }
+            .slt-hotfix-modal .hotfix-btn {
+                padding: 10px 24px;
+                border-radius: 24px;
+                border: none;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(135deg, #ff9800, #ffb74d);
+                color: #000;
+                box-shadow: 0 2px 12px rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-hotfix-modal .hotfix-btn:hover::after {
+                opacity: 1;
+            }
+            .slt-hotfix-modal .hotfix-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(255, 152, 0, 0.35);
+            }
+            .slt-hotfix-modal .hotfix-btn:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(255, 152, 0, 0.2);
+            }
+        </style>
+        <div class="hotfix-hero">
+            <div class="hotfix-hero-icon">\u{1F527}</div>
+            <div class="hotfix-hero-text">
+                <div class="hotfix-hero-title">Hotfix Applied</div>
+                <div class="hotfix-hero-subtitle">A quick fix has been automatically applied to Spicy Lyric Translator.</div>
+            </div>
+        </div>
+        <div class="hotfix-info">
+            <span class="hotfix-badge version">v${version}</span>
+            ${hashShort ? `<span class="hotfix-badge hash">${hashShort}</span>` : ""}
+        </div>
+        <div class="hotfix-buttons">
+            <button class="hotfix-btn" id="slt-hotfix-dismiss">Got it</button>
+        </div>
+    `;
+    if (Spicetify.PopupModal) {
+      Spicetify.PopupModal.display({
+        title: "Spicy Lyric Translator",
+        content,
+        isLarge: false
+      });
+      setTimeout(() => {
+        const dismissBtn = document.getElementById("slt-hotfix-dismiss");
+        if (dismissBtn) {
+          dismissBtn.addEventListener("click", () => Spicetify.PopupModal.hide());
+        }
+      }, 100);
+    }
   }
   async function showPostUpdateChangelog() {
     const currentVersion = CURRENT_VERSION;
@@ -4959,11 +5148,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       await new Promise((r) => setTimeout(r, 2e3));
       const metadata = window._spicy_lyric_translator_metadata;
       const hashShort = metadata?.ContentHash ? metadata.ContentHash.substring(0, 8) : "";
-      const hashLabel = hashShort ? ` [${hashShort}]` : "";
-      if (Spicetify.showNotification) {
-        Spicetify.showNotification(`Spicy Lyric Translator v${currentVersion} hotfix applied!${hashLabel}`);
-      }
-      info(`Hotfix applied for v${currentVersion}${hashLabel}`);
+      showHotfixModal(currentVersion, hashShort);
     }
     const pendingVersion = storage.get("pending-update-version");
     if (pendingVersion) {
@@ -4988,7 +5173,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const currentParsed = parseVersion(currentVersion);
         if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
           targetVersion = currentVersion;
-          debug(`Version change detected: ${lastKnownVersion} \u2192 ${currentVersion}`);
         }
       } else if (!lastKnownVersion) {
         storage.set("last-known-version", currentVersion);
@@ -5166,6 +5350,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         break;
     }
     if (typeof Spicetify !== "undefined" && Spicetify.Tippy && button && !button._tippy) {
+      const baseOnShow = Spicetify.TippyProps?.onShow;
       Spicetify.Tippy(button, {
         ...Spicetify.TippyProps,
         interactive: true,
@@ -5174,6 +5359,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         allowHTML: true,
         content: getTooltipContent(),
         onShow(instance) {
+          if (typeof baseOnShow === "function")
+            baseOnShow(instance);
           instance.setContent(getTooltipContent());
         }
       });
@@ -5357,7 +5544,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     } catch (error2) {
       const isAbortError = error2 instanceof Error && error2.name === "AbortError";
       if (!isAbortError) {
-        console.warn("[SpicyLyricTranslator] Connection failed:", error2);
       }
       indicatorState.state = "error";
       updateUI();
@@ -5533,6 +5719,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var translateDebounceTimer = null;
   var viewModeIntervalId = null;
   var romanizationToggleListener = null;
+  var romanizationToggleButton = null;
+  var observedLyricsContent = null;
+  var lastKnownRomanizationState = null;
+  var lastTranslatedRomanizationState = null;
   function getPIPWindow2() {
     try {
       const docPiP = globalThis.documentPictureInPicture;
@@ -5543,10 +5733,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     return null;
   }
   function isRomanizationActive() {
-    const page = document.querySelector("#SpicyLyricsPage");
-    if (!page?.classList.contains("Lyrics_RomanizationAvailable")) {
-      return false;
-    }
     const btn = document.querySelector("#RomanizationToggle");
     if (btn) {
       if (btn.classList.contains("active"))
@@ -5796,7 +5982,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     return document.querySelectorAll(".non-existent-selector");
   }
   async function waitForLyricsAndTranslate(retries = 10, delay = 500) {
-    debug("Waiting for lyrics to load...");
     for (let i = 0; i < retries; i++) {
       if (!isSpicyLyricsOpen() || state.isTranslating)
         return;
@@ -5816,9 +6001,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (state.isTranslating)
       return;
     const currentTrackUri = getCurrentTrackUri();
-    if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0) {
-      debug("Already translated this track, skipping");
+    const currentRomanization = isRomanizationActive();
+    const romanizationChanged = lastTranslatedRomanizationState !== null && currentRomanization !== lastTranslatedRomanizationState;
+    if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0 && !romanizationChanged) {
+      const lines2 = getLyricsLines();
+      if (lines2.length > 0 && !document.querySelector(".slt-interleaved-translation, .slt-replace-line, .spicy-translated")) {
+        applyTranslations(lines2);
+      }
       return;
+    }
+    if (romanizationChanged) {
+      removeTranslations();
     }
     if (isOffline()) {
       const cacheStats = getCacheStats();
@@ -5855,7 +6048,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const currentTrackUri2 = getCurrentTrackUri();
       const romanizationOn = isRomanizationActive();
       if (romanizationOn) {
-        debug("Romanization is active \u2014 skipping pre-API language detection on DOM text");
       } else {
         const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri2 || void 0);
         if (preApiSkipCheck.detectedLanguage) {
@@ -5871,7 +6063,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           apiLineTexts = apiResult.lines;
           apiLanguage = apiResult.language;
           apiLineData = apiResult.lineData;
-          debug(`Got ${apiLineTexts.length} lines from SpicyLyrics API (DOM has ${lines.length} lines)`);
         }
       } catch (apiErr) {
         warn("SpicyLyrics API fetch failed, falling back to DOM:", apiErr);
@@ -5887,7 +6078,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             apiVocalLineData.push(apiLineData[i]);
           }
         }
-        debug(`API: ${apiLineTexts.length} total, ${apiVocalTexts.length} vocal (DOM: ${lines.length})`);
       }
       let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
       if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
@@ -5900,18 +6090,28 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
           if (apiVocalTexts.length === lines.length) {
             useApiLines = true;
-            debug(`Romanization: DOM count matches API vocal count (${lines.length}) on retry ${retryAttempt + 1}`);
             break;
           }
         }
         if (!useApiLines && apiVocalTexts.length > 0 && lines.length > 0) {
-          debug(`Romanization: API vocal (${apiVocalTexts.length}) vs DOM (${lines.length}) \u2014 using API text mapped to DOM count`);
           useApiLines = true;
           const domCount = lines.length;
           if (apiVocalTexts.length > domCount) {
             apiVocalTexts = apiVocalTexts.slice(0, domCount);
             if (apiVocalLineData)
               apiVocalLineData = apiVocalLineData.slice(0, domCount);
+          } else if (apiVocalTexts.length < domCount) {
+            for (let i = apiVocalTexts.length; i < domCount; i++) {
+              apiVocalTexts.push(domLineTexts[i] || "");
+              if (apiVocalLineData) {
+                apiVocalLineData.push({
+                  text: domLineTexts[i] || "",
+                  startTime: 0,
+                  endTime: 0,
+                  isInstrumental: false
+                });
+              }
+            }
           }
         }
       }
@@ -5925,13 +6125,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
           if (apiVocalTexts.length === lines.length) {
             useApiLines = true;
-            debug(`DOM refreshed on retry ${retryAttempt + 1}: count now matches (${lines.length})`);
             break;
           }
           const apiTextSet = new Set(apiVocalTexts.map((t) => t.trim().toLowerCase()));
           const domMatchCount = domLineTexts.filter((t) => apiTextSet.has(t.trim().toLowerCase())).length;
           if (domMatchCount > domLineTexts.length * 0.3) {
-            debug(`DOM refreshed on retry ${retryAttempt + 1}: ${domMatchCount}/${domLineTexts.length} text matches`);
             break;
           }
         }
@@ -5962,13 +6160,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             });
           }
         }
-        debug(`Text-based matching: ${matchCount}/${domLineTexts.length} DOM lines matched to API timing data`);
       }
       const lineTexts = useApiLines ? apiVocalTexts : domLineTexts;
       if (useApiLines) {
-        debug("Using SpicyLyrics API vocal lines for translation");
       } else if (apiVocalTexts) {
-        debug(`API vocal count (${apiVocalTexts.length}) != DOM count (${lines.length}), using DOM with text-matched timing`);
       }
       const nonEmptyTexts = lineTexts.filter((t) => t.trim().length > 0);
       if (nonEmptyTexts.length === 0) {
@@ -5981,7 +6176,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (romanizationOn && apiLanguage) {
         const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
         skipCheck = apiLangSame ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage } : { skip: false, detectedLanguage: apiLanguage };
-        debug("Romanization active: using API language (" + apiLanguage + ") for skip check instead of text analysis");
+      } else if (romanizationOn) {
+        skipCheck = { skip: false, detectedLanguage: "unknown" };
       } else {
         skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
       }
@@ -5991,8 +6187,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (skipCheck.skip) {
         const nonTargetIndexes = getConfidentNonTargetLineIndexes(lineTexts, state.targetLanguage);
         if (nonTargetIndexes.length === 0) {
+          removeTranslations();
           state.isTranslating = false;
           state.lastTranslatedSongUri = currentTrackUri2;
+          lastTranslatedRomanizationState = romanizationOn;
           restoreButtonState();
           if (state.showNotifications && Spicetify.showNotification) {
             Spicetify.showNotification(skipCheck.reason || "Lyrics already in target language");
@@ -6057,6 +6255,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         }
       });
       state.lastTranslatedSongUri = currentTrackUri2;
+      lastTranslatedRomanizationState = romanizationOn;
       if (useApiLines && apiVocalLineData) {
         setLineTimingData(apiVocalLineData);
       } else if (matchedTimingData) {
@@ -6064,7 +6263,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       } else if (apiLineData) {
         setLineTimingData(apiLineData);
       }
-      applyTranslations(lines);
+      const freshLines = getLyricsLines();
+      if (freshLines.length > 0) {
+        applyTranslations(freshLines);
+      } else {
+        applyTranslations(lines);
+      }
       if (state.showNotifications && Spicetify.showNotification) {
         const wasActuallyTranslated = translations.some((t) => t.wasTranslated === true);
         if (wasActuallyTranslated) {
@@ -6181,6 +6385,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     const lyricsContent = getLyricsContent();
     if (!lyricsContent)
       return;
+    observedLyricsContent = lyricsContent;
     try {
       lyricsObserver = new MutationObserver((mutations) => {
         if (!state.isEnabled || state.isTranslating)
@@ -6254,36 +6459,40 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       lyricsObserver.disconnect();
       lyricsObserver = null;
     }
+    observedLyricsContent = null;
+    lastKnownRomanizationState = null;
+    lastTranslatedRomanizationState = null;
     cleanupRomanizationWatcher();
   }
   function setupRomanizationWatcher() {
     cleanupRomanizationWatcher();
     const handler = () => {
-      setTimeout(() => {
-        debug("Romanization toggle clicked \u2014 refreshing translations");
-        if (state.isEnabled && !state.isTranslating) {
-          state.lastTranslatedSongUri = null;
-          state.translatedLyrics.clear();
-          state._translationsByIndex = void 0;
-          clearLyricsCache();
+      setTimeout(async () => {
+        if (state.isEnabled) {
+          for (let i = 0; i < 20 && state.isTranslating; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
           removeTranslations();
-          waitForLyricsAndTranslate(15, 500);
+          setupLyricsObserver();
+          state.lastTranslatedSongUri = null;
+          await waitForLyricsAndTranslate(15, 500);
         }
-      }, 600);
+      }, 1200);
     };
     const btn = document.querySelector("#RomanizationToggle");
     if (btn) {
       btn.addEventListener("click", handler);
       romanizationToggleListener = handler;
+      romanizationToggleButton = btn;
     }
   }
   function cleanupRomanizationWatcher() {
     if (romanizationToggleListener) {
-      const btn = document.querySelector("#RomanizationToggle");
-      if (btn) {
-        btn.removeEventListener("click", romanizationToggleListener);
+      if (romanizationToggleButton) {
+        romanizationToggleButton.removeEventListener("click", romanizationToggleListener);
       }
       romanizationToggleListener = null;
+      romanizationToggleButton = null;
     }
   }
   function setupViewModeObserver() {
@@ -6295,9 +6504,35 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         if (!document.querySelector("#TranslateToggle")) {
           insertTranslateButton();
         }
+        if (romanizationToggleButton && !romanizationToggleButton.isConnected) {
+          romanizationToggleListener = null;
+          romanizationToggleButton = null;
+        }
         if (!romanizationToggleListener && document.querySelector("#RomanizationToggle")) {
           setupRomanizationWatcher();
         }
+        if (observedLyricsContent && !observedLyricsContent.isConnected) {
+          if (lyricsObserver) {
+            lyricsObserver.disconnect();
+            lyricsObserver = null;
+          }
+          observedLyricsContent = null;
+        }
+        if (!lyricsObserver && state.isEnabled) {
+          setupLyricsObserver();
+        }
+        const currentRomanization = isRomanizationActive();
+        if (lastKnownRomanizationState !== null && currentRomanization !== lastKnownRomanizationState) {
+          if (state.isEnabled) {
+            if (!state.isTranslating) {
+              removeTranslations();
+              setupLyricsObserver();
+              state.lastTranslatedSongUri = null;
+              waitForLyricsAndTranslate(15, 500);
+            }
+          }
+        }
+        lastKnownRomanizationState = currentRomanization;
         const pipWindow = getPIPWindow2();
         if (pipWindow && !pipWindow.document.querySelector("#TranslateToggle")) {
           insertTranslateButtonIntoDocument(pipWindow.document);
@@ -6375,16 +6610,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
-    row.className = "x-settings-row";
+    row.className = "x-settings-row qV_CxbowaNkMarye";
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <label class="x-toggle-wrapper">
-                <input id="${id}" class="x-toggle-input" type="checkbox" ${checked ? "checked" : ""}>
-                <span class="x-toggle-indicatorWrapper">
-                    <span class="x-toggle-indicator"></span>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <label class="x-toggle-wrapper _nD_jYvjV80Rf8sX">
+                <input id="${id}" class="x-toggle-input vTxmx3oTF8tWUPD7" type="checkbox" ${checked ? "checked" : ""}>
+                <span class="x-toggle-indicator t3q6uAPe7y0rAqRKWrapper hzLQN8eYDPYyn1km">
+                    <span class="x-toggle-indicator t3q6uAPe7y0rAqRK"></span>
                 </span>
             </label>
         </div>
@@ -6395,14 +6630,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function createNativeDropdown(id, label, options, currentValue, onChange) {
     const row = document.createElement("div");
-    row.className = "x-settings-row";
+    row.className = "x-settings-row qV_CxbowaNkMarye";
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
             <span>
-                <select class="main-dropDown-dropDown" id="${id}">
+                <select class="main-dropDown-dropDown lu9EejNhmuMFF3oS" id="${id}">
                     ${options.map((opt) => `<option value="${opt.value}" ${opt.value === currentValue ? "selected" : ""}>${opt.text}</option>`).join("")}
                 </select>
             </span>
@@ -6414,13 +6649,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function createNativeButton(id, label, buttonText, onClick) {
     const row = document.createElement("div");
-    row.className = "x-settings-row";
+    row.className = "x-settings-row qV_CxbowaNkMarye";
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <button id="${id}" class="Button-sc-y0gtbx-0 Button-buttonSecondary-small-useBrowserDefaultFocusStyle encore-text-body-small-bold e-91000-button--small" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <button id="${id}" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
         </div>
     `;
     const button = row.querySelector("button");
@@ -6431,11 +6666,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     const section = document.createElement("div");
     section.id = SETTINGS_ID;
     section.innerHTML = `
-        <div class="x-settings-section">
+        <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
             <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
-    const sectionContent = section.querySelector(".x-settings-section");
+    const sectionContent = section.querySelector(".x-settings-section fNaaQ0Cp8Yzy19j8");
     const languageOptions = SUPPORTED_LANGUAGES.map((l) => ({ value: l.code, text: l.name }));
     sectionContent.appendChild(createNativeDropdown(
       "slt-settings.target-language",
@@ -6507,14 +6742,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     ));
     const customApiRow = document.createElement("div");
     customApiRow.id = "slt-settings-custom-api-row";
-    customApiRow.className = "x-settings-row";
+    customApiRow.className = "x-settings-row qV_CxbowaNkMarye";
     customApiRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
     customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("custom-api-url") || ""}" placeholder="https://your-api.com/translate">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("custom-api-url") || ""}" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector("input");
@@ -6532,14 +6767,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(customApiRow);
     const customApiKeyRow = document.createElement("div");
     customApiKeyRow.id = "slt-settings-custom-api-key-row";
-    customApiKeyRow.className = "x-settings-row";
+    customApiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
     customApiKeyRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
     customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector("input");
@@ -6551,14 +6786,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(customApiKeyRow);
     const deeplKeyRow = document.createElement("div");
     deeplKeyRow.id = "slt-settings-deepl-key-row";
-    deeplKeyRow.className = "x-settings-row";
+    deeplKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
     deeplKeyRow.style.display = storage.get("preferred-api") === "deepl" ? "" : "none";
     deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector("input");
@@ -6570,14 +6805,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(deeplKeyRow);
     const openaiKeyRow = document.createElement("div");
     openaiKeyRow.id = "slt-settings-openai-key-row";
-    openaiKeyRow.className = "x-settings-row";
+    openaiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
     openaiKeyRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
     openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector("input");
@@ -6589,14 +6824,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(openaiKeyRow);
     const openaiModelRow = document.createElement("div");
     openaiModelRow.id = "slt-settings-openai-model-row";
-    openaiModelRow.className = "x-settings-row";
+    openaiModelRow.className = "x-settings-row qV_CxbowaNkMarye";
     openaiModelRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
     openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector("input");
@@ -6608,14 +6843,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(openaiModelRow);
     const geminiKeyRow = document.createElement("div");
     geminiKeyRow.id = "slt-settings-gemini-key-row";
-    geminiKeyRow.className = "x-settings-row";
+    geminiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
     geminiKeyRow.style.display = storage.get("preferred-api") === "gemini" ? "" : "none";
     geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector("input");
@@ -6774,20 +7009,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     ));
     const githubRow = document.createElement("div");
-    githubRow.className = "x-settings-row";
+    githubRow.className = "x-settings-row qV_CxbowaNkMarye";
     githubRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <a href="${REPO_URL}" target="_blank" class="Button-sc-y0gtbx-0 Button-buttonSecondary-small-iconTrailing-useBrowserDefaultFocusStyle encore-text-body-small-bold e-91000-button--small e-91000-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <a href="${REPO_URL}" target="_blank" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button e-10180-legacy-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
         </div>
     `;
     sectionContent.appendChild(githubRow);
     const shortcutRow = document.createElement("div");
-    shortcutRow.className = "x-settings-row";
+    shortcutRow.className = "x-settings-row qV_CxbowaNkMarye";
     shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <span class="e-91000-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
         </div>
     `;
@@ -6797,7 +7032,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   function injectSettingsIntoPage() {
     const settingsContainer = document.querySelector(".x-settings-container") || document.querySelector('[data-testid="settings-page"]') || document.querySelector("main.x-settings-container");
     if (!settingsContainer) {
-      debug("Settings container not found");
       return;
     }
     const existingSettingsSection = document.getElementById(SETTINGS_ID);
@@ -6805,29 +7039,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (sectionAlreadyInContainer) {
       return;
     }
-    debug("Found settings container, injecting settings...");
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
     const spicyLyricsSettings = document.getElementById("spicy-lyrics-settings");
     const spicyLyricsDevSettings = document.getElementById("spicy-lyrics-dev-settings");
     if (spicyLyricsDevSettings) {
       spicyLyricsDevSettings.after(settingsSection);
-      debug("Settings injected after spicy-lyrics-dev-settings");
     } else if (spicyLyricsSettings) {
       spicyLyricsSettings.after(settingsSection);
-      debug("Settings injected after spicy-lyrics-settings");
     } else {
-      const allSections = settingsContainer.querySelectorAll(".x-settings-section");
+      const allSections = settingsContainer.querySelectorAll(".x-settings-section fNaaQ0Cp8Yzy19j8");
       if (allSections.length > 0) {
         const lastSection = allSections[allSections.length - 1];
-        const lastSectionParent = lastSection.closest("div:not(.x-settings-section):not(.x-settings-container)") || lastSection;
+        const lastSectionParent = lastSection.closest("div:not(.x-settings-section fNaaQ0Cp8Yzy19j8):not(.x-settings-container)") || lastSection;
         lastSectionParent.after(settingsSection);
-        debug("Settings injected after last settings section");
       } else {
         settingsContainer.appendChild(settingsSection);
-        debug("Settings appended to settings container");
       }
     }
-    debug("Settings injected into Spotify settings page");
   }
   function isOnSettingsPage() {
     const hasSettingsContainer = !!document.querySelector(".x-settings-container");
@@ -6844,15 +7072,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     return hasSettingsContainer || hasSettingsTestId || pathCheck || historyCheck;
   }
   function watchForSettingsPage() {
-    debug("Starting settings page watcher...");
     if (isOnSettingsPage()) {
-      debug("Already on settings page, injecting...");
       setTimeout(injectSettingsIntoPage, 100);
       setTimeout(injectSettingsIntoPage, 500);
     }
     if (Spicetify.Platform?.History) {
       Spicetify.Platform.History.listen((location) => {
-        debug("Navigation detected:", location?.pathname);
         if (location?.pathname?.includes("preferences") || location?.pathname?.includes("settings")) {
           setTimeout(injectSettingsIntoPage, 100);
           setTimeout(injectSettingsIntoPage, 300);
@@ -6864,14 +7089,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     const observer = new MutationObserver((mutations) => {
       const settingsContainer = document.querySelector(".x-settings-container") || document.querySelector('[data-testid="settings-page"]');
       if (settingsContainer && !document.getElementById(SETTINGS_ID)) {
-        debug("Settings container detected via MutationObserver");
         injectSettingsIntoPage();
       }
       const ourSettings = document.getElementById(SETTINGS_ID);
       const spicyLyricsDevSettings = document.getElementById("spicy-lyrics-dev-settings");
       if (ourSettings && spicyLyricsDevSettings && ourSettings.previousElementSibling !== spicyLyricsDevSettings) {
         spicyLyricsDevSettings.after(ourSettings);
-        debug("Repositioned settings after spicy-lyrics-dev-settings");
       }
     });
     observer.observe(document.body, {
@@ -7364,7 +7587,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return true;
       }
     } catch (e) {
-      debug("Direct playback API failed, trying Cosmos fallback:", e);
     }
     const cosmos = Spicetify?.CosmosAsync;
     const cosmosAttempts = [
@@ -7386,7 +7608,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           await cosmos.put(attempt.url, attempt.body);
           return true;
         } catch (e) {
-          debug("Cosmos play attempt failed:", attempt.url, e);
         }
       }
     }
@@ -7397,7 +7618,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return true;
       }
     } catch (e) {
-      debug("Failed to navigate to track page as fallback:", e);
     }
     return false;
   }
@@ -7592,7 +7812,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         }
       }
     } catch (e) {
-      debug("Failed to fetch source lyrics for side-by-side view:", e);
       const rowsContainer = content.querySelector("#slt-lyrics-rows");
       if (rowsContainer) {
         rowsContainer.innerHTML = renderRows([]);
@@ -7851,7 +8070,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             await new Promise((resolve) => setTimeout(resolve, 120));
             await openCachedLyricsViewer(uri, lang, sourceLang);
           } catch (error2) {
-            debug("Failed to open cached lyrics viewer:", error2);
             if (Spicetify.showNotification) {
               Spicetify.showNotification("Failed to open cached lyrics viewer", true);
             }
@@ -7949,10 +8167,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
               false,
               openSettingsModal
             ).register();
-            info("Settings menu item registered");
             return true;
           } catch (e) {
-            debug("Menu.Item not available:", e);
           }
         }
         return false;
@@ -7961,7 +8177,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         setTimeout(registerMenuItem, 2e3);
       }
     }
-    debug("Settings registration complete");
   }
 
   // src/utils/initialize.ts
@@ -7969,7 +8184,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     while (typeof Spicetify === "undefined" || !Spicetify.Platform) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    info("Initializing...");
     setPreferredApi(state.preferredApi, state.customApiUrl, {
       customApiKey: state.customApiKey,
       deeplApiKey: state.deeplApiKey,
@@ -7985,7 +8199,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     await registerSettings();
     startUpdateChecker(30 * 60 * 1e3);
     setupKeyboardShortcut();
-    showPostUpdateChangelog().catch((e) => debug("Changelog display error:", e));
+    showPostUpdateChangelog().catch(() => {
+    });
     let wasSpicyLyricsOpen = false;
     const observer = new MutationObserver((mutations) => {
       const isOpen = isSpicyLyricsOpen();
@@ -8049,7 +8264,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         refresh: refreshConnection
       }
     };
-    info("Initialized successfully!");
   }
 
   // src/app.ts

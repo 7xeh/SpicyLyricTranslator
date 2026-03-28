@@ -147,6 +147,7 @@ function updateUI(): void {
     }
 
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy && button && !(button as any)._tippy) {
+        const baseOnShow = Spicetify.TippyProps?.onShow;
         Spicetify.Tippy(button, {
             ...Spicetify.TippyProps,
             interactive: true,
@@ -155,6 +156,7 @@ function updateUI(): void {
             allowHTML: true,
             content: getTooltipContent(),
             onShow(instance: any) {
+                if (typeof baseOnShow === 'function') baseOnShow(instance);
                 instance.setContent(getTooltipContent());
             }
         });
@@ -349,7 +351,6 @@ async function connect(): Promise<boolean> {
     } catch (error) {
         const isAbortError = error instanceof Error && error.name === 'AbortError';
         if (!isAbortError) {
-            console.warn('[SpicyLyricTranslator] Connection failed:', error);
         }
         indicatorState.state = 'error';
         updateUI();

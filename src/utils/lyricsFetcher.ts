@@ -1,4 +1,4 @@
-import { debug, warn, error as logError } from './debug';
+import { warn } from './debug';
 
 const SPICY_LYRICS_API = 'https://api.spicylyrics.org';
 
@@ -82,7 +82,6 @@ async function getSpotifyAccessToken(): Promise<string> {
             }
         }
     } catch (e) {
-        debug('CosmosAsync token fetch failed, trying fallback:', e);
     }
     
     try {
@@ -91,7 +90,6 @@ async function getSpotifyAccessToken(): Promise<string> {
             return session.accessToken;
         }
     } catch (e) {
-        debug('Platform.Session token fetch failed:', e);
     }
     
     throw new Error('Could not obtain Spotify access token');
@@ -165,8 +163,6 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
         },
     };
     
-    debug('Fetching lyrics from SpicyLyrics API for track:', trackId, 'version:', spicyVersion);
-    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     
@@ -197,7 +193,6 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
         }
         
         if (lyricsResult.httpStatus !== 200) {
-            debug('SpicyLyrics API returned non-200 status:', lyricsResult.httpStatus);
             return null;
         }
         
@@ -208,11 +203,9 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
             try {
                 lyricsData = JSON.parse(lyricsResult.data) as LyricsData;
             } catch {
-                debug('Failed to parse text-format lyrics data');
                 return null;
             }
         } else {
-            debug('Unexpected lyrics format:', lyricsResult.format);
             return null;
         }
         
@@ -220,7 +213,6 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
     } catch (err) {
         clearTimeout(timeoutId);
         if ((err as Error).name === 'AbortError') {
-            debug('SpicyLyrics API request timed out after 5s');
         }
         throw err;
     }
@@ -294,7 +286,6 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             }
         }
         
-        debug('Skipping unrecognized Content item:', JSON.stringify(group).substring(0, 200));
     }
     
     return lineData;
@@ -321,7 +312,6 @@ function extractLinesData(lyrics: LyricsData): LyricLineData[] {
             return extractStaticLinesData(lyrics);
         default:
             if (lyrics.Content && lyrics.Content.length > 0) {
-                debug('Unknown lyrics type:', lyrics.Type, '- trying Content extraction');
                 return extractContentLinesData(lyrics);
             }
             warn('Unknown lyrics type and no Content:', lyrics.Type, JSON.stringify(Object.keys(lyrics)));
@@ -342,12 +332,10 @@ export function getCachedLineData(): LyricLineData[] | null {
 export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData: LyricLineData[]; language?: string } | null> {
     const trackId = getCurrentTrackId();
     if (!trackId) {
-        debug('No current track ID available');
         return null;
     }
     
     if (trackId === cachedTrackId && cachedLineData) {
-        debug('Returning cached API lyrics for track:', trackId);
         return {
             lines: cachedLineData.map(l => l.text),
             lineData: cachedLineData,
@@ -358,13 +346,11 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
     try {
         const lyrics = await querySpicyLyricsAPI(trackId);
         if (!lyrics) {
-            debug('No lyrics data from API');
             return null;
         }
         
         const lineData = extractLinesData(lyrics);
         if (lineData.length === 0) {
-            debug('No text lines extracted from API lyrics');
             return null;
         }
         
@@ -373,7 +359,6 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
         cachedLanguage = lyrics.Language || null;
         
         const lines = lineData.map(l => l.text);
-        debug(`Fetched ${lines.length} lyrics lines from API (type: ${lyrics.Type}, lang: ${lyrics.Language || 'unknown'})`);
         return { lines, lineData, language: lyrics.Language || undefined };
     } catch (err) {
         warn('Failed to fetch lyrics from SpicyLyrics API:', err);
@@ -384,7 +369,6 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
 export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines: string[]; lineData: LyricLineData[]; language?: string } | null> {
     const trackId = getTrackIdFromUri(trackUri);
     if (!trackId) {
-        debug('No valid track ID in URI:', trackUri);
         return null;
     }
 

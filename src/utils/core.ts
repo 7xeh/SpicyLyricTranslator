@@ -14,7 +14,7 @@ import {
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, isSameLanguage } from './languageDetection';
 import { openSettingsModal } from './settings';
-import { debug, warn, error } from './debug';
+import { warn, error } from './debug';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 
 let viewControlsObserver: MutationObserver | null = null;
@@ -22,6 +22,10 @@ let lyricsObserver: MutationObserver | null = null;
 let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let viewModeIntervalId: ReturnType<typeof setInterval> | null = null;
 let romanizationToggleListener: (() => void) | null = null;
+let romanizationToggleButton: Element | null = null;
+let observedLyricsContent: Element | null = null;
+let lastKnownRomanizationState: boolean | null = null;
+let lastTranslatedRomanizationState: boolean | null = null;
 
 function getPIPWindow(): Window | null {
     try {
@@ -32,11 +36,6 @@ function getPIPWindow(): Window | null {
 }
 
 export function isRomanizationActive(): boolean {
-    const page = document.querySelector('#SpicyLyricsPage');
-    if (!page?.classList.contains('Lyrics_RomanizationAvailable')) {
-        return false;
-    }
-
     const btn = document.querySelector('#RomanizationToggle');
     if (btn) {
         if (btn.classList.contains('active')) return true;
@@ -335,8 +334,6 @@ function getLyricsLines(): NodeListOf<Element> {
 }
 
 export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500): Promise<void> {
-    debug('Waiting for lyrics to load...');
-    
     for (let i = 0; i < retries; i++) {
         if (!isSpicyLyricsOpen() || state.isTranslating) return;
 
@@ -357,9 +354,19 @@ export async function translateCurrentLyrics(): Promise<void> {
     if (state.isTranslating) return;
     
     const currentTrackUri = getCurrentTrackUri();
-    if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0) {
-        debug('Already translated this track, skipping');
+    const currentRomanization = isRomanizationActive();
+    const romanizationChanged = lastTranslatedRomanizationState !== null && currentRomanization !== lastTranslatedRomanizationState;
+    
+    if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0 && !romanizationChanged) {
+        const lines = getLyricsLines();
+        if (lines.length > 0 && !document.querySelector('.slt-interleaved-translation, .slt-replace-line, .spicy-translated')) {
+            applyTranslations(lines);
+        }
         return;
+    }
+    
+    if (romanizationChanged) {
+        removeTranslations();
     }
     
     if (isOffline()) {
@@ -403,7 +410,6 @@ export async function translateCurrentLyrics(): Promise<void> {
         const romanizationOn = isRomanizationActive();
 
         if (romanizationOn) {
-            debug('Romanization is active — skipping pre-API language detection on DOM text');
         } else {
             const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
             if (preApiSkipCheck.detectedLanguage) {
@@ -420,7 +426,6 @@ export async function translateCurrentLyrics(): Promise<void> {
                 apiLineTexts = apiResult.lines;
                 apiLanguage = apiResult.language;
                 apiLineData = apiResult.lineData;
-                debug(`Got ${apiLineTexts.length} lines from SpicyLyrics API (DOM has ${lines.length} lines)`);
             }
         } catch (apiErr) {
             warn('SpicyLyrics API fetch failed, falling back to DOM:', apiErr);
@@ -437,7 +442,6 @@ export async function translateCurrentLyrics(): Promise<void> {
                     apiVocalLineData.push(apiLineData[i]);
                 }
             }
-            debug(`API: ${apiLineTexts.length} total, ${apiVocalTexts.length} vocal (DOM: ${lines.length})`);
         }
         
         let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
@@ -453,18 +457,29 @@ export async function translateCurrentLyrics(): Promise<void> {
                 
                 if (apiVocalTexts.length === lines.length) {
                     useApiLines = true;
-                    debug(`Romanization: DOM count matches API vocal count (${lines.length}) on retry ${retryAttempt + 1}`);
                     break;
                 }
             }
             
             if (!useApiLines && apiVocalTexts.length > 0 && lines.length > 0) {
-                debug(`Romanization: API vocal (${apiVocalTexts.length}) vs DOM (${lines.length}) — using API text mapped to DOM count`);
                 useApiLines = true;
                 const domCount = lines.length;
                 if (apiVocalTexts.length > domCount) {
                     apiVocalTexts = apiVocalTexts.slice(0, domCount);
                     if (apiVocalLineData) apiVocalLineData = apiVocalLineData.slice(0, domCount);
+                } else if (apiVocalTexts.length < domCount) {
+                    // Pad with romanized DOM text for excess lines the API doesn't cover
+                    for (let i = apiVocalTexts.length; i < domCount; i++) {
+                        apiVocalTexts.push(domLineTexts[i] || '');
+                        if (apiVocalLineData) {
+                            apiVocalLineData.push({
+                                text: domLineTexts[i] || '',
+                                startTime: 0,
+                                endTime: 0,
+                                isInstrumental: false,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -480,14 +495,12 @@ export async function translateCurrentLyrics(): Promise<void> {
                 
                 if (apiVocalTexts.length === lines.length) {
                     useApiLines = true;
-                    debug(`DOM refreshed on retry ${retryAttempt + 1}: count now matches (${lines.length})`);
                     break;
                 }
                 
                 const apiTextSet = new Set(apiVocalTexts.map(t => t.trim().toLowerCase()));
                 const domMatchCount = domLineTexts.filter(t => apiTextSet.has(t.trim().toLowerCase())).length;
                 if (domMatchCount > domLineTexts.length * 0.3) {
-                    debug(`DOM refreshed on retry ${retryAttempt + 1}: ${domMatchCount}/${domLineTexts.length} text matches`);
                     break;
                 }
             }
@@ -520,15 +533,12 @@ export async function translateCurrentLyrics(): Promise<void> {
                     });
                 }
             }
-            debug(`Text-based matching: ${matchCount}/${domLineTexts.length} DOM lines matched to API timing data`);
         }
         
         const lineTexts = useApiLines ? apiVocalTexts! : domLineTexts;
         
         if (useApiLines) {
-            debug('Using SpicyLyrics API vocal lines for translation');
         } else if (apiVocalTexts) {
-            debug(`API vocal count (${apiVocalTexts.length}) != DOM count (${lines.length}), using DOM with text-matched timing`);
         }
         
         const nonEmptyTexts = lineTexts.filter(t => t.trim().length > 0);
@@ -546,7 +556,8 @@ export async function translateCurrentLyrics(): Promise<void> {
             skipCheck = apiLangSame
                 ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
                 : { skip: false, detectedLanguage: apiLanguage };
-            debug('Romanization active: using API language (' + apiLanguage + ') for skip check instead of text analysis');
+        } else if (romanizationOn) {
+            skipCheck = { skip: false, detectedLanguage: 'unknown' };
         } else {
             skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
         }
@@ -559,8 +570,10 @@ export async function translateCurrentLyrics(): Promise<void> {
             const nonTargetIndexes = getConfidentNonTargetLineIndexes(lineTexts, state.targetLanguage);
 
             if (nonTargetIndexes.length === 0) {
+                removeTranslations();
                 state.isTranslating = false;
                 state.lastTranslatedSongUri = currentTrackUri;
+                lastTranslatedRomanizationState = romanizationOn;
                 restoreButtonState();
                 if (state.showNotifications && Spicetify.showNotification) {
                     Spicetify.showNotification(skipCheck.reason || 'Lyrics already in target language');
@@ -633,6 +646,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         });
         
         state.lastTranslatedSongUri = currentTrackUri;
+        lastTranslatedRomanizationState = romanizationOn;
         
         if (useApiLines && apiVocalLineData) {
             setLineTimingData(apiVocalLineData);
@@ -642,7 +656,13 @@ export async function translateCurrentLyrics(): Promise<void> {
             setLineTimingData(apiLineData);
         }
         
-        applyTranslations(lines);
+        // Re-query DOM lines fresh to avoid stale references after async operations
+        const freshLines = getLyricsLines();
+        if (freshLines.length > 0) {
+            applyTranslations(freshLines);
+        } else {
+            applyTranslations(lines);
+        }
         
         if (state.showNotifications && Spicetify.showNotification) {
             const wasActuallyTranslated = translations.some(t => t.wasTranslated === true);
@@ -775,6 +795,8 @@ export function setupLyricsObserver(): void {
     const lyricsContent = getLyricsContent();
     if (!lyricsContent) return;
     
+    observedLyricsContent = lyricsContent;
+    
     try {
         lyricsObserver = new MutationObserver((mutations) => {
             if (!state.isEnabled || state.isTranslating) return;
@@ -856,6 +878,9 @@ export function onSpicyLyricsClose(): void {
         lyricsObserver.disconnect();
         lyricsObserver = null;
     }
+    observedLyricsContent = null;
+    lastKnownRomanizationState = null;
+    lastTranslatedRomanizationState = null;
     cleanupRomanizationWatcher();
 }
 
@@ -863,34 +888,39 @@ function setupRomanizationWatcher(): void {
     cleanupRomanizationWatcher();
 
     const handler = () => {
-        setTimeout(() => {
-            debug('Romanization toggle clicked — refreshing translations');
+        setTimeout(async () => {
+            if (state.isEnabled) {
+                // Wait for any in-progress translation to finish first
+                for (let i = 0; i < 20 && state.isTranslating; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
 
-            if (state.isEnabled && !state.isTranslating) {
-                state.lastTranslatedSongUri = null;
-                state.translatedLyrics.clear();
-                state._translationsByIndex = undefined;
-                clearLyricsCache();
+                // Remove existing translations from DOM
                 removeTranslations();
-                waitForLyricsAndTranslate(15, 500);
+                // Re-setup observer since LyricsContent may have been rebuilt
+                setupLyricsObserver();
+                // Force full re-translate (clear URI to bypass early return)
+                state.lastTranslatedSongUri = null;
+                await waitForLyricsAndTranslate(15, 500);
             }
-        }, 600);
+        }, 1200);
     };
 
     const btn = document.querySelector('#RomanizationToggle');
     if (btn) {
         btn.addEventListener('click', handler);
         romanizationToggleListener = handler;
+        romanizationToggleButton = btn;
     }
 }
 
 function cleanupRomanizationWatcher(): void {
     if (romanizationToggleListener) {
-        const btn = document.querySelector('#RomanizationToggle');
-        if (btn) {
-            btn.removeEventListener('click', romanizationToggleListener);
+        if (romanizationToggleButton) {
+            romanizationToggleButton.removeEventListener('click', romanizationToggleListener);
         }
         romanizationToggleListener = null;
+        romanizationToggleButton = null;
     }
 }
 
@@ -904,9 +934,43 @@ export function setupViewModeObserver(): void {
                 insertTranslateButton();
             }
             
+            // Detect if romanization button was replaced (framework re-render)
+            if (romanizationToggleButton && !romanizationToggleButton.isConnected) {
+                romanizationToggleListener = null;
+                romanizationToggleButton = null;
+            }
+            
             if (!romanizationToggleListener && document.querySelector('#RomanizationToggle')) {
                 setupRomanizationWatcher();
             }
+            
+            // Detect if LyricsContent was replaced (framework re-render)
+            if (observedLyricsContent && !observedLyricsContent.isConnected) {
+                if (lyricsObserver) {
+                    lyricsObserver.disconnect();
+                    lyricsObserver = null;
+                }
+                observedLyricsContent = null;
+            }
+            if (!lyricsObserver && state.isEnabled) {
+                setupLyricsObserver();
+            }
+            
+            // Detect romanization state changes missed by click handler
+            const currentRomanization = isRomanizationActive();
+            if (lastKnownRomanizationState !== null && currentRomanization !== lastKnownRomanizationState) {
+                if (state.isEnabled) {
+                    // Don't act if already translating — the romanization handler or
+                    // translateCurrentLyrics will pick up the change via romanizationChanged check
+                    if (!state.isTranslating) {
+                        removeTranslations();
+                        setupLyricsObserver();
+                        state.lastTranslatedSongUri = null;
+                        waitForLyricsAndTranslate(15, 500);
+                    }
+                }
+            }
+            lastKnownRomanizationState = currentRomanization;
             
             const pipWindow = getPIPWindow();
             if (pipWindow && !pipWindow.document.querySelector('#TranslateToggle')) {

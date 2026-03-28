@@ -1,7 +1,7 @@
 import { storage } from './storage';
 import { state } from './state';
 import { SUPPORTED_LANGUAGES, clearTranslationCache, setPreferredApi } from './translator';
-import { debug, info, isDebugEnabled, setDebugMode } from './debug';
+import { isDebugEnabled, setDebugMode } from './debug';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog } from './updater';
 import { OverlayMode } from './translationOverlay';
@@ -85,16 +85,16 @@ function areDevToolsEnabled(): boolean {
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row';
+    row.className = 'x-settings-row qV_CxbowaNkMarye';
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <label class="x-toggle-wrapper">
-                <input id="${id}" class="x-toggle-input" type="checkbox" ${checked ? 'checked' : ''}>
-                <span class="x-toggle-indicatorWrapper">
-                    <span class="x-toggle-indicator"></span>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <label class="x-toggle-wrapper _nD_jYvjV80Rf8sX">
+                <input id="${id}" class="x-toggle-input vTxmx3oTF8tWUPD7" type="checkbox" ${checked ? 'checked' : ''}>
+                <span class="x-toggle-indicator t3q6uAPe7y0rAqRKWrapper hzLQN8eYDPYyn1km">
+                    <span class="x-toggle-indicator t3q6uAPe7y0rAqRK"></span>
                 </span>
             </label>
         </div>
@@ -108,14 +108,14 @@ function createNativeToggle(id: string, label: string, checked: boolean, onChang
 
 function createNativeDropdown(id: string, label: string, options: { value: string; text: string }[], currentValue: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row';
+    row.className = 'x-settings-row qV_CxbowaNkMarye';
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
             <span>
-                <select class="main-dropDown-dropDown" id="${id}">
+                <select class="main-dropDown-dropDown lu9EejNhmuMFF3oS" id="${id}">
                     ${options.map(opt => `<option value="${opt.value}" ${opt.value === currentValue ? 'selected' : ''}>${opt.text}</option>`).join('')}
                 </select>
             </span>
@@ -130,13 +130,13 @@ function createNativeDropdown(id: string, label: string, options: { value: strin
 
 function createNativeButton(id: string, label: string, buttonText: string, onClick: () => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row';
+    row.className = 'x-settings-row qV_CxbowaNkMarye';
     row.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <button id="${id}" class="Button-sc-y0gtbx-0 Button-buttonSecondary-small-useBrowserDefaultFocusStyle encore-text-body-small-bold e-91000-button--small" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <button id="${id}" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
         </div>
     `;
     
@@ -150,12 +150,12 @@ function createNativeSettingsSection(): HTMLElement {
     const section = document.createElement('div');
     section.id = SETTINGS_ID;
     section.innerHTML = `
-        <div class="x-settings-section">
+        <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
             <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
     
-    const sectionContent = section.querySelector('.x-settings-section') as HTMLElement;
+    const sectionContent = section.querySelector('.x-settings-section fNaaQ0Cp8Yzy19j8') as HTMLElement;
 
     const languageOptions = SUPPORTED_LANGUAGES.map(l => ({ value: l.code, text: l.name }));
     sectionContent.appendChild(createNativeDropdown(
@@ -226,14 +226,14 @@ function createNativeSettingsSection(): HTMLElement {
     
     const customApiRow = document.createElement('div');
     customApiRow.id = 'slt-settings-custom-api-row';
-    customApiRow.className = 'x-settings-row';
+    customApiRow.className = 'x-settings-row qV_CxbowaNkMarye';
     customApiRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
     customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('custom-api-url') || ''}" placeholder="https://your-api.com/translate">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('custom-api-url') || ''}" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector('input') as HTMLInputElement;
@@ -253,14 +253,14 @@ function createNativeSettingsSection(): HTMLElement {
     // Custom API Key row
     const customApiKeyRow = document.createElement('div');
     customApiKeyRow.id = 'slt-settings-custom-api-key-row';
-    customApiKeyRow.className = 'x-settings-row';
+    customApiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
     customApiKeyRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
     customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector('input') as HTMLInputElement;
@@ -274,14 +274,14 @@ function createNativeSettingsSection(): HTMLElement {
     // DeepL API Key row
     const deeplKeyRow = document.createElement('div');
     deeplKeyRow.id = 'slt-settings-deepl-key-row';
-    deeplKeyRow.className = 'x-settings-row';
+    deeplKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
     deeplKeyRow.style.display = storage.get('preferred-api') === 'deepl' ? '' : 'none';
     deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector('input') as HTMLInputElement;
@@ -295,14 +295,14 @@ function createNativeSettingsSection(): HTMLElement {
     // OpenAI API Key row
     const openaiKeyRow = document.createElement('div');
     openaiKeyRow.id = 'slt-settings-openai-key-row';
-    openaiKeyRow.className = 'x-settings-row';
+    openaiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
     openaiKeyRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
     openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector('input') as HTMLInputElement;
@@ -316,14 +316,14 @@ function createNativeSettingsSection(): HTMLElement {
     // OpenAI Model row
     const openaiModelRow = document.createElement('div');
     openaiModelRow.id = 'slt-settings-openai-model-row';
-    openaiModelRow.className = 'x-settings-row';
+    openaiModelRow.className = 'x-settings-row qV_CxbowaNkMarye';
     openaiModelRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
     openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector('input') as HTMLInputElement;
@@ -337,14 +337,14 @@ function createNativeSettingsSection(): HTMLElement {
     // Gemini API Key row
     const geminiKeyRow = document.createElement('div');
     geminiKeyRow.id = 'slt-settings-gemini-key-row';
-    geminiKeyRow.className = 'x-settings-row';
+    geminiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
     geminiKeyRow.style.display = storage.get('preferred-api') === 'gemini' ? '' : 'none';
     geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="${storage.get('gemini-api-key') || ''}" placeholder="AIza...">
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('gemini-api-key') || ''}" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector('input') as HTMLInputElement;
@@ -515,21 +515,21 @@ function createNativeSettingsSection(): HTMLElement {
     ));
     
     const githubRow = document.createElement('div');
-    githubRow.className = 'x-settings-row';
+    githubRow.className = 'x-settings-row qV_CxbowaNkMarye';
     githubRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
         </div>
-        <div class="x-settings-secondColumn">
-            <a href="${REPO_URL}" target="_blank" class="Button-sc-y0gtbx-0 Button-buttonSecondary-small-iconTrailing-useBrowserDefaultFocusStyle encore-text-body-small-bold e-91000-button--small e-91000-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
+        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+            <a href="${REPO_URL}" target="_blank" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button e-10180-legacy-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
         </div>
     `;
     sectionContent.appendChild(githubRow);
     
     const shortcutRow = document.createElement('div');
-    shortcutRow.className = 'x-settings-row';
+    shortcutRow.className = 'x-settings-row qV_CxbowaNkMarye';
     shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn">
+        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
             <span class="e-91000-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
         </div>
     `;
@@ -543,7 +543,6 @@ function injectSettingsIntoPage(): void {
                               document.querySelector('[data-testid="settings-page"]') ||
                               document.querySelector('main.x-settings-container');
     if (!settingsContainer) {
-        debug('Settings container not found');
         return;
     }
 
@@ -553,8 +552,6 @@ function injectSettingsIntoPage(): void {
         return;
     }
     
-    debug('Found settings container, injecting settings...');
-    
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
     
     const spicyLyricsSettings = document.getElementById('spicy-lyrics-settings');
@@ -562,24 +559,19 @@ function injectSettingsIntoPage(): void {
     
     if (spicyLyricsDevSettings) {
         spicyLyricsDevSettings.after(settingsSection);
-        debug('Settings injected after spicy-lyrics-dev-settings');
     } else if (spicyLyricsSettings) {
         spicyLyricsSettings.after(settingsSection);
-        debug('Settings injected after spicy-lyrics-settings');
     } else {
-        const allSections = settingsContainer.querySelectorAll('.x-settings-section');
+        const allSections = settingsContainer.querySelectorAll('.x-settings-section fNaaQ0Cp8Yzy19j8');
         if (allSections.length > 0) {
             const lastSection = allSections[allSections.length - 1];
-            const lastSectionParent = lastSection.closest('div:not(.x-settings-section):not(.x-settings-container)') || lastSection;
+            const lastSectionParent = lastSection.closest('div:not(.x-settings-section fNaaQ0Cp8Yzy19j8):not(.x-settings-container)') || lastSection;
             lastSectionParent.after(settingsSection);
-            debug('Settings injected after last settings section');
         } else {
             settingsContainer.appendChild(settingsSection);
-            debug('Settings appended to settings container');
         }
     }
     
-    debug('Settings injected into Spotify settings page');
 }
 
 function isOnSettingsPage(): boolean {
@@ -606,17 +598,13 @@ function isOnSettingsPage(): boolean {
 }
 
 function watchForSettingsPage(): void {
-    debug('Starting settings page watcher...');
-    
     if (isOnSettingsPage()) {
-        debug('Already on settings page, injecting...');
         setTimeout(injectSettingsIntoPage, 100);
         setTimeout(injectSettingsIntoPage, 500);
     }
     
     if (Spicetify.Platform?.History) {
         Spicetify.Platform.History.listen((location: any) => {
-            debug('Navigation detected:', location?.pathname);
             if (location?.pathname?.includes('preferences') || location?.pathname?.includes('settings')) {
                 setTimeout(injectSettingsIntoPage, 100);
                 setTimeout(injectSettingsIntoPage, 300);
@@ -630,7 +618,6 @@ function watchForSettingsPage(): void {
         const settingsContainer = document.querySelector('.x-settings-container') || 
                                   document.querySelector('[data-testid="settings-page"]');
         if (settingsContainer && !document.getElementById(SETTINGS_ID)) {
-            debug('Settings container detected via MutationObserver');
             injectSettingsIntoPage();
         }
         
@@ -638,7 +625,6 @@ function watchForSettingsPage(): void {
         const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');
         if (ourSettings && spicyLyricsDevSettings && ourSettings.previousElementSibling !== spicyLyricsDevSettings) {
             spicyLyricsDevSettings.after(ourSettings);
-            debug('Repositioned settings after spicy-lyrics-dev-settings');
         }
     });
     
@@ -1160,7 +1146,6 @@ async function playCachedTrack(trackUri: string): Promise<boolean> {
             return true;
         }
     } catch (e) {
-        debug('Direct playback API failed, trying Cosmos fallback:', e);
     }
 
     const cosmos = (Spicetify as any)?.CosmosAsync;
@@ -1184,7 +1169,6 @@ async function playCachedTrack(trackUri: string): Promise<boolean> {
                 await cosmos.put(attempt.url, attempt.body);
                 return true;
             } catch (e) {
-                debug('Cosmos play attempt failed:', attempt.url, e);
             }
         }
     }
@@ -1196,7 +1180,6 @@ async function playCachedTrack(trackUri: string): Promise<boolean> {
             return true;
         }
     } catch (e) {
-        debug('Failed to navigate to track page as fallback:', e);
     }
 
     return false;
@@ -1397,7 +1380,6 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             }
         }
     } catch (e) {
-        debug('Failed to fetch source lyrics for side-by-side view:', e);
         const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
         if (rowsContainer) {
             rowsContainer.innerHTML = renderRows([]);
@@ -1667,7 +1649,6 @@ function createCacheViewerUI(): HTMLElement {
                     await new Promise(resolve => setTimeout(resolve, 120));
                     await openCachedLyricsViewer(uri, lang, sourceLang);
                 } catch (error) {
-                    debug('Failed to open cached lyrics viewer:', error);
                     if (Spicetify.showNotification) {
                         Spicetify.showNotification('Failed to open cached lyrics viewer', true);
                     }
@@ -1770,10 +1751,8 @@ export async function registerSettings(): Promise<void> {
                         false,
                         openSettingsModal
                     ).register();
-                    info('Settings menu item registered');
                     return true;
                 } catch (e) {
-                    debug('Menu.Item not available:', e);
                 }
             }
             return false;
@@ -1784,7 +1763,6 @@ export async function registerSettings(): Promise<void> {
         }
     }
 
-    debug('Settings registration complete');
 }
 
 export default registerSettings;

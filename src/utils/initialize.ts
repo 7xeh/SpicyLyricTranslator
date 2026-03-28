@@ -6,7 +6,7 @@ import { injectStyles } from '../styles/main';
 import { registerSettings } from './settings';
 import { initConnectionIndicator, getConnectionState, refreshConnection } from './connectivity';
 import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
-import { info, debug } from './debug';
+
 
 import { 
     translateCurrentLyrics, 
@@ -25,8 +25,6 @@ export async function initialize(): Promise<void> {
     while (typeof Spicetify === 'undefined' || !Spicetify.Platform) {
         await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
-    info('Initializing...');
     
     setPreferredApi(state.preferredApi, state.customApiUrl, {
         customApiKey: state.customApiKey,
@@ -47,7 +45,7 @@ export async function initialize(): Promise<void> {
     startUpdateChecker(30 * 60 * 1000);
     setupKeyboardShortcut();
 
-    showPostUpdateChangelog().catch(e => debug('Changelog display error:', e));
+    showPostUpdateChangelog().catch(() => {});
     
     let wasSpicyLyricsOpen = false;
     const observer = new MutationObserver((mutations) => {
@@ -116,5 +114,4 @@ export async function initialize(): Promise<void> {
         }
     };
     
-    info('Initialized successfully!');
 }

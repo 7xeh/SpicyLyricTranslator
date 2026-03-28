@@ -1,5 +1,5 @@
 import { storage } from './storage';
-import { debug, warn, error as logError, info } from './debug';
+import { warn, error as logError } from './debug';
 
 declare const __VERSION__: string;
 
@@ -165,7 +165,6 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
             releaseNotes = githubRelease?.body || '';
         }
     } catch (e) {
-        debug('Could not fetch GitHub release notes:', e);
     }
     
     try {
@@ -176,7 +175,6 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
             const version = parseVersion(data.version);
             
             if (version) {
-                debug('Got version from self-hosted API:', data.version);
                 return {
                     version,
                     release: {
@@ -399,116 +397,196 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
     content.className = 'slt-update-modal';
     content.innerHTML = `
         <style>
+            @keyframes slt-modal-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes slt-shimmer {
+                0% { background-position: -200% center; }
+                100% { background-position: 200% center; }
+            }
+            @keyframes slt-progress-glow {
+                0%, 100% { box-shadow: 0 0 8px rgba(29, 185, 84, 0.3); }
+                50% { box-shadow: 0 0 16px rgba(29, 185, 84, 0.6); }
+            }
+            @keyframes slt-pulse-ring {
+                0% { transform: scale(0.9); opacity: 0.6; }
+                50% { transform: scale(1.05); opacity: 1; }
+                100% { transform: scale(0.9); opacity: 0.6; }
+            }
+            @keyframes slt-arrow-bounce {
+                0%, 100% { transform: translateX(0); }
+                50% { transform: translateX(4px); }
+            }
             .slt-update-modal {
-                padding: 16px;
+                padding: 20px;
                 color: var(--spice-text);
+                animation: slt-modal-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
             }
-            .slt-update-modal .update-header {
-                font-size: 16px;
-                font-weight: 600;
-                margin-bottom: 16px;
-                color: var(--spice-text);
-            }
-            .slt-update-modal .version-info {
-                background: var(--spice-card);
-                padding: 12px 16px;
-                border-radius: 8px;
-                margin-bottom: 16px;
-            }
-            .slt-update-modal .version-row {
+            .slt-update-modal .update-hero {
                 display: flex;
-                justify-content: space-between;
                 align-items: center;
-                margin-bottom: 8px;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.12) 0%, rgba(29, 185, 84, 0.04) 100%);
+                border: 1px solid rgba(29, 185, 84, 0.18);
             }
-            .slt-update-modal .version-row:last-child {
-                margin-bottom: 0;
+            .slt-update-modal .update-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #1db954, #1ed760);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
             }
-            .slt-update-modal .version-label {
+            .slt-update-modal .update-hero-text {
+                flex: 1;
+            }
+            .slt-update-modal .update-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+                margin-bottom: 2px;
+            }
+            .slt-update-modal .update-hero-subtitle {
+                font-size: 12px;
                 color: var(--spice-subtext);
             }
-            .slt-update-modal .version-value {
-                font-weight: 600;
-                color: var(--spice-text);
+            .slt-update-modal .version-info {
+                background: rgba(255, 255, 255, 0.04);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
             }
-            .slt-update-modal .version-new {
-                color: #1db954;
+            .slt-update-modal .version-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 12px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            }
+            .slt-update-modal .version-badge.current {
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--spice-subtext);
+            }
+            .slt-update-modal .version-arrow {
+                color: var(--spice-subtext);
+                font-size: 16px;
+                animation: slt-arrow-bounce 1.8s ease-in-out infinite;
+                opacity: 0.7;
+            }
+            .slt-update-modal .version-badge.latest {
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.2), rgba(30, 215, 96, 0.12));
+                color: #1ed760;
+                border: 1px solid rgba(29, 185, 84, 0.25);
+                box-shadow: 0 0 10px rgba(29, 185, 84, 0.1);
             }
             .slt-update-modal .release-notes {
-                background: var(--spice-card);
-                padding: 12px 16px;
-                border-radius: 8px;
-                margin-bottom: 16px;
-                max-height: 250px;
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                max-height: 260px;
                 overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-update-modal .release-notes::-webkit-scrollbar {
-                width: 6px;
+                width: 5px;
             }
             .slt-update-modal .release-notes::-webkit-scrollbar-track {
                 background: transparent;
             }
             .slt-update-modal .release-notes::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 3px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
             }
             .slt-update-modal .release-notes::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.3);
+                background: rgba(255, 255, 255, 0.25);
             }
             .slt-update-modal .release-notes-title {
                 font-weight: 600;
+                font-size: 13px;
                 margin-bottom: 12px;
                 color: var(--spice-text);
                 display: flex;
                 align-items: center;
                 gap: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
             }
-            .slt-update-modal .release-notes-title::before {
-                content: '📋';
+            .slt-update-modal .release-notes-title svg {
+                width: 14px;
+                height: 14px;
+                opacity: 0.7;
             }
             .slt-update-modal .release-notes-content {
                 color: var(--spice-subtext);
                 font-size: 13px;
-                line-height: 1.6;
+                line-height: 1.65;
             }
             .slt-update-modal .update-progress {
                 display: none;
-                background: var(--spice-card);
-                padding: 16px;
-                border-radius: 8px;
-                margin-bottom: 16px;
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-update-modal .progress-bar {
-                height: 8px;
-                background: var(--spice-button);
-                border-radius: 4px;
+                height: 6px;
+                background: rgba(255, 255, 255, 0.06);
+                border-radius: 6px;
                 overflow: hidden;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
             }
             .slt-update-modal .progress-bar-fill {
                 height: 100%;
-                background: #1db954;
-                border-radius: 4px;
-                transition: width 0.3s ease;
+                background: linear-gradient(90deg, #1db954, #1ed760, #1db954);
+                background-size: 200% 100%;
+                border-radius: 6px;
+                transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 width: 0%;
+                animation: slt-shimmer 2s linear infinite, slt-progress-glow 2s ease-in-out infinite;
             }
             .slt-update-modal .progress-text {
-                font-size: 13px;
+                font-size: 12px;
                 color: var(--spice-subtext);
                 text-align: center;
+                font-weight: 500;
             }
             .slt-update-modal .update-success {
                 display: flex;
                 align-items: center;
                 gap: 10px;
                 color: #1db954;
+                font-weight: 500;
             }
             .slt-update-modal .update-error {
                 display: flex;
                 align-items: center;
                 gap: 10px;
                 color: #e74c3c;
+                font-weight: 500;
             }
             .slt-update-modal .success-icon,
             .slt-update-modal .error-icon {
@@ -516,51 +594,74 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
             }
             .slt-update-modal .update-buttons {
                 display: flex;
-                gap: 12px;
+                gap: 10px;
                 justify-content: flex-end;
             }
             .slt-update-modal .update-btn {
-                padding: 10px 20px;
-                border-radius: 20px;
+                padding: 10px 24px;
+                border-radius: 24px;
                 border: none;
                 cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.2s;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-update-modal .update-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-update-modal .update-btn:hover::after {
+                opacity: 1;
             }
             .slt-update-modal .update-btn.primary {
-                background: #1db954;
+                background: linear-gradient(135deg, #1db954, #1ed760);
                 color: #000;
+                box-shadow: 0 2px 12px rgba(29, 185, 84, 0.25);
             }
             .slt-update-modal .update-btn.primary:hover {
-                background: #1ed760;
-                transform: scale(1.02);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(29, 185, 84, 0.35);
+            }
+            .slt-update-modal .update-btn.primary:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(29, 185, 84, 0.2);
             }
             .slt-update-modal .update-btn.secondary {
-                background: var(--spice-card);
+                background: rgba(255, 255, 255, 0.06);
                 color: var(--spice-text);
+                border: 1px solid rgba(255, 255, 255, 0.08);
             }
             .slt-update-modal .update-btn.secondary:hover {
-                background: var(--spice-button);
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.14);
             }
             .slt-update-modal .update-instructions {
-                background: var(--spice-card);
-                border-radius: 8px;
-                padding: 16px;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 10px;
+                padding: 16px 18px;
                 margin-top: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-update-modal .update-instructions p {
                 margin: 0 0 12px 0;
                 color: var(--spice-text);
             }
             .slt-update-modal .update-instructions code {
-                background: rgba(0, 0, 0, 0.3);
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-family: 'Fira Code', 'Consolas', monospace;
+                background: rgba(0, 0, 0, 0.4);
+                padding: 3px 8px;
+                border-radius: 5px;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
                 font-size: 12px;
-                color: #1db954;
+                color: #1ed760;
                 word-break: break-all;
+                border: 1px solid rgba(29, 185, 84, 0.15);
             }
             .slt-update-modal .update-instructions ol {
                 margin: 0;
@@ -578,19 +679,20 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
                 display: inline-block;
             }
         </style>
-        <div class="update-header">🎉 A new version is available!</div>
-        <div class="version-info">
-            <div class="version-row">
-                <span class="version-label">Current Version:</span>
-                <span class="version-value">${currentVersion.text}</span>
-            </div>
-            <div class="version-row">
-                <span class="version-label">Latest Version:</span>
-                <span class="version-value version-new">${latestVersion.text}</span>
+        <div class="update-hero">
+            <div class="update-hero-icon">🚀</div>
+            <div class="update-hero-text">
+                <div class="update-hero-title">A new version is available!</div>
+                <div class="update-hero-subtitle">Spicy Lyric Translator has a shiny new update ready for you.</div>
             </div>
         </div>
+        <div class="version-info">
+            <span class="version-badge current">${currentVersion.text}</span>
+            <span class="version-arrow">→</span>
+            <span class="version-badge latest">${latestVersion.text}</span>
+        </div>
         <div class="release-notes">
-            <div class="release-notes-title">Changelog</div>
+            <div class="release-notes-title"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z"/></svg>Changelog</div>
             <div class="release-notes-content">${formatReleaseNotes(release.body)}</div>
         </div>
         <div class="update-progress">
@@ -607,7 +709,7 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
     
     if (Spicetify.PopupModal) {
         Spicetify.PopupModal.display({
-            title: 'Spicy Lyric Translator - Update Available',
+            title: 'Spicy Lyric Translator',
             content: content,
             isLarge: true
         });
@@ -781,15 +883,12 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
         const current = getCurrentVersion();
         
         if (compareVersions(latest.version, current) > 0) {
-            debug(`Update available: ${current.text} → ${latest.version.text}`);
             if (!hasShownUpdateNotice) {
                 hasShownUpdateNotice = true;
-                info(`Auto-updating Spicy Lyric Translator to ${latest.version.text}`);
             }
             await performSilentAutoUpdate(latest.version, latest.release.body);
             hasShownUpdateNotice = true;
         } else {
-            debug('Already on latest version:', current.text);
             resetBackoff();
             hasShownUpdateNotice = false;
         }
@@ -826,7 +925,6 @@ export function startUpdateChecker(intervalMs: number = DEFAULT_CHECK_INTERVAL_M
 
     scheduleNextCheck(5000);
 
-    info('Update checker started');
 }
 
 export async function getUpdateInfo(): Promise<{
@@ -864,104 +962,187 @@ function showChangelogModal(version: string, changelog: string): void {
     content.className = 'slt-changelog-modal';
     content.innerHTML = `
         <style>
-            .slt-changelog-modal {
-                padding: 16px;
-                color: var(--spice-text);
+            @keyframes slt-cl-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
             }
-            .slt-changelog-modal .changelog-header {
+            @keyframes slt-confetti-float {
+                0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+                100% { transform: translateY(-20px) rotate(180deg); opacity: 0; }
+            }
+            .slt-changelog-modal {
+                padding: 20px;
+                color: var(--spice-text);
+                animation: slt-cl-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .slt-changelog-modal .changelog-hero {
                 display: flex;
                 align-items: center;
-                gap: 12px;
-                margin-bottom: 16px;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.12) 0%, rgba(99, 102, 241, 0.08) 100%);
+                border: 1px solid rgba(29, 185, 84, 0.15);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-changelog-modal .changelog-hero::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(29, 185, 84, 0.4), transparent);
+            }
+            .slt-changelog-modal .changelog-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #1db954, #1ed760);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
+            }
+            .slt-changelog-modal .changelog-hero-text {
+                flex: 1;
+            }
+            .slt-changelog-modal .changelog-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+                display: flex;
+                align-items: center;
+                gap: 8px;
             }
             .slt-changelog-modal .changelog-badge {
-                background: #1db954;
+                background: linear-gradient(135deg, #1db954, #1ed760);
                 color: #000;
-                padding: 4px 12px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 800;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+                letter-spacing: 0.3px;
+                box-shadow: 0 2px 8px rgba(29, 185, 84, 0.2);
             }
-            .slt-changelog-modal .changelog-subtitle {
+            .slt-changelog-modal .changelog-hero-subtitle {
+                font-size: 12px;
                 color: var(--spice-subtext);
-                font-size: 13px;
+                margin-top: 3px;
             }
             .slt-changelog-modal .changelog-content {
-                background: var(--spice-card);
-                padding: 16px;
-                border-radius: 8px;
-                margin-bottom: 16px;
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 16px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
                 max-height: 400px;
                 overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.06);
                 font-size: 13px;
-                line-height: 1.6;
+                line-height: 1.65;
                 color: var(--spice-subtext);
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar {
-                width: 6px;
+                width: 5px;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-track {
                 background: transparent;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 3px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
             }
             .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.3);
+                background: rgba(255, 255, 255, 0.25);
             }
             .slt-changelog-modal .changelog-content a {
-                color: #1db954;
+                color: #1ed760;
                 text-decoration: none;
+                border-bottom: 1px solid rgba(30, 215, 96, 0.3);
+                transition: border-color 0.2s;
             }
             .slt-changelog-modal .changelog-content a:hover {
-                text-decoration: underline;
+                border-color: #1ed760;
             }
             .slt-changelog-modal .changelog-content img {
                 max-width: 100%;
-                border-radius: 6px;
+                border-radius: 8px;
                 margin: 8px 0;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-changelog-modal .changelog-content strong {
                 color: var(--spice-text);
             }
             .slt-changelog-modal .changelog-content del {
-                opacity: 0.6;
+                opacity: 0.5;
             }
             .slt-changelog-modal .changelog-buttons {
                 display: flex;
-                gap: 12px;
+                gap: 10px;
                 justify-content: flex-end;
             }
             .slt-changelog-modal .changelog-btn {
                 padding: 10px 24px;
-                border-radius: 20px;
+                border-radius: 24px;
                 border: none;
                 cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.2s;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-changelog-modal .changelog-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-changelog-modal .changelog-btn:hover::after {
+                opacity: 1;
             }
             .slt-changelog-modal .changelog-btn.primary {
-                background: #1db954;
+                background: linear-gradient(135deg, #1db954, #1ed760);
                 color: #000;
+                box-shadow: 0 2px 12px rgba(29, 185, 84, 0.25);
             }
             .slt-changelog-modal .changelog-btn.primary:hover {
-                background: #1ed760;
-                transform: scale(1.02);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(29, 185, 84, 0.35);
+            }
+            .slt-changelog-modal .changelog-btn.primary:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(29, 185, 84, 0.2);
             }
             .slt-changelog-modal .changelog-btn.secondary {
-                background: var(--spice-card);
+                background: rgba(255, 255, 255, 0.06);
                 color: var(--spice-text);
+                border: 1px solid rgba(255, 255, 255, 0.08);
             }
             .slt-changelog-modal .changelog-btn.secondary:hover {
-                background: var(--spice-button);
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.14);
             }
         </style>
-        <div class="changelog-header">
-            <span class="changelog-badge">v${version}</span>
-            <span class="changelog-subtitle">Here's what's new in this update</span>
+        <div class="changelog-hero">
+            <div class="changelog-hero-icon">✨</div>
+            <div class="changelog-hero-text">
+                <div class="changelog-hero-title">
+                    Updated Successfully
+                    <span class="changelog-badge">v${version}</span>
+                </div>
+                <div class="changelog-hero-subtitle">Here's what's new in this release</div>
+            </div>
         </div>
         <div class="changelog-content">${formatReleaseNotes(changelog)}</div>
         <div class="changelog-buttons">
@@ -974,7 +1155,7 @@ function showChangelogModal(version: string, changelog: string): void {
 
     if (Spicetify.PopupModal) {
         Spicetify.PopupModal.display({
-            title: '\u{1F389} Spicy Lyric Translator Updated!',
+            title: 'Spicy Lyric Translator',
             content: content,
             isLarge: true
         });
@@ -1001,7 +1182,6 @@ async function fetchChangelogForVersion(version: string): Promise<string> {
             if (release.body) return release.body;
         }
     } catch (e) {
-        debug('Could not fetch changelog for version', version, ':', e);
     }
 
     try {
@@ -1013,10 +1193,174 @@ async function fetchChangelogForVersion(version: string): Promise<string> {
             if (release.body) return release.body;
         }
     } catch (e) {
-        debug('Could not fetch latest release changelog:', e);
     }
 
     return '';
+}
+
+function showHotfixModal(version: string, hashShort: string): void {
+    const hashLabel = hashShort ? ` [${hashShort}]` : '';
+    const content = document.createElement('div');
+    content.className = 'slt-hotfix-modal';
+    content.innerHTML = `
+        <style>
+            @keyframes slt-hf-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .slt-hotfix-modal {
+                padding: 20px;
+                color: var(--spice-text);
+                animation: slt-hf-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .slt-hotfix-modal .hotfix-hero {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(255, 170, 51, 0.12) 0%, rgba(255, 136, 0, 0.06) 100%);
+                border: 1px solid rgba(255, 170, 51, 0.18);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-hotfix-modal .hotfix-hero::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(255, 170, 51, 0.4), transparent);
+            }
+            .slt-hotfix-modal .hotfix-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #ff9800, #ffb74d);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-hero-text {
+                flex: 1;
+            }
+            .slt-hotfix-modal .hotfix-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+            }
+            .slt-hotfix-modal .hotfix-hero-subtitle {
+                font-size: 12px;
+                color: var(--spice-subtext);
+                margin-top: 3px;
+            }
+            .slt-hotfix-modal .hotfix-info {
+                background: rgba(255, 255, 255, 0.04);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+            }
+            .slt-hotfix-modal .hotfix-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 12px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            }
+            .slt-hotfix-modal .hotfix-badge.version {
+                background: linear-gradient(135deg, rgba(255, 152, 0, 0.2), rgba(255, 183, 77, 0.12));
+                color: #ffb74d;
+                border: 1px solid rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-badge.hash {
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--spice-subtext);
+                font-size: 11px;
+            }
+            .slt-hotfix-modal .hotfix-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: flex-end;
+            }
+            .slt-hotfix-modal .hotfix-btn {
+                padding: 10px 24px;
+                border-radius: 24px;
+                border: none;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(135deg, #ff9800, #ffb74d);
+                color: #000;
+                box-shadow: 0 2px 12px rgba(255, 152, 0, 0.25);
+            }
+            .slt-hotfix-modal .hotfix-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-hotfix-modal .hotfix-btn:hover::after {
+                opacity: 1;
+            }
+            .slt-hotfix-modal .hotfix-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(255, 152, 0, 0.35);
+            }
+            .slt-hotfix-modal .hotfix-btn:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(255, 152, 0, 0.2);
+            }
+        </style>
+        <div class="hotfix-hero">
+            <div class="hotfix-hero-icon">🔧</div>
+            <div class="hotfix-hero-text">
+                <div class="hotfix-hero-title">Hotfix Applied</div>
+                <div class="hotfix-hero-subtitle">A quick fix has been automatically applied to Spicy Lyric Translator.</div>
+            </div>
+        </div>
+        <div class="hotfix-info">
+            <span class="hotfix-badge version">v${version}</span>
+            ${hashShort ? `<span class="hotfix-badge hash">${hashShort}</span>` : ''}
+        </div>
+        <div class="hotfix-buttons">
+            <button class="hotfix-btn" id="slt-hotfix-dismiss">Got it</button>
+        </div>
+    `;
+
+    if (Spicetify.PopupModal) {
+        Spicetify.PopupModal.display({
+            title: 'Spicy Lyric Translator',
+            content: content,
+            isLarge: false
+        });
+        setTimeout(() => {
+            const dismissBtn = document.getElementById('slt-hotfix-dismiss');
+            if (dismissBtn) {
+                dismissBtn.addEventListener('click', () => Spicetify.PopupModal.hide());
+            }
+        }, 100);
+    }
 }
 
 export async function showPostUpdateChangelog(): Promise<void> {
@@ -1030,11 +1374,7 @@ export async function showPostUpdateChangelog(): Promise<void> {
         await new Promise(r => setTimeout(r, 2000));
         const metadata = (window as any)._spicy_lyric_translator_metadata;
         const hashShort = metadata?.ContentHash ? metadata.ContentHash.substring(0, 8) : '';
-        const hashLabel = hashShort ? ` [${hashShort}]` : '';
-        if (Spicetify.showNotification) {
-            Spicetify.showNotification(`Spicy Lyric Translator v${currentVersion} hotfix applied!${hashLabel}`);
-        }
-        info(`Hotfix applied for v${currentVersion}${hashLabel}`);
+        showHotfixModal(currentVersion, hashShort);
     }
 
     const pendingVersion = storage.get('pending-update-version');
@@ -1063,7 +1403,6 @@ export async function showPostUpdateChangelog(): Promise<void> {
             const currentParsed = parseVersion(currentVersion);
             if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
                 targetVersion = currentVersion;
-                debug(`Version change detected: ${lastKnownVersion} → ${currentVersion}`);
             }
         } else if (!lastKnownVersion) {
             storage.set('last-known-version', currentVersion);

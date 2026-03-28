@@ -1,4 +1,4 @@
-import { debug, warn } from './debug';
+import { warn } from './debug';
 
 const detectionCache: Map<string, { language: string; confidence: number; timestamp: number }> = new Map();
 const DETECTION_CACHE_TTL = 30 * 60 * 1000;
@@ -185,7 +185,6 @@ export async function detectLyricsLanguage(
     if (trackUri) {
         const cached = detectionCache.get(trackUri);
         if (cached && Date.now() - cached.timestamp < DETECTION_CACHE_TTL) {
-            debug(`Language detection cache hit: ${cached.language}`);
             return { code: cached.language, confidence: cached.confidence };
         }
     }
@@ -198,8 +197,6 @@ export async function detectLyricsLanguage(
 
     const heuristic = detectLanguageHeuristic(sampleText);
     if (heuristic && heuristic.confidence >= 0.7) {
-        debug(`Heuristic language detection: ${heuristic.code} (${(heuristic.confidence * 100).toFixed(0)}%)`);
-
         if (trackUri) {
             detectionCache.set(trackUri, { 
                 language: heuristic.code, 
@@ -213,8 +210,6 @@ export async function detectLyricsLanguage(
 
     try {
         const apiResult = await detectLanguageViaAPI(sampleText);
-        debug(`API language detection: ${apiResult.code} (${(apiResult.confidence * 100).toFixed(0)}%)`);
-
         if (trackUri) {
             detectionCache.set(trackUri, { 
                 language: apiResult.code, 
@@ -306,7 +301,6 @@ export async function shouldSkipTranslation(
         if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
             const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
             if (mixedCheck.hasMixedContent) {
-                debug(`Mixed content detected (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) — will not skip`);
                 return { skip: false, detectedLanguage: quickHeuristic.code };
             }
             return {
@@ -327,7 +321,6 @@ export async function shouldSkipTranslation(
     if (isSameLanguage(detection.code, targetLanguage)) {
         const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
         if (mixedCheck.hasMixedContent) {
-            debug(`Mixed content detected via API path (${mixedCheck.nonTargetCount} non-target, ${mixedCheck.uncertainCount} uncertain) — will not skip`);
             return { skip: false, detectedLanguage: detection.code };
         }
         return {
