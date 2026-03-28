@@ -16,6 +16,7 @@ import {
     onSpicyLyricsOpen, 
     onSpicyLyricsClose,
     waitForLyricsAndTranslate,
+    getLyricsFirstLineText,
     updateButtonState,
     setupKeyboardShortcut,
     setupViewModeObserver
@@ -64,9 +65,12 @@ export async function initialize(): Promise<void> {
     
     if (Spicetify.Player?.addEventListener) {
         Spicetify.Player.addEventListener('songchange', () => {
+            const previousFirstLine = getLyricsFirstLineText();
             state.isTranslating = false;
             state.translatedLyrics.clear();
             state._translationsByIndex = undefined;
+            state._qualityByIndex = undefined;
+            state.lastTranslatedSongUri = null;
             clearLyricsCache();
             removeTranslations();
             
@@ -76,7 +80,7 @@ export async function initialize(): Promise<void> {
                     storage.set('translation-enabled', 'true');
                     updateButtonState();
                 }
-                waitForLyricsAndTranslate(20, 800);
+                waitForLyricsAndTranslate(20, 800, previousFirstLine);
             }
         });
     }

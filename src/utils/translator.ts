@@ -1076,7 +1076,7 @@ export async function translateLyrics(
         
         if (currentTrackUri) {
             const translatedLines = finalResults.map(r => r.translatedText);
-            setTrackCache(currentTrackUri, targetLang, detectedSourceLang || 'auto', translatedLines, preferredApi, sourceFingerprint);
+            setTrackCache(currentTrackUri, targetLang, detectedSourceLang || 'auto', translatedLines, preferredApi, sourceFingerprint, undefined, undefined, lines);
         }
         
         return finalResults;
@@ -1172,7 +1172,7 @@ export async function translateLyrics(
     const someTranslated = results.some(r => r.wasTranslated);
     if (currentTrackUri && results.length > 0 && someTranslated) {
         const translatedLines = results.map(r => r.translatedText);
-        setTrackCache(currentTrackUri, targetLang, detectedLang, translatedLines, preferredApi, sourceFingerprint);
+        setTrackCache(currentTrackUri, targetLang, detectedLang, translatedLines, preferredApi, sourceFingerprint, undefined, undefined, lines);
     }
     
     return results;

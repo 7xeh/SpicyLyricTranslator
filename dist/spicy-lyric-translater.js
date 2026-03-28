@@ -175,13 +175,6 @@ var SpicyLyricTranslater = (() => {
   // src/utils/debug.ts
   var debugMode = storage.get("debug-mode") === "true";
   var PREFIX = "[SpicyLyricTranslator]";
-  function setDebugMode(enabled) {
-    debugMode = enabled;
-    storage.set("debug-mode", enabled.toString());
-    if (enabled) {
-      console.log(`${PREFIX} Debug mode enabled`);
-    }
-  }
   function warn(...args) {
     console.warn(PREFIX, ...args);
   }
@@ -251,7 +244,7 @@ var SpicyLyricTranslater = (() => {
       return null;
     }
   }
-  function setTrackCache(trackUri, targetLang, sourceLang, lines, api, sourceFingerprint, trackName, artistName) {
+  function setTrackCache(trackUri, targetLang, sourceLang, lines, api, sourceFingerprint, trackName, artistName, sourceLines) {
     const storage2 = getStorage();
     if (!storage2 || !trackUri || !lines.length)
       return;
@@ -261,6 +254,7 @@ var SpicyLyricTranslater = (() => {
       lang: sourceLang,
       targetLang,
       lines,
+      sourceLines,
       timestamp: Date.now(),
       api,
       sourceFingerprint,
@@ -1628,7 +1622,7 @@ ${text}`
       const finalResults = lines.map((_, index) => cachedResults.get(index));
       if (currentTrackUri) {
         const translatedLines = finalResults.map((r) => r.translatedText);
-        setTrackCache(currentTrackUri, targetLang, detectedSourceLang || "auto", translatedLines, preferredApi, sourceFingerprint);
+        setTrackCache(currentTrackUri, targetLang, detectedSourceLang || "auto", translatedLines, preferredApi, sourceFingerprint, void 0, void 0, lines);
       }
       return finalResults;
     }
@@ -1708,7 +1702,7 @@ ${text}`
     const someTranslated = results.some((r) => r.wasTranslated);
     if (currentTrackUri && results.length > 0 && someTranslated) {
       const translatedLines = results.map((r) => r.translatedText);
-      setTrackCache(currentTrackUri, targetLang, detectedLang, translatedLines, preferredApi, sourceFingerprint);
+      setTrackCache(currentTrackUri, targetLang, detectedLang, translatedLines, preferredApi, sourceFingerprint, void 0, void 0, lines);
     }
     return results;
   }
@@ -5981,7 +5975,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return document.querySelectorAll(".non-existent-selector");
   }
-  async function waitForLyricsAndTranslate(retries = 10, delay = 500) {
+  function getLyricsFirstLineText() {
+    const lines = getLyricsLines();
+    if (lines.length > 0) {
+      return lines[0].textContent?.trim() || null;
+    }
+    return null;
+  }
+  async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine) {
     for (let i = 0; i < retries; i++) {
       if (!isSpicyLyricsOpen() || state.isTranslating)
         return;
@@ -5989,6 +5990,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (lines.length > 0) {
         const firstLineText = lines[0].textContent?.trim();
         if (firstLineText && firstLineText.length > 0) {
+          if (previousFirstLine && firstLineText === previousFirstLine) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
           await new Promise((resolve) => setTimeout(resolve, delay));
           await translateCurrentLyrics();
           return;
@@ -6553,61 +6558,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
 
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
-  function areDevToolsEnabled() {
-    const hasDeveloperSettingsSection = !!document.getElementById("spicy-lyrics-dev-settings");
-    try {
-      const isTruthy = (value) => {
-        if (typeof value === "boolean")
-          return value;
-        if (typeof value === "number")
-          return value === 1;
-        if (typeof value === "string") {
-          const normalized = value.trim().toLowerCase();
-          return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on" || normalized === "enabled";
-        }
-        return false;
-      };
-      const platformConfig = Spicetify?.Platform?.Config;
-      const globalConfig = Spicetify?.Config;
-      const platform = Spicetify?.Platform;
-      const runtimeFlag = [
-        platform?.DeveloperMode,
-        platform?.developerMode,
-        platform?.DevTools,
-        platform?.devTools,
-        platform?.isDeveloper,
-        platform?.isDeveloperMode,
-        platform?.isDev,
-        window?.Spicetify?.DeveloperMode,
-        window?.Spicetify?.isDeveloper,
-        window?.Spicetify?.isDev
-      ].some(isTruthy);
-      const configFlag = [
-        platformConfig?.enableDeveloperMode ?? platformConfig?.developerMode ?? platformConfig?.devTools ?? platformConfig?.isDeveloper ?? platformConfig?.isDev ?? platformConfig?.["app.enable-developer-mode"] ?? globalConfig?.enableDeveloperMode ?? globalConfig?.developerMode ?? globalConfig?.devTools ?? globalConfig?.isDeveloper ?? globalConfig?.isDev
-      ].some(isTruthy);
-      const localStorageKeys = [
-        "spicetify-enable-devtools",
-        "spicetify_developer_mode",
-        "spicetify:enable-devtools",
-        "spicetify:developer-mode",
-        "developer-mode",
-        "devtools",
-        "app.enable-developer-mode",
-        "app.developer-mode"
-      ];
-      const webStorageFlag = localStorageKeys.some((key) => {
-        const value = window.localStorage?.getItem(key);
-        return isTruthy(value);
-      });
-      const spicetifyStorageFlag = localStorageKeys.some((key) => {
-        const value = Spicetify?.LocalStorage?.get?.(key);
-        return isTruthy(value);
-      });
-      return hasDeveloperSettingsSection || runtimeFlag || configFlag || webStorageFlag || spicetifyStorageFlag;
-    } catch (e) {
-      return hasDeveloperSettingsSection;
-    }
-  }
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row qV_CxbowaNkMarye";
@@ -6670,7 +6620,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
-    const sectionContent = section.querySelector(".x-settings-section fNaaQ0Cp8Yzy19j8");
+    const sectionContent = section.querySelector(".x-settings-section.fNaaQ0Cp8Yzy19j8");
     const languageOptions = SUPPORTED_LANGUAGES.map((l) => ({ value: l.code, text: l.name }));
     sectionContent.appendChild(createNativeDropdown(
       "slt-settings.target-language",
@@ -6918,16 +6868,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         document.body.classList.toggle("slt-hide-connection-indicator", checked);
       }
     ));
-    if (areDevToolsEnabled()) {
-      sectionContent.appendChild(createNativeToggle(
-        "slt-settings.debug-mode",
-        "Debug Mode (Console Logging)",
-        storage.get("debug-mode") === "true",
-        (checked) => {
-          setDebugMode(checked);
-        }
-      ));
-    }
     sectionContent.appendChild(createNativeButton(
       "slt-settings.view-cache",
       "View Translation Cache",
@@ -7103,7 +7043,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     });
   }
   function createSettingsUI() {
-    const showDebugToggle = areDevToolsEnabled();
     const container = document.createElement("div");
     container.className = "slt-settings-container";
     container.innerHTML = `
@@ -7336,16 +7275,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             </label>
         </div>
 
-        ${showDebugToggle ? `
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-debug-mode" ${storage.get("debug-mode") === "true" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-        ` : ""}
-        
         <div class="slt-setting-row">
             <button class="slt-button" id="slt-view-cache">View Translation Cache</button>
         </div>
@@ -7388,7 +7317,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const vocabularyModeCheckbox = container.querySelector("#slt-vocabulary-mode");
       const shareUsageDataCheckbox = container.querySelector("#slt-share-usage-data");
       const hideConnectionIndicatorCheckbox = container.querySelector("#slt-hide-connection-indicator");
-      const debugModeCheckbox = container.querySelector("#slt-debug-mode");
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
       const checkUpdatesButton = container.querySelector("#slt-check-updates");
@@ -7489,9 +7417,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         storage.set("hide-connection-indicator", String(hideConnectionIndicatorCheckbox.checked));
         state.hideConnectionIndicator = hideConnectionIndicatorCheckbox.checked;
         document.body.classList.toggle("slt-hide-connection-indicator", hideConnectionIndicatorCheckbox.checked);
-      });
-      debugModeCheckbox?.addEventListener("change", () => {
-        setDebugMode(debugModeCheckbox.checked);
       });
       viewCacheButton?.addEventListener("click", () => {
         Spicetify.PopupModal?.hide();
@@ -7798,11 +7723,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         }, 2e3);
       }
     });
-    try {
-      const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
-      const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : [];
+    const cachedSourceLines = trackCache.sourceLines || [];
+    if (cachedSourceLines.length > 0) {
       const rowsContainer = content.querySelector("#slt-lyrics-rows");
       if (rowsContainer) {
+        rowsContainer.innerHTML = renderRows(cachedSourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
+      }
+    }
+    try {
+      const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
+      const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : cachedSourceLines;
+      const rowsContainer = content.querySelector("#slt-lyrics-rows");
+      if (rowsContainer && sourceLines.length > 0) {
         rowsContainer.innerHTML = renderRows(sourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
       }
       if (sourceLyrics?.language) {
@@ -7812,9 +7744,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         }
       }
     } catch (e) {
-      const rowsContainer = content.querySelector("#slt-lyrics-rows");
-      if (rowsContainer) {
-        rowsContainer.innerHTML = renderRows([]);
+      if (cachedSourceLines.length === 0) {
+        const rowsContainer = content.querySelector("#slt-lyrics-rows");
+        if (rowsContainer) {
+          rowsContainer.innerHTML = renderRows([]);
+        }
       }
     }
   }
@@ -8216,9 +8150,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     setupViewModeObserver();
     if (Spicetify.Player?.addEventListener) {
       Spicetify.Player.addEventListener("songchange", () => {
+        const previousFirstLine = getLyricsFirstLineText();
         state.isTranslating = false;
         state.translatedLyrics.clear();
         state._translationsByIndex = void 0;
+        state._qualityByIndex = void 0;
+        state.lastTranslatedSongUri = null;
         clearLyricsCache();
         removeTranslations();
         if (state.isEnabled || state.autoTranslate) {
@@ -8227,7 +8164,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             storage.set("translation-enabled", "true");
             updateButtonState();
           }
-          waitForLyricsAndTranslate(20, 800);
+          waitForLyricsAndTranslate(20, 800, previousFirstLine);
         }
       });
     }

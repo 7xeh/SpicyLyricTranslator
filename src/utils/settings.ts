@@ -1,7 +1,6 @@
 import { storage } from './storage';
 import { state } from './state';
 import { SUPPORTED_LANGUAGES, clearTranslationCache, setPreferredApi } from './translator';
-import { isDebugEnabled, setDebugMode } from './debug';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog } from './updater';
 import { OverlayMode } from './translationOverlay';
@@ -11,77 +10,6 @@ import { notifyShareDataChanged } from './connectivity';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 
-function areDevToolsEnabled(): boolean {
-    const hasDeveloperSettingsSection = !!document.getElementById('spicy-lyrics-dev-settings');
-
-    try {
-        const isTruthy = (value: unknown): boolean => {
-            if (typeof value === 'boolean') return value;
-            if (typeof value === 'number') return value === 1;
-            if (typeof value === 'string') {
-                const normalized = value.trim().toLowerCase();
-                return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on' || normalized === 'enabled';
-            }
-            return false;
-        };
-
-        const platformConfig = (Spicetify as any)?.Platform?.Config;
-        const globalConfig = (Spicetify as any)?.Config;
-        const platform = (Spicetify as any)?.Platform;
-
-        const runtimeFlag = [
-            platform?.DeveloperMode,
-            platform?.developerMode,
-            platform?.DevTools,
-            platform?.devTools,
-            platform?.isDeveloper,
-            platform?.isDeveloperMode,
-            platform?.isDev,
-            (window as any)?.Spicetify?.DeveloperMode,
-            (window as any)?.Spicetify?.isDeveloper,
-            (window as any)?.Spicetify?.isDev
-        ].some(isTruthy);
-
-        const configFlag = [
-            platformConfig?.enableDeveloperMode ??
-            platformConfig?.developerMode ??
-            platformConfig?.devTools ??
-            platformConfig?.isDeveloper ??
-            platformConfig?.isDev ??
-            platformConfig?.['app.enable-developer-mode'] ??
-            globalConfig?.enableDeveloperMode ??
-            globalConfig?.developerMode ??
-            globalConfig?.devTools ??
-            globalConfig?.isDeveloper ??
-            globalConfig?.isDev
-        ].some(isTruthy);
-
-        const localStorageKeys = [
-            'spicetify-enable-devtools',
-            'spicetify_developer_mode',
-            'spicetify:enable-devtools',
-            'spicetify:developer-mode',
-            'developer-mode',
-            'devtools',
-            'app.enable-developer-mode',
-            'app.developer-mode'
-        ];
-
-        const webStorageFlag = localStorageKeys.some((key) => {
-            const value = window.localStorage?.getItem(key);
-            return isTruthy(value);
-        });
-
-        const spicetifyStorageFlag = localStorageKeys.some((key) => {
-            const value = (Spicetify as any)?.LocalStorage?.get?.(key);
-            return isTruthy(value);
-        });
-
-        return hasDeveloperSettingsSection || runtimeFlag || configFlag || webStorageFlag || spicetifyStorageFlag;
-    } catch (e) {
-        return hasDeveloperSettingsSection;
-    }
-}
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
     const row = document.createElement('div');
@@ -155,7 +83,7 @@ function createNativeSettingsSection(): HTMLElement {
         </div>
     `;
     
-    const sectionContent = section.querySelector('.x-settings-section fNaaQ0Cp8Yzy19j8') as HTMLElement;
+    const sectionContent = section.querySelector('.x-settings-section.fNaaQ0Cp8Yzy19j8') as HTMLElement;
 
     const languageOptions = SUPPORTED_LANGUAGES.map(l => ({ value: l.code, text: l.name }));
     sectionContent.appendChild(createNativeDropdown(
@@ -419,17 +347,6 @@ function createNativeSettingsSection(): HTMLElement {
         }
     ));
 
-    if (areDevToolsEnabled()) {
-        sectionContent.appendChild(createNativeToggle(
-            'slt-settings.debug-mode',
-            'Debug Mode (Console Logging)',
-            storage.get('debug-mode') === 'true',
-            (checked) => {
-                setDebugMode(checked);
-            }
-        ));
-    }
-    
     sectionContent.appendChild(createNativeButton(
         'slt-settings.view-cache',
         'View Translation Cache',
@@ -635,8 +552,6 @@ function watchForSettingsPage(): void {
 }
 
 function createSettingsUI(): HTMLElement {
-    const showDebugToggle = areDevToolsEnabled();
-
     const container = document.createElement('div');
     container.className = 'slt-settings-container';
     container.innerHTML = `
@@ -869,16 +784,6 @@ function createSettingsUI(): HTMLElement {
             </label>
         </div>
 
-        ${showDebugToggle ? `
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-debug-mode">Debug Mode (Console Logging)</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-debug-mode" ${storage.get('debug-mode') === 'true' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-        ` : ''}
-        
         <div class="slt-setting-row">
             <button class="slt-button" id="slt-view-cache">View Translation Cache</button>
         </div>
@@ -922,7 +827,6 @@ function createSettingsUI(): HTMLElement {
         const vocabularyModeCheckbox = container.querySelector('#slt-vocabulary-mode') as HTMLInputElement;
         const shareUsageDataCheckbox = container.querySelector('#slt-share-usage-data') as HTMLInputElement;
         const hideConnectionIndicatorCheckbox = container.querySelector('#slt-hide-connection-indicator') as HTMLInputElement;
-        const debugModeCheckbox = container.querySelector('#slt-debug-mode') as HTMLInputElement;
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
@@ -1035,10 +939,6 @@ function createSettingsUI(): HTMLElement {
             document.body.classList.toggle('slt-hide-connection-indicator', hideConnectionIndicatorCheckbox.checked);
         });
 
-        debugModeCheckbox?.addEventListener('change', () => {
-            setDebugMode(debugModeCheckbox.checked);
-        });
-        
         viewCacheButton?.addEventListener('click', () => {
             Spicetify.PopupModal?.hide();
             setTimeout(() => openCacheViewer(), 150);
@@ -1365,11 +1265,20 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
         }
     });
 
-    try {
-        const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
-        const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : [];
+    const cachedSourceLines = trackCache.sourceLines || [];
+
+    if (cachedSourceLines.length > 0) {
         const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
         if (rowsContainer) {
+            rowsContainer.innerHTML = renderRows(cachedSourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
+        }
+    }
+
+    try {
+        const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
+        const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : cachedSourceLines;
+        const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
+        if (rowsContainer && sourceLines.length > 0) {
             rowsContainer.innerHTML = renderRows(sourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
         }
 
@@ -1380,9 +1289,11 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             }
         }
     } catch (e) {
-        const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
-        if (rowsContainer) {
-            rowsContainer.innerHTML = renderRows([]);
+        if (cachedSourceLines.length === 0) {
+            const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
+            if (rowsContainer) {
+                rowsContainer.innerHTML = renderRows([]);
+            }
         }
     }
 }

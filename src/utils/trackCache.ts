@@ -10,6 +10,7 @@ interface TrackCacheEntry {
     lang: string;
     targetLang: string;
     lines: string[];
+    sourceLines?: string[];
     timestamp: number;
     api?: string;
     sourceFingerprint?: string;
@@ -94,7 +95,8 @@ export function setTrackCache(
     api?: string,
     sourceFingerprint?: string,
     trackName?: string,
-    artistName?: string
+    artistName?: string,
+    sourceLines?: string[]
 ): void {
     const storage = getStorage();
     if (!storage || !trackUri || !lines.length) return;
@@ -107,6 +109,7 @@ export function setTrackCache(
         lang: sourceLang,
         targetLang: targetLang,
         lines: lines,
+        sourceLines: sourceLines,
         timestamp: Date.now(),
         api: api,
         sourceFingerprint,

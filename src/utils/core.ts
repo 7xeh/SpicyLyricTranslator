@@ -333,7 +333,15 @@ function getLyricsLines(): NodeListOf<Element> {
     return document.querySelectorAll('.non-existent-selector');
 }
 
-export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500): Promise<void> {
+export function getLyricsFirstLineText(): string | null {
+    const lines = getLyricsLines();
+    if (lines.length > 0) {
+        return lines[0].textContent?.trim() || null;
+    }
+    return null;
+}
+
+export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null): Promise<void> {
     for (let i = 0; i < retries; i++) {
         if (!isSpicyLyricsOpen() || state.isTranslating) return;
 
@@ -341,6 +349,10 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
         if (lines.length > 0) {
             const firstLineText = lines[0].textContent?.trim();
             if (firstLineText && firstLineText.length > 0) {
+                if (previousFirstLine && firstLineText === previousFirstLine) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
                  await new Promise(resolve => setTimeout(resolve, delay));
                  await translateCurrentLyrics();
                  return;
