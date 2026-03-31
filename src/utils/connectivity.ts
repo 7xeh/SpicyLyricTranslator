@@ -184,7 +184,8 @@ function getTooltipContent(): string {
         case 'connected': {
             const latencyColor = indicatorState.latencyMs !== null ? getLatencyColor(indicatorState.latencyMs) : '#888';
             const latencyLabel = indicatorState.latencyMs !== null ? getLatencyLabel(indicatorState.latencyMs) : '...';
-            const regionText = indicatorState.region ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${indicatorState.region}</span>` : '';
+            const safeRegion = (indicatorState.region || '').replace(/[<>"'&]/g, '');
+            const regionText = safeRegion ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${safeRegion}</span>` : '';
             return `
                 <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;font-size:12px;min-width:160px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:default;" title="Connection status: ${latencyLabel}">
@@ -280,7 +281,7 @@ async function measureLatencyAccurate(): Promise<number | null> {
 
 async function sendHeartbeat(): Promise<boolean> {
     try {
-        const shareData = storage.get('share-usage-data') !== 'false';
+        const shareData = storage.get('share-usage-data') === 'true';
         const params = new URLSearchParams({
             action: 'heartbeat',
             session: indicatorState.sessionId || '',

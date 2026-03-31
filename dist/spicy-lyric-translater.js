@@ -106,7 +106,13 @@ var SpicyLyricTranslater = (() => {
         const value = this.get(key);
         if (value === null)
           return defaultValue;
-        return JSON.parse(value);
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          delete parsed.__proto__;
+          delete parsed.constructor;
+          delete parsed.prototype;
+        }
+        return parsed;
       } catch (e) {
         console.error("[SpicyLyricTranslator] Storage getJSON error:", e);
         return defaultValue;
@@ -141,6 +147,28 @@ var SpicyLyricTranslater = (() => {
       } catch (e) {
         console.error("[SpicyLyricTranslator] Storage clearAll error:", e);
       }
+    },
+    setSecret(key, value) {
+      try {
+        const encoded = btoa(unescape(encodeURIComponent(value)));
+        return this.set(key, encoded);
+      } catch (e) {
+        return this.set(key, value);
+      }
+    },
+    getSecret(key) {
+      try {
+        const stored = this.get(key);
+        if (stored === null)
+          return null;
+        try {
+          return decodeURIComponent(escape(atob(stored)));
+        } catch {
+          return stored;
+        }
+      } catch (e) {
+        return null;
+      }
     }
   };
   var storage_default = storage;
@@ -154,11 +182,11 @@ var SpicyLyricTranslater = (() => {
     showNotifications: storage.get("show-notifications") !== "false",
     preferredApi: storage.get("preferred-api") || "google",
     customApiUrl: storage.get("custom-api-url") || "",
-    customApiKey: storage.get("custom-api-key") || "",
-    deeplApiKey: storage.get("deepl-api-key") || "",
-    openaiApiKey: storage.get("openai-api-key") || "",
+    customApiKey: storage.getSecret("custom-api-key") || "",
+    deeplApiKey: storage.getSecret("deepl-api-key") || "",
+    openaiApiKey: storage.getSecret("openai-api-key") || "",
     openaiModel: storage.get("openai-model") || "gpt-4o-mini",
-    geminiApiKey: storage.get("gemini-api-key") || "",
+    geminiApiKey: storage.getSecret("gemini-api-key") || "",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
     lastViewMode: null,
@@ -1162,7 +1190,7 @@ var SpicyLyricTranslater = (() => {
     });
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      throw new Error(`DeepL API error: ${response.status} ${errorText}`);
+      throw new Error(`DeepL API error: ${response.status}`);
     }
     const data = await response.json();
     if (data.translations && data.translations.length > 0) {
@@ -1202,7 +1230,7 @@ var SpicyLyricTranslater = (() => {
     });
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
+      throw new Error(`OpenAI API error: ${response.status}`);
     }
     const data = await response.json();
     if (data.choices && data.choices.length > 0) {
@@ -1218,10 +1246,11 @@ var SpicyLyricTranslater = (() => {
       throw new Error("Gemini API key not configured. Set it in Settings.");
     }
     const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey
       },
       body: JSON.stringify({
         contents: [
@@ -1243,7 +1272,7 @@ ${text}`
     });
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
     const data = await response.json();
     if (data.candidates && data.candidates.length > 0) {
@@ -1257,6 +1286,20 @@ ${text}`
   async function translateWithCustomApi(text, targetLang) {
     if (!customApiUrl) {
       throw new Error("Custom API URL not configured");
+    }
+    try {
+      const parsedUrl = new URL(customApiUrl);
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+        throw new Error("Custom API URL must use http or https protocol");
+      }
+      if (parsedUrl.hostname === "localhost" || parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "0.0.0.0" || parsedUrl.hostname === "::1" || parsedUrl.hostname.endsWith(".local")) {
+        throw new Error("Custom API URL cannot point to local addresses");
+      }
+    } catch (e) {
+      if (e instanceof TypeError) {
+        throw new Error("Invalid Custom API URL format");
+      }
+      throw e;
     }
     try {
       const headers = {
@@ -1280,7 +1323,7 @@ ${text}`
       });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => "");
-        throw new Error(`Custom API error: ${response.status} ${errorBody}`);
+        throw new Error(`Custom API error: ${response.status}`);
       }
       const data = await response.json();
       const translation = data.translatedText || data.translated_text || data.translation || data.result || data.text || data.translations && data.translations[0]?.text || data.data && data.data.translatedText || data.choices && data.choices[0]?.message?.content || Array.isArray(data) && data[0]?.translatedText;
@@ -1394,7 +1437,7 @@ ${text}`
     });
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "");
-      throw new Error(`Batch API error: ${response.status} ${errorBody}`);
+      throw new Error(`Batch API error: ${response.status}`);
     }
     const data = await response.json();
     const normalized = normalizeBatchTranslations(data);
@@ -4347,7 +4390,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.5" : "0.0.0";
+    return true ? "1.9.6" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -4510,35 +4553,438 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return null;
     }
   }
-  async function performSilentAutoUpdate(version, releaseBody) {
-    if (updateState.isUpdating) {
+  async function performUpdate(release, version, modalContent) {
+    if (updateState.isUpdating)
       return;
+    updateState.isUpdating = true;
+    updateState.progress = 0;
+    updateState.status = "Preparing update...";
+    const progressContainer = modalContent.querySelector(".update-progress");
+    const progressBar = modalContent.querySelector(".progress-bar-fill");
+    const progressText = modalContent.querySelector(".progress-text");
+    const buttonsContainer = modalContent.querySelector(".update-buttons");
+    if (progressContainer) {
+      progressContainer.style.display = "block";
     }
+    if (buttonsContainer) {
+      buttonsContainer.style.display = "none";
+    }
+    const updateProgress = () => {
+      if (progressBar) {
+        progressBar.style.width = `${updateState.progress}%`;
+      }
+      if (progressText) {
+        progressText.textContent = updateState.status;
+      }
+    };
     try {
-      updateState.isUpdating = true;
-      updateState.progress = 100;
-      updateState.status = "Reloading to apply update";
       storage.set("pending-update-version", version.text);
       storage.set("pending-update-timestamp", Date.now().toString());
-      if (releaseBody) {
-        storage.set("pending-update-changelog", releaseBody);
-      }
+      storage.set("pending-update-changelog", release.body || "");
+      updateState.progress = 30;
+      updateState.status = "Preparing to update...";
+      updateProgress();
+      await new Promise((r) => setTimeout(r, 500));
+      updateState.progress = 60;
+      updateState.status = "Ready to reload...";
+      updateProgress();
+      await new Promise((r) => setTimeout(r, 500));
+      updateState.progress = 100;
+      updateState.status = "Reloading Spotify...";
+      updateProgress();
+      await new Promise((r) => setTimeout(r, 300));
       if (window._spicy_lyric_translator_metadata) {
         window._spicy_lyric_translator_metadata = {};
       }
-      window.setTimeout(() => {
-        window.location.reload();
-      }, 350);
-    } catch (e) {
-      error("Silent auto-update failed:", e);
+      window.location.reload();
+    } catch (error2) {
+      error("Update failed:", error2);
+      updateState.status = "Update failed";
+      updateProgress();
+      if (progressContainer && buttonsContainer) {
+        progressContainer.innerHTML = `
+                <div class="update-error">
+                    <span class="error-icon">\u274C</span>
+                    <span class="error-text">Update failed. Please try restarting Spotify.</span>
+                </div>
+            `;
+        buttonsContainer.style.display = "flex";
+        buttonsContainer.innerHTML = `
+                <button class="update-btn secondary" id="slt-update-cancel">Cancel</button>
+                <button class="update-btn primary" id="slt-reload-now">Reload Now</button>
+            `;
+        setTimeout(() => {
+          const cancelBtn = document.getElementById("slt-update-cancel");
+          const reloadBtn = document.getElementById("slt-reload-now");
+          if (cancelBtn) {
+            cancelBtn.addEventListener("click", () => {
+              Spicetify.PopupModal.hide();
+              updateState.isUpdating = false;
+            });
+          }
+          if (reloadBtn) {
+            reloadBtn.addEventListener("click", () => {
+              window.location.reload();
+            });
+          }
+        }, 100);
+      }
       updateState.isUpdating = false;
+    }
+  }
+  function showUpdateModal(currentVersion, latestVersion, release) {
+    const content = document.createElement("div");
+    content.className = "slt-update-modal";
+    content.innerHTML = `
+        <style>
+            @keyframes slt-modal-fadeIn {
+                from { opacity: 0; transform: translateY(8px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes slt-shimmer {
+                0% { background-position: -200% center; }
+                100% { background-position: 200% center; }
+            }
+            @keyframes slt-progress-glow {
+                0%, 100% { box-shadow: 0 0 8px rgba(29, 185, 84, 0.3); }
+                50% { box-shadow: 0 0 16px rgba(29, 185, 84, 0.6); }
+            }
+            @keyframes slt-pulse-ring {
+                0% { transform: scale(0.9); opacity: 0.6; }
+                50% { transform: scale(1.05); opacity: 1; }
+                100% { transform: scale(0.9); opacity: 0.6; }
+            }
+            @keyframes slt-arrow-bounce {
+                0%, 100% { transform: translateX(0); }
+                50% { transform: translateX(4px); }
+            }
+            .slt-update-modal {
+                padding: 20px;
+                color: var(--spice-text);
+                animation: slt-modal-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .slt-update-modal .update-hero {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 20px;
+                padding: 16px 18px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.12) 0%, rgba(29, 185, 84, 0.04) 100%);
+                border: 1px solid rgba(29, 185, 84, 0.18);
+            }
+            .slt-update-modal .update-hero-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #1db954, #1ed760);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 22px;
+                flex-shrink: 0;
+                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
+            }
+            .slt-update-modal .update-hero-text {
+                flex: 1;
+            }
+            .slt-update-modal .update-hero-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: var(--spice-text);
+                margin-bottom: 2px;
+            }
+            .slt-update-modal .update-hero-subtitle {
+                font-size: 12px;
+                color: var(--spice-subtext);
+            }
+            .slt-update-modal .version-info {
+                background: rgba(255, 255, 255, 0.04);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+            }
+            .slt-update-modal .version-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 12px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            }
+            .slt-update-modal .version-badge.current {
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--spice-subtext);
+            }
+            .slt-update-modal .version-arrow {
+                color: var(--spice-subtext);
+                font-size: 16px;
+                animation: slt-arrow-bounce 1.8s ease-in-out infinite;
+                opacity: 0.7;
+            }
+            .slt-update-modal .version-badge.latest {
+                background: linear-gradient(135deg, rgba(29, 185, 84, 0.2), rgba(30, 215, 96, 0.12));
+                color: #1ed760;
+                border: 1px solid rgba(29, 185, 84, 0.25);
+                box-shadow: 0 0 10px rgba(29, 185, 84, 0.1);
+            }
+            .slt-update-modal .release-notes {
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 14px 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                max-height: 260px;
+                overflow-y: auto;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .slt-update-modal .release-notes::-webkit-scrollbar {
+                width: 5px;
+            }
+            .slt-update-modal .release-notes::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .slt-update-modal .release-notes::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
+            }
+            .slt-update-modal .release-notes::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.25);
+            }
+            .slt-update-modal .release-notes-title {
+                font-weight: 600;
+                font-size: 13px;
+                margin-bottom: 12px;
+                color: var(--spice-text);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .slt-update-modal .release-notes-title svg {
+                width: 14px;
+                height: 14px;
+                opacity: 0.7;
+            }
+            .slt-update-modal .release-notes-content {
+                color: var(--spice-subtext);
+                font-size: 13px;
+                line-height: 1.65;
+            }
+            .slt-update-modal .update-progress {
+                display: none;
+                background: rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(6px);
+                -webkit-backdrop-filter: blur(6px);
+                padding: 18px;
+                border-radius: 10px;
+                margin-bottom: 18px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .slt-update-modal .progress-bar {
+                height: 6px;
+                background: rgba(255, 255, 255, 0.06);
+                border-radius: 6px;
+                overflow: hidden;
+                margin-bottom: 10px;
+            }
+            .slt-update-modal .progress-bar-fill {
+                height: 100%;
+                background: linear-gradient(90deg, #1db954, #1ed760, #1db954);
+                background-size: 200% 100%;
+                border-radius: 6px;
+                transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                width: 0%;
+                animation: slt-shimmer 2s linear infinite, slt-progress-glow 2s ease-in-out infinite;
+            }
+            .slt-update-modal .progress-text {
+                font-size: 12px;
+                color: var(--spice-subtext);
+                text-align: center;
+                font-weight: 500;
+            }
+            .slt-update-modal .update-success {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                color: #1db954;
+                font-weight: 500;
+            }
+            .slt-update-modal .update-error {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                color: #e74c3c;
+                font-weight: 500;
+            }
+            .slt-update-modal .success-icon,
+            .slt-update-modal .error-icon {
+                font-size: 20px;
+            }
+            .slt-update-modal .update-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: flex-end;
+            }
+            .slt-update-modal .update-btn {
+                padding: 10px 24px;
+                border-radius: 24px;
+                border: none;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .slt-update-modal .update-btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transition: opacity 0.3s;
+            }
+            .slt-update-modal .update-btn:hover::after {
+                opacity: 1;
+            }
+            .slt-update-modal .update-btn.primary {
+                background: linear-gradient(135deg, #1db954, #1ed760);
+                color: #000;
+                box-shadow: 0 2px 12px rgba(29, 185, 84, 0.25);
+            }
+            .slt-update-modal .update-btn.primary:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 20px rgba(29, 185, 84, 0.35);
+            }
+            .slt-update-modal .update-btn.primary:active {
+                transform: translateY(0);
+                box-shadow: 0 1px 6px rgba(29, 185, 84, 0.2);
+            }
+            .slt-update-modal .update-btn.secondary {
+                background: rgba(255, 255, 255, 0.06);
+                color: var(--spice-text);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .slt-update-modal .update-btn.secondary:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.14);
+            }
+            .slt-update-modal .update-instructions {
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 10px;
+                padding: 16px 18px;
+                margin-top: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .slt-update-modal .update-instructions p {
+                margin: 0 0 12px 0;
+                color: var(--spice-text);
+            }
+            .slt-update-modal .update-instructions code {
+                background: rgba(0, 0, 0, 0.4);
+                padding: 3px 8px;
+                border-radius: 5px;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+                font-size: 12px;
+                color: #1ed760;
+                word-break: break-all;
+                border: 1px solid rgba(29, 185, 84, 0.15);
+            }
+            .slt-update-modal .update-instructions ol {
+                margin: 0;
+                padding-left: 20px;
+                color: var(--spice-subtext);
+            }
+            .slt-update-modal .update-instructions li {
+                margin-bottom: 8px;
+                line-height: 1.5;
+            }
+            .slt-update-modal .update-instructions li:last-child {
+                margin-bottom: 0;
+            }
+            .slt-update-modal .update-instructions li code {
+                display: inline-block;
+            }
+        </style>
+        <div class="update-hero">
+            <div class="update-hero-icon">\u{1F680}</div>
+            <div class="update-hero-text">
+                <div class="update-hero-title">A new version is available!</div>
+                <div class="update-hero-subtitle">Spicy Lyric Translator has a shiny new update ready for you.</div>
+            </div>
+        </div>
+        <div class="version-info">
+            <span class="version-badge current">${currentVersion.text}</span>
+            <span class="version-arrow">\u2192</span>
+            <span class="version-badge latest">${latestVersion.text}</span>
+        </div>
+        <div class="release-notes">
+            <div class="release-notes-title"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z"/></svg>Changelog</div>
+            <div class="release-notes-content">${formatReleaseNotes(release.body)}</div>
+        </div>
+        <div class="update-progress">
+            <div class="progress-bar">
+                <div class="progress-bar-fill"></div>
+            </div>
+            <div class="progress-text">Starting update...</div>
+        </div>
+        <div class="update-buttons">
+            <button class="update-btn secondary" id="slt-update-later">Later</button>
+            <button class="update-btn primary" id="slt-update-now">Install Update</button>
+        </div>
+    `;
+    if (Spicetify.PopupModal) {
+      Spicetify.PopupModal.display({
+        title: "Spicy Lyric Translator",
+        content,
+        isLarge: true
+      });
+      setTimeout(() => {
+        const laterBtn = document.getElementById("slt-update-later");
+        const updateBtn = document.getElementById("slt-update-now");
+        if (laterBtn) {
+          laterBtn.addEventListener("click", () => {
+            Spicetify.PopupModal.hide();
+          });
+        }
+        if (updateBtn) {
+          updateBtn.addEventListener("click", () => {
+            performUpdate(release, latestVersion, content);
+          });
+        }
+      }, 100);
     }
   }
   function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function processInlineMarkdown(text) {
-    return text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">').replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: #1db954;">$1</code>');
+    const sanitizeUrl = (url) => {
+      const trimmed = url.trim();
+      if (/^https?:\/\//i.test(trimmed))
+        return trimmed;
+      return "";
+    };
+    return text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+      const safe = sanitizeUrl(url);
+      return safe ? `<img src="${safe}" alt="${alt}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">` : alt;
+    }).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text2, url) => {
+      const safe = sanitizeUrl(url);
+      return safe ? `<a href="${safe}" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">${text2}</a>` : text2;
+    }).replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: #1db954;">$1</code>');
   }
   function formatReleaseNotes(body) {
     if (!body || body.trim() === "") {
@@ -4676,9 +5122,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (compareVersions(latest.version, current) > 0) {
         if (!hasShownUpdateNotice) {
           hasShownUpdateNotice = true;
+          showUpdateModal(current, latest.version, latest.release);
         }
-        await performSilentAutoUpdate(latest.version, latest.release.body);
-        hasShownUpdateNotice = true;
       } else {
         resetBackoff();
         hasShownUpdateNotice = false;
@@ -5386,7 +5831,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       case "connected": {
         const latencyColor = indicatorState.latencyMs !== null ? getLatencyColor(indicatorState.latencyMs) : "#888";
         const latencyLabel = indicatorState.latencyMs !== null ? getLatencyLabel(indicatorState.latencyMs) : "...";
-        const regionText = indicatorState.region ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${indicatorState.region}</span>` : "";
+        const safeRegion = (indicatorState.region || "").replace(/[<>"'&]/g, "");
+        const regionText = safeRegion ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${safeRegion}</span>` : "";
         return `
                 <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;font-size:12px;min-width:160px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:default;" title="Connection status: ${latencyLabel}">
@@ -5476,7 +5922,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   async function sendHeartbeat() {
     try {
-      const shareData = storage.get("share-usage-data") !== "false";
+      const shareData = storage.get("share-usage-data") === "true";
       const params = new URLSearchParams({
         action: "heartbeat",
         session: indicatorState.sessionId || "",
@@ -6700,10 +7146,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("custom-api-url") || ""}" placeholder="https://your-api.com/translate">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector("input");
+    if (customApiInput)
+      customApiInput.value = storage.get("custom-api-url") || "";
     customApiInput?.addEventListener("change", () => {
       storage.set("custom-api-url", customApiInput.value);
       state.customApiUrl = customApiInput.value;
@@ -6725,12 +7173,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector("input");
+    if (customApiKeyInput)
+      customApiKeyInput.value = storage.getSecret("custom-api-key") || "";
     customApiKeyInput?.addEventListener("change", () => {
-      storage.set("custom-api-key", customApiKeyInput.value);
+      storage.setSecret("custom-api-key", customApiKeyInput.value);
       state.customApiKey = customApiKeyInput.value;
       setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
     });
@@ -6744,12 +7194,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector("input");
+    if (deeplKeyInput)
+      deeplKeyInput.value = storage.getSecret("deepl-api-key") || "";
     deeplKeyInput?.addEventListener("change", () => {
-      storage.set("deepl-api-key", deeplKeyInput.value);
+      storage.setSecret("deepl-api-key", deeplKeyInput.value);
       state.deeplApiKey = deeplKeyInput.value;
       setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
     });
@@ -6763,12 +7215,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector("input");
+    if (openaiKeyInput)
+      openaiKeyInput.value = storage.getSecret("openai-api-key") || "";
     openaiKeyInput?.addEventListener("change", () => {
-      storage.set("openai-api-key", openaiKeyInput.value);
+      storage.setSecret("openai-api-key", openaiKeyInput.value);
       state.openaiApiKey = openaiKeyInput.value;
       setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
     });
@@ -6782,10 +7236,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector("input");
+    if (openaiModelInput)
+      openaiModelInput.value = storage.get("openai-model") || "gpt-4o-mini";
     openaiModelInput?.addEventListener("change", () => {
       storage.set("openai-model", openaiModelInput.value);
       state.openaiModel = openaiModelInput.value;
@@ -6801,12 +7257,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector("input");
+    if (geminiKeyInput)
+      geminiKeyInput.value = storage.getSecret("gemini-api-key") || "";
     geminiKeyInput?.addEventListener("change", () => {
-      storage.set("gemini-api-key", geminiKeyInput.value);
+      storage.setSecret("gemini-api-key", geminiKeyInput.value);
       state.geminiApiKey = geminiKeyInput.value;
       setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiKeyInput.value });
     });
@@ -6853,7 +7311,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(createNativeToggle(
       "slt-settings.share-usage-data",
       "Share Active Viewing Status",
-      storage.get("share-usage-data") !== "false",
+      storage.get("share-usage-data") === "true",
       (checked) => {
         storage.set("share-usage-data", String(checked));
         notifyShareDataChanged();
@@ -7270,7 +7728,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-share-usage-data">Share Active Viewing Status</label>
             <label class="slt-toggle">
-                <input type="checkbox" id="slt-share-usage-data" ${storage.get("share-usage-data") !== "false" ? "checked" : ""}>
+                <input type="checkbox" id="slt-share-usage-data" ${storage.get("share-usage-data") === "true" ? "checked" : ""}>
                 <span class="slt-toggle-slider"></span>
             </label>
         </div>

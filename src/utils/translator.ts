@@ -503,7 +503,7 @@ async function translateWithDeepL(text: string, targetLang: string): Promise<{ t
     
     if (!response.ok) {
         const errorText = await response.text().catch(() => '');
-        throw new Error(`DeepL API error: ${response.status} ${errorText}`);
+        throw new Error(`DeepL API error: ${response.status}`);
     }
     
     const data = await response.json();
@@ -550,7 +550,7 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
     
     if (!response.ok) {
         const errorText = await response.text().catch(() => '');
-        throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
+        throw new Error(`OpenAI API error: ${response.status}`);
     }
     
     const data = await response.json();
@@ -572,10 +572,11 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
 
     const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiApiKey
         },
         body: JSON.stringify({
             contents: [
@@ -596,7 +597,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
 
     if (!response.ok) {
         const errorText = await response.text().catch(() => '');
-        throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+        throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -614,6 +615,21 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
 async function translateWithCustomApi(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
     if (!customApiUrl) {
         throw new Error('Custom API URL not configured');
+    }
+
+    try {
+        const parsedUrl = new URL(customApiUrl);
+        if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+            throw new Error('Custom API URL must use http or https protocol');
+        }
+        if (parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '0.0.0.0' || parsedUrl.hostname === '::1' || parsedUrl.hostname.endsWith('.local')) {
+            throw new Error('Custom API URL cannot point to local addresses');
+        }
+    } catch (e) {
+        if (e instanceof TypeError) {
+            throw new Error('Invalid Custom API URL format');
+        }
+        throw e;
     }
     
     try {
@@ -640,7 +656,7 @@ async function translateWithCustomApi(text: string, targetLang: string): Promise
         
         if (!response.ok) {
             const errorBody = await response.text().catch(() => '');
-            throw new Error(`Custom API error: ${response.status} ${errorBody}`);
+            throw new Error(`Custom API error: ${response.status}`);
         }
         
         const data = await response.json();
@@ -781,7 +797,7 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
 
     if (!response.ok) {
         const errorBody = await response.text().catch(() => '');
-        throw new Error(`Batch API error: ${response.status} ${errorBody}`);
+        throw new Error(`Batch API error: ${response.status}`);
     }
 
     const data = await response.json();

@@ -749,9 +749,20 @@ function escapeHtml(text: string): string {
 }
 
 function processInlineMarkdown(text: string): string {
+    const sanitizeUrl = (url: string): string => {
+        const trimmed = url.trim();
+        if (/^https?:\/\//i.test(trimmed)) return trimmed;
+        return '';
+    };
     return text
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">')
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">$1</a>')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+            const safe = sanitizeUrl(url);
+            return safe ? `<img src="${safe}" alt="${alt}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">` : alt;
+        })
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+            const safe = sanitizeUrl(url);
+            return safe ? `<a href="${safe}" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">${text}</a>` : text;
+        })
         .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, '<em>$1</em>')
@@ -885,9 +896,8 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
         if (compareVersions(latest.version, current) > 0) {
             if (!hasShownUpdateNotice) {
                 hasShownUpdateNotice = true;
+                showUpdateModal(current, latest.version, latest.release);
             }
-            await performSilentAutoUpdate(latest.version, latest.release.body);
-            hasShownUpdateNotice = true;
         } else {
             resetBackoff();
             hasShownUpdateNotice = false;

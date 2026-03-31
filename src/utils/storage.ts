@@ -84,7 +84,13 @@ export const storage = {
         try {
             const value = this.get(key);
             if (value === null) return defaultValue;
-            return JSON.parse(value) as T;
+            const parsed = JSON.parse(value);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                delete parsed.__proto__;
+                delete parsed.constructor;
+                delete parsed.prototype;
+            }
+            return parsed as T;
         } catch (e) {
             console.error("[SpicyLyricTranslator] Storage getJSON error:", e);
             return defaultValue;
@@ -121,6 +127,29 @@ export const storage = {
             keysToRemove.forEach(key => localStorage.removeItem(key));
         } catch (e) {
             console.error("[SpicyLyricTranslator] Storage clearAll error:", e);
+        }
+    },
+
+    setSecret(key: string, value: string): boolean {
+        try {
+            const encoded = btoa(unescape(encodeURIComponent(value)));
+            return this.set(key, encoded);
+        } catch (e) {
+            return this.set(key, value);
+        }
+    },
+
+    getSecret(key: string): string | null {
+        try {
+            const stored = this.get(key);
+            if (stored === null) return null;
+            try {
+                return decodeURIComponent(escape(atob(stored)));
+            } catch {
+                return stored;
+            }
+        } catch (e) {
+            return null;
         }
     }
 };

@@ -33,13 +33,13 @@ echo [STEP 1] Checking installation...
 where spicetify >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Installing Spicetify...
-    %PWSH% -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/cli/main/install.ps1 | iex"
+    %PWSH% -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/cli/main/install.ps1 -OutFile '%TEMP%\spicetify-install.ps1'; & '%TEMP%\spicetify-install.ps1'; Remove-Item '%TEMP%\spicetify-install.ps1' -ErrorAction SilentlyContinue"
     
     :: Refresh PATH
     set "PATH=%PATH%;%USERPROFILE%\.spicetify;%APPDATA%\spicetify"
     
     echo [INFO] Installing Marketplace...
-    %PWSH% -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/marketplace/main/resources/install.ps1 | iex"
+    %PWSH% -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/marketplace/main/resources/install.ps1 -OutFile '%TEMP%\marketplace-install.ps1'; & '%TEMP%\marketplace-install.ps1'; Remove-Item '%TEMP%\marketplace-install.ps1' -ErrorAction SilentlyContinue"
 ) else (
     echo [OK] Spicetify is installed.
 )

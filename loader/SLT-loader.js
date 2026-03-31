@@ -303,7 +303,7 @@
         };
     };
 
-    const loadExtension = async (version) => {
+    const loadExtension = async (version, expectedHash = null) => {
         const url = `${EXTENSION_BASE_URL}/v${version}/spicy-lyric-translater.js?_=${Date.now()}`;
         
         const response = await fetch(url);
@@ -311,6 +311,10 @@
         
         const code = await response.text();
         const contentHash = await computeSHA256(code);
+
+        if (expectedHash && contentHash && expectedHash !== contentHash) {
+            throw new Error(`Integrity check failed: expected ${expectedHash.substring(0, 12)}, got ${contentHash.substring(0, 12)}`);
+        }
 
         const previousHash = storageGet('content-hash');
         const previousVersion = storageGet('loaded-version');
@@ -496,7 +500,7 @@
         for (let i = 0; i < retries; i++) {
             try {
                 const info = await getVersionInfo();
-                await loadExtension(info.version);
+                await loadExtension(info.version, info.hash);
                 startHotfixChecker();
                 return;
             } catch (err) {

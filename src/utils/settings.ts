@@ -161,10 +161,11 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('custom-api-url') || ''}" placeholder="https://your-api.com/translate">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector('input') as HTMLInputElement;
+    if (customApiInput) customApiInput.value = storage.get('custom-api-url') || '';
     customApiInput?.addEventListener('change', () => {
         storage.set('custom-api-url', customApiInput.value);
         state.customApiUrl = customApiInput.value;
@@ -188,12 +189,13 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector('input') as HTMLInputElement;
+    if (customApiKeyInput) customApiKeyInput.value = storage.getSecret('custom-api-key') || '';
     customApiKeyInput?.addEventListener('change', () => {
-        storage.set('custom-api-key', customApiKeyInput.value);
+        storage.setSecret('custom-api-key', customApiKeyInput.value);
         state.customApiKey = customApiKeyInput.value;
         setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
     });
@@ -209,12 +211,13 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector('input') as HTMLInputElement;
+    if (deeplKeyInput) deeplKeyInput.value = storage.getSecret('deepl-api-key') || '';
     deeplKeyInput?.addEventListener('change', () => {
-        storage.set('deepl-api-key', deeplKeyInput.value);
+        storage.setSecret('deepl-api-key', deeplKeyInput.value);
         state.deeplApiKey = deeplKeyInput.value;
         setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
     });
@@ -230,12 +233,13 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector('input') as HTMLInputElement;
+    if (openaiKeyInput) openaiKeyInput.value = storage.getSecret('openai-api-key') || '';
     openaiKeyInput?.addEventListener('change', () => {
-        storage.set('openai-api-key', openaiKeyInput.value);
+        storage.setSecret('openai-api-key', openaiKeyInput.value);
         state.openaiApiKey = openaiKeyInput.value;
         setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
     });
@@ -251,10 +255,11 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector('input') as HTMLInputElement;
+    if (openaiModelInput) openaiModelInput.value = storage.get('openai-model') || 'gpt-4o-mini';
     openaiModelInput?.addEventListener('change', () => {
         storage.set('openai-model', openaiModelInput.value);
         state.openaiModel = openaiModelInput.value;
@@ -272,12 +277,13 @@ function createNativeSettingsSection(): HTMLElement {
             <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
         <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="${storage.get('gemini-api-key') || ''}" placeholder="AIza...">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector('input') as HTMLInputElement;
+    if (geminiKeyInput) geminiKeyInput.value = storage.getSecret('gemini-api-key') || '';
     geminiKeyInput?.addEventListener('change', () => {
-        storage.set('gemini-api-key', geminiKeyInput.value);
+        storage.setSecret('gemini-api-key', geminiKeyInput.value);
         state.geminiApiKey = geminiKeyInput.value;
         setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiKeyInput.value });
     });
@@ -329,7 +335,7 @@ function createNativeSettingsSection(): HTMLElement {
     sectionContent.appendChild(createNativeToggle(
         'slt-settings.share-usage-data',
         'Share Active Viewing Status',
-        storage.get('share-usage-data') !== 'false',
+        storage.get('share-usage-data') === 'true',
         (checked) => {
             storage.set('share-usage-data', String(checked));
             notifyShareDataChanged();
@@ -777,7 +783,7 @@ function createSettingsUI(): HTMLElement {
         <div class="slt-setting-row slt-toggle-row">
             <label for="slt-share-usage-data">Share Active Viewing Status</label>
             <label class="slt-toggle">
-                <input type="checkbox" id="slt-share-usage-data" ${storage.get('share-usage-data') !== 'false' ? 'checked' : ''}>
+                <input type="checkbox" id="slt-share-usage-data" ${storage.get('share-usage-data') === 'true' ? 'checked' : ''}>
                 <span class="slt-toggle-slider"></span>
             </label>
         </div>
