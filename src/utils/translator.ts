@@ -424,9 +424,18 @@ function cacheTranslation(text: string, targetLang: string, translation: string,
     storage.setJSON('translation-cache', cache);
 }
 
-async function translateWithGoogle(text: string, targetLang: string): Promise<{ translation: string; detectedLang: string }> {
+function normalizeSourceLangHint(raw?: string): string {
+    if (!raw) return 'auto';
+    const value = raw.toLowerCase().trim();
+    if (!value || value === 'unknown' || value === 'auto') return 'auto';
+    // Use only the base code (e.g. "ja-JP" -> "ja") to satisfy Google.
+    return value.split(/[-_]/)[0] || 'auto';
+}
+
+async function translateWithGoogle(text: string, targetLang: string, sourceLang?: string): Promise<{ translation: string; detectedLang: string }> {
     const encodedText = encodeURIComponent(text);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodedText}`;
+    const sl = normalizeSourceLangHint(sourceLang);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${targetLang}&dt=t&q=${encodedText}`;
     
     const response = await fetch(url);
     if (!response.ok) {
@@ -887,7 +896,8 @@ function parseBatchTextFallbacks(translatedText: string, expectedCount: number):
 async function translateChunkedBatch(
     lines: string[],
     targetLang: string,
-    chunkSize: number = BATCH_CHUNK_SIZE
+    chunkSize: number = BATCH_CHUNK_SIZE,
+    sourceLang?: string
 ): Promise<{ translations: string[]; detectedLang?: string }> {
     const translations: string[] = [];
     let detectedLang: string | undefined;
@@ -895,7 +905,7 @@ async function translateChunkedBatch(
     for (let start = 0; start < lines.length; start += chunkSize) {
         const chunk = lines.slice(start, start + chunkSize);
         const { combinedText, markerNonce } = buildMarkedBatchPayload(chunk);
-        const result = await retryWithBackoff(() => translateText(combinedText, targetLang));
+        const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
 
         const parsed =
             parseMarkedBatchResponse(result.translatedText, chunk.length, markerNonce) ||
@@ -915,7 +925,7 @@ async function translateChunkedBatch(
     return { translations, detectedLang };
 }
 
-export async function translateText(text: string, targetLang: string): Promise<TranslationResult> {
+export async function translateText(text: string, targetLang: string, sourceLang?: string): Promise<TranslationResult> {
     const cached = getCachedTranslation(text, targetLang);
     if (cached) {
         return {
@@ -924,9 +934,9 @@ export async function translateText(text: string, targetLang: string): Promise<T
             targetLanguage: targetLang
         };
     }
-    
+
     const tryGoogle = async () => {
-        const result = await translateWithGoogle(text, targetLang);
+        const result = await translateWithGoogle(text, targetLang, sourceLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
     
@@ -1117,7 +1127,7 @@ export async function translateLyrics(
 
         if (!translatedLines) {
             const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map(l => l.text));
-            const result = await retryWithBackoff(() => translateText(combinedText, targetLang));
+            const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
             translatedLines =
                 parseMarkedBatchResponse(result.translatedText, uncachedLines.length, markerNonce) ||
                 parseBatchTextFallbacks(result.translatedText, uncachedLines.length);
@@ -1129,7 +1139,7 @@ export async function translateLyrics(
 
         if ((!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
             warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
-            const chunked = await translateChunkedBatch(uncachedLines.map(l => l.text), targetLang);
+            const chunked = await translateChunkedBatch(uncachedLines.map(l => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
             translatedLines = chunked.translations;
             if (chunked.detectedLang) {
                 detectedLang = chunked.detectedLang;

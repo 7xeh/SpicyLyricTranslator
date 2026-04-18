@@ -1121,9 +1121,18 @@ var SpicyLyricTranslater = (() => {
     }
     storage_default.setJSON("translation-cache", cache);
   }
-  async function translateWithGoogle(text, targetLang) {
+  function normalizeSourceLangHint(raw) {
+    if (!raw)
+      return "auto";
+    const value = raw.toLowerCase().trim();
+    if (!value || value === "unknown" || value === "auto")
+      return "auto";
+    return value.split(/[-_]/)[0] || "auto";
+  }
+  async function translateWithGoogle(text, targetLang, sourceLang) {
     const encodedText = encodeURIComponent(text);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodedText}`;
+    const sl = normalizeSourceLangHint(sourceLang);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${targetLang}&dt=t&q=${encodedText}`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Google Translate API error: ${response.status}`);
@@ -1496,13 +1505,13 @@ ${text}`
     }
     return null;
   }
-  async function translateChunkedBatch(lines, targetLang, chunkSize = BATCH_CHUNK_SIZE) {
+  async function translateChunkedBatch(lines, targetLang, chunkSize = BATCH_CHUNK_SIZE, sourceLang) {
     const translations = [];
     let detectedLang;
     for (let start = 0; start < lines.length; start += chunkSize) {
       const chunk = lines.slice(start, start + chunkSize);
       const { combinedText, markerNonce } = buildMarkedBatchPayload(chunk);
-      const result = await retryWithBackoff(() => translateText(combinedText, targetLang));
+      const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
       const parsed = parseMarkedBatchResponse(result.translatedText, chunk.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, chunk.length);
       if (!parsed || parsed.length !== chunk.length) {
         throw new Error(`Chunked batch mismatch: Sent ${chunk.length}, got ${parsed?.length ?? 0}`);
@@ -1514,7 +1523,7 @@ ${text}`
     }
     return { translations, detectedLang };
   }
-  async function translateText(text, targetLang) {
+  async function translateText(text, targetLang, sourceLang) {
     const cached = getCachedTranslation(text, targetLang);
     if (cached) {
       return {
@@ -1524,7 +1533,7 @@ ${text}`
       };
     }
     const tryGoogle = async () => {
-      const result = await translateWithGoogle(text, targetLang);
+      const result = await translateWithGoogle(text, targetLang, sourceLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryLibreTranslate = async () => {
@@ -1686,7 +1695,7 @@ ${text}`
       }
       if (!translatedLines) {
         const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map((l) => l.text));
-        const result = await retryWithBackoff(() => translateText(combinedText, targetLang));
+        const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
         translatedLines = parseMarkedBatchResponse(result.translatedText, uncachedLines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, uncachedLines.length);
         if (result.detectedLanguage) {
           detectedLang = result.detectedLanguage;
@@ -1694,7 +1703,7 @@ ${text}`
       }
       if ((!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
         warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
-        const chunked = await translateChunkedBatch(uncachedLines.map((l) => l.text), targetLang);
+        const chunked = await translateChunkedBatch(uncachedLines.map((l) => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
         translatedLines = chunked.translations;
         if (chunked.detectedLang) {
           detectedLang = chunked.detectedLang;
@@ -4390,7 +4399,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.6" : "0.0.0";
+    return true ? "1.9.7" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6554,10 +6563,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
               apiVocalLineData = apiVocalLineData.slice(0, domCount);
           } else if (apiVocalTexts.length < domCount) {
             for (let i = apiVocalTexts.length; i < domCount; i++) {
-              apiVocalTexts.push(domLineTexts[i] || "");
+              apiVocalTexts.push("");
               if (apiVocalLineData) {
                 apiVocalLineData.push({
-                  text: domLineTexts[i] || "",
+                  text: "",
                   startTime: 0,
                   endTime: 0,
                   isInstrumental: false
@@ -6743,6 +6752,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   function normalizeForComparison(text) {
     return (text || "").toLowerCase().replace(/[\s\p{P}]+/gu, "").trim();
   }
+  function looseLatinSkeleton(text) {
+    return (text || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  }
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
     lines.forEach((line, index) => {
@@ -6752,9 +6764,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         translatedText = state.translatedLyrics.get(originalText2);
       }
       const originalText = extractLineText2(line);
-      if (translatedText && translatedText !== originalText && normalizeForComparison(translatedText) !== normalizeForComparison(originalText)) {
-        translationMapByIndex.set(index, translatedText);
+      if (!translatedText)
+        return;
+      if (translatedText === originalText)
+        return;
+      if (normalizeForComparison(translatedText) === normalizeForComparison(originalText))
+        return;
+      const bothLatin = /^[\p{Script=Latin}\p{N}\s\p{P}]+$/u.test(originalText) && /^[\p{Script=Latin}\p{N}\s\p{P}]+$/u.test(translatedText);
+      if (bothLatin && looseLatinSkeleton(translatedText) === looseLatinSkeleton(originalText)) {
+        return;
       }
+      translationMapByIndex.set(index, translatedText);
     });
     if (!isOverlayActive()) {
       enableOverlay({
