@@ -21,12 +21,20 @@ let currentConfig: OverlayConfig = {
 
 let isOverlayEnabled = false;
 let translationMap: Map<number, string> = new Map();
+let romanizationMap: Map<number, string> = new Map();
+let originalTextMap: Map<number, string> = new Map();
 let lineTimingData: LyricLineData[] = [];
 let qualityMap: Map<number, TranslationQualityMeta> = new Map();
+
+function normalizeCompare(text: string | undefined | null): string {
+    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
+}
 
 interface DocCache {
     lines: NodeListOf<Element> | null;
     translationMap: Map<number, HTMLElement> | null;
+    romanizationElMap: Map<number, HTMLElement> | null;
+    originalElMap: Map<number, HTMLElement> | null;
     lastActiveIndex: number;
 }
 
@@ -35,14 +43,83 @@ const docCacheMap = new WeakMap<Document, DocCache>();
 function getDocCache(doc: Document): DocCache {
     let cache = docCacheMap.get(doc);
     if (!cache) {
-        cache = { lines: null, translationMap: null, lastActiveIndex: -1 };
+        cache = { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 };
         docCacheMap.set(doc, cache);
     }
     return cache;
 }
 
 function resetDocCache(doc: Document): void {
-    docCacheMap.set(doc, { lines: null, translationMap: null, lastActiveIndex: -1 });
+    docCacheMap.set(doc, { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 });
+}
+
+function isLearningModeActive(): boolean {
+    return storage.get('vocabulary-mode') === 'true';
+}
+
+function buildRomanizationLine(
+    doc: Document,
+    index: number,
+    timingInfo: LyricLineData | undefined,
+    line: Element
+): HTMLElement | null {
+    const romanized = romanizationMap.get(index);
+    if (!romanized || !romanized.trim()) return null;
+    if (timingInfo?.isInstrumental) return null;
+
+    const romanEl = doc.createElement('div');
+    romanEl.className = 'slt-romanization-line';
+    romanEl.dataset.forLine = index.toString();
+    romanEl.dataset.lineIndex = index.toString();
+    romanEl.textContent = romanized;
+
+    if (timingInfo) {
+        romanEl.dataset.startTime = timingInfo.startTime.toString();
+        romanEl.dataset.endTime = timingInfo.endTime.toString();
+    }
+    if (isLineActive(line)) romanEl.classList.add('active');
+    return romanEl;
+}
+
+function buildOriginalLine(
+    doc: Document,
+    index: number,
+    timingInfo: LyricLineData | undefined,
+    line: Element
+): HTMLElement | null {
+    const original = originalTextMap.get(index);
+    if (!original || !original.trim()) return null;
+    if (timingInfo?.isInstrumental) return null;
+
+    const origEl = doc.createElement('div');
+    origEl.className = 'slt-original-line';
+    origEl.dataset.forLine = index.toString();
+    origEl.dataset.lineIndex = index.toString();
+    origEl.textContent = original;
+
+    if (timingInfo) {
+        origEl.dataset.startTime = timingInfo.startTime.toString();
+        origEl.dataset.endTime = timingInfo.endTime.toString();
+    }
+    if (isLineActive(line)) origEl.classList.add('active');
+    return origEl;
+}
+
+function domLineIsRomanized(line: Element, index: number): boolean {
+    const apiOriginal = originalTextMap.get(index);
+    const apiRomanized = romanizationMap.get(index);
+    if (!apiOriginal || !apiRomanized) return false;
+
+    const domText = extractLineText(line);
+    if (!domText) return false;
+
+    const nDom = normalizeCompare(domText);
+    const nOrig = normalizeCompare(apiOriginal);
+    const nRom = normalizeCompare(apiRomanized);
+
+    if (nDom === nOrig) return false;
+    if (nDom === nRom) return true;
+    return nDom !== nOrig && nRom.length > 0 && nDom.length > 0;
 }
 
 function getPIPWindow(): Window | null {
@@ -202,23 +279,38 @@ function applyReplaceMode(doc: Document): void {
     resetDocCache(doc);
 
     const lines = getLyricLines(doc);
-    
+
     doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
     doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
-    
+    doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
+
     const lyricsContainer = doc.querySelector('.SpicyLyricsScrollContainer');
     const lyricsType = lyricsContainer?.getAttribute('data-lyrics-type') || 'Line';
-    
+    const learningMode = isLearningModeActive();
+
     lines.forEach((line, index) => {
         const translation = translationMap.get(index);
         if (!translation) return;
-        
+
         const originalText = extractLineText(line);
         if (translation === originalText) return;
-        
+
         if (!line.parentNode) return;
-        
-        line.classList.add('slt-replace-hidden');
+
+        const timingInfoEarly = lineTimingData[index];
+        const isBreakEarly = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
+        const hasRomanization = !!romanizationMap.get(index);
+        const hasApiOriginal = !!originalTextMap.get(index);
+        const domIsRomanized = domLineIsRomanized(line, index);
+        const learningActive = learningMode && hasRomanization && !(timingInfoEarly?.isInstrumental || isBreakEarly);
+        const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
+        const keepDomVisible = learningActive && !domIsRomanized;
+
+        if (!keepDomVisible) {
+            line.classList.add('slt-replace-hidden');
+        }
         (line as HTMLElement).dataset.sltIndex = index.toString();
         
         const replaceEl = doc.createElement('div');
@@ -236,9 +328,10 @@ function applyReplaceMode(doc: Document): void {
             replaceEl.classList.add('slt-replace-instrumental');
         } else {
             const vocabEnabled = storage.get('vocabulary-mode') === 'true';
+            const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
             if (vocabEnabled) {
                 replaceEl.classList.add('slt-vocab-line');
-                appendVocabularyPairs(doc, replaceEl, originalText, translation, line, 'slt-replace-word');
+                appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, 'slt-replace-word');
             } else if (currentConfig.syncWordHighlight) {
                 appendTranslationWordSpans(doc, replaceEl, translation, line, 'slt-replace-word');
             } else {
@@ -280,8 +373,15 @@ function applyReplaceMode(doc: Document): void {
         if (qualityIndicator) {
             replaceEl.appendChild(qualityIndicator);
         }
-        
+
         line.parentNode.insertBefore(replaceEl, line.nextSibling);
+
+        if (showInjectedOriginal) {
+            const origEl = buildOriginalLine(doc, index, timingInfo, line);
+            if (origEl) {
+                line.parentNode.insertBefore(origEl, line);
+            }
+        }
     });
 }
 
@@ -636,38 +736,56 @@ function applyInterleavedMode(doc: Document): void {
         
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
-        
+        doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
+
+        const learningMode = isLearningModeActive();
+
         lines.forEach((line, index) => {
             try {
                 const translation = translationMap.get(index);
                 const originalText = extractLineText(line);
-                
+
                 const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
-                
+
                 if (!translation && !isBreak) return;
                 if (translation === originalText) return;
-                
+
                 if (!line.parentNode) {
                     return;
                 }
-                
+
+                const hasRomanization = !!romanizationMap.get(index);
+                const hasApiOriginal = !!originalTextMap.get(index);
+                const domIsRomanized = domLineIsRomanized(line, index);
+                const learningActive = learningMode && hasRomanization && !isBreak;
+                const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
+
                 line.classList.add('slt-overlay-parent');
                 (line as HTMLElement).dataset.sltIndex = index.toString();
-                
+
+                if (showInjectedOriginal) {
+                    line.classList.add('slt-learning-hidden');
+                } else {
+                    line.classList.remove('slt-learning-hidden');
+                }
+
                 const translationEl = doc.createElement('div');
                 translationEl.className = 'slt-interleaved-translation';
                 translationEl.dataset.forLine = index.toString();
                 translationEl.dataset.lineIndex = index.toString();
-                
+
                 const isVocabMode = storage.get('vocabulary-mode') === 'true';
-                
+                const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+
                 if (isBreak) {
                     translationEl.textContent = '• • •';
                     translationEl.classList.add('slt-music-break');
                 } else if (isVocabMode && translation) {
                     translationEl.classList.add('slt-vocab-line');
                     translationEl.classList.add('slt-sync-translation');
-                    appendVocabularyPairs(doc, translationEl, originalText, translation, line, 'slt-sync-word');
+                    appendVocabularyPairs(doc, translationEl, pairBelowText, translation, line, 'slt-sync-word');
                 } else {
                     translationEl.classList.add('slt-sync-translation');
                     if (currentConfig.syncWordHighlight && translation) {
@@ -691,6 +809,13 @@ function applyInterleavedMode(doc: Document): void {
                 }
                 
                 line.parentNode.insertBefore(translationEl, line.nextSibling);
+
+                if (showInjectedOriginal) {
+                    const origEl = buildOriginalLine(doc, index, timingInfo, line);
+                    if (origEl) {
+                        line.parentNode.insertBefore(origEl, line);
+                    }
+                }
 
                 if (!isBreak && currentConfig.syncWordHighlight && translation) {
                     fallbackToContinuousMultilineGradient(translationEl, translation, line);
@@ -1088,12 +1213,25 @@ function updateWordSyncStates(doc: Document): void {
 }
 
 function syncBlurToTranslations(doc: Document): void {
-    doc.querySelectorAll('.slt-interleaved-translation, .slt-replace-line').forEach((transEl) => {
+    doc.querySelectorAll('.slt-interleaved-translation, .slt-replace-line, .slt-romanization-line, .slt-original-line').forEach((transEl) => {
         const transHtml = transEl as HTMLElement;
-        let lineEl = transEl.previousElementSibling as HTMLElement | null;
-        while (lineEl && !lineEl.classList.contains('line')) {
-            lineEl = lineEl.previousElementSibling as HTMLElement | null;
+        const isOriginalLine = transHtml.classList.contains('slt-original-line');
+
+        let lineEl: HTMLElement | null = null;
+        if (isOriginalLine) {
+            let next = transEl.nextElementSibling as HTMLElement | null;
+            while (next && !next.classList.contains('line')) {
+                next = next.nextElementSibling as HTMLElement | null;
+            }
+            lineEl = next;
+        } else {
+            let prev = transEl.previousElementSibling as HTMLElement | null;
+            while (prev && !prev.classList.contains('line')) {
+                prev = prev.previousElementSibling as HTMLElement | null;
+            }
+            lineEl = prev;
         }
+
         if (lineEl) {
             const blurAmount = lineEl.style.getPropertyValue('--BlurAmount');
             if (blurAmount) {
@@ -1167,6 +1305,22 @@ function onActiveLineChanged(doc: Document): void {
                 });
             }
 
+            if (!cache.romanizationElMap) {
+                cache.romanizationElMap = new Map();
+                doc.querySelectorAll('.slt-romanization-line').forEach(el => {
+                    const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
+                    if (idx >= 0) cache.romanizationElMap!.set(idx, el as HTMLElement);
+                });
+            }
+
+            if (!cache.originalElMap) {
+                cache.originalElMap = new Map();
+                doc.querySelectorAll('.slt-original-line').forEach(el => {
+                    const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
+                    if (idx >= 0) cache.originalElMap!.set(idx, el as HTMLElement);
+                });
+            }
+
             let currentActiveIndex = -1;
             for (let i = 0; i < cache.lines.length; i++) {
                 if (isLineActive(cache.lines[i])) {
@@ -1179,6 +1333,10 @@ function onActiveLineChanged(doc: Document): void {
                 if (cache.lastActiveIndex !== -1) {
                     const oldEl = cache.translationMap.get(cache.lastActiveIndex);
                     if (oldEl) oldEl.classList.remove('active');
+                    const oldRom = cache.romanizationElMap.get(cache.lastActiveIndex);
+                    if (oldRom) oldRom.classList.remove('active');
+                    const oldOrig = cache.originalElMap?.get(cache.lastActiveIndex);
+                    if (oldOrig) oldOrig.classList.remove('active');
                 }
 
                 if (currentActiveIndex !== -1) {
@@ -1191,6 +1349,10 @@ function onActiveLineChanged(doc: Document): void {
                             } catch (scrollErr) { }
                         }
                     }
+                    const newRom = cache.romanizationElMap.get(currentActiveIndex);
+                    if (newRom) newRom.classList.add('active');
+                    const newOrig = cache.originalElMap?.get(currentActiveIndex);
+                    if (newOrig) newOrig.classList.add('active');
                 }
 
                 cache.lastActiveIndex = currentActiveIndex;
@@ -1390,10 +1552,13 @@ export function disableOverlay(): void {
         
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
-        
+        doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
+
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
-        
+
         doc.querySelectorAll('[data-slt-original-html]').forEach(el => {
             const original = (el as HTMLElement).dataset.sltOriginalHtml;
             if (original !== undefined) {
@@ -1444,8 +1609,10 @@ export function disableOverlay(): void {
     }
     
     translationMap.clear();
+    romanizationMap.clear();
+    originalTextMap.clear();
     document.body.classList.remove('slt-overlay-active');
-    
+
 }
 
 export function updateOverlayContent(translations: Map<number, string>): void {
@@ -1463,13 +1630,18 @@ export function updateOverlayContent(translations: Map<number, string>): void {
 
 export function clearOverlayContent(): void {
     translationMap.clear();
+    romanizationMap.clear();
+    originalTextMap.clear();
     lineTimingData = [];
-    
+
     const clearDoc = (doc: Document) => {
         const container = doc.getElementById('spicy-translate-overlay');
         if (container) container.innerHTML = '';
-        
+
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
         
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
@@ -1535,6 +1707,14 @@ export function setOverlayConfig(config: Partial<OverlayConfig>): void {
 
 export function setLineTimingData(data: LyricLineData[]): void {
     lineTimingData = data;
+}
+
+export function setRomanizationData(data: Map<number, string>): void {
+    romanizationMap = new Map(data);
+}
+
+export function setOriginalTextData(data: Map<number, string>): void {
+    originalTextMap = new Map(data);
 }
 
 export function setQualityMetadata(metadata: Map<number, TranslationQualityMeta>): void {
@@ -1640,6 +1820,121 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     letter-spacing: 0.3em;
     padding: 8px 0 16px 0;
 }
+
+.line.slt-learning-hidden {
+    display: none !important;
+}
+
+.slt-original-line {
+    display: block;
+    font-size: inherit;
+    font-weight: 900;
+    line-height: 1.15;
+    padding: 4px 0 2px 0;
+    color: rgba(255, 255, 255, 0.9);
+    text-align: left;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    letter-spacing: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    filter: blur(var(--BlurAmount, 0px));
+    transition: opacity 0.25s ease, filter 0.25s ease;
+}
+
+.slt-original-line.OppositeAligned,
+.slt-original-line.rtl {
+    text-align: end;
+}
+
+.line.Active ~ .slt-original-line,
+.slt-original-line.active,
+.slt-original-line.Active {
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+.spicy-pip-wrapper .slt-original-line {
+    font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
+}
+
+.Cinema--Container .slt-original-line,
+#SpicyLyricsPage.ForcedCompactMode .slt-original-line {
+    font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
+}
+
+#SpicyLyricsPage.SidebarMode .slt-original-line {
+    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
+}
+
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-original-line {
+    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
+    padding: 2px 0;
+}
+
+.slt-romanization-line {
+    display: block;
+    font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
+    font-weight: 600;
+    font-style: italic;
+    line-height: 1.2;
+    padding: 2px 0 2px 0;
+    letter-spacing: 0.02em;
+    color: rgba(255, 215, 120, 0.78);
+    text-align: left;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    pointer-events: none;
+    opacity: 0.7;
+    filter: blur(var(--BlurAmount, 0px));
+    transition: opacity 0.25s ease, filter 0.25s ease, color 0.25s ease;
+}
+
+.slt-romanization-line.OppositeAligned,
+.slt-romanization-line.rtl {
+    text-align: end;
+}
+
+.line.Active + .slt-romanization-line,
+.slt-romanization-line.active,
+.slt-romanization-line.Active {
+    opacity: 1 !important;
+    filter: none !important;
+    color: rgba(255, 224, 150, 0.95);
+}
+
+.line.Sung + .slt-romanization-line {
+    opacity: 0.45;
+}
+
+.line.NotSung + .slt-romanization-line {
+    opacity: 0.55;
+}
+
+.spicy-pip-wrapper .slt-romanization-line {
+    font-size: calc(0.7em * var(--slt-overlay-font-scale, 1));
+}
+
+.Cinema--Container .slt-romanization-line,
+#SpicyLyricsPage.ForcedCompactMode .slt-romanization-line {
+    font-size: calc(0.75em * var(--slt-overlay-font-scale, 1));
+    padding: 3px 0;
+}
+
+#SpicyLyricsPage.SidebarMode .slt-romanization-line {
+    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
+    padding: 1px 0;
+}
+
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line {
+    font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
+    padding: 1px 0;
+    margin: 0;
+}
 `;
 }
 
@@ -1652,6 +1947,8 @@ export default {
     getOverlayConfig,
     setOverlayConfig,
     setLineTimingData,
+    setRomanizationData,
+    setOriginalTextData,
     setQualityMetadata,
     initPIPOverlay,
     getOverlayStyles

@@ -4,12 +4,14 @@ import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats } from './translator';
 import { getCurrentTrackUri } from './trackCache';
 import { setViewingLyrics } from './connectivity';
-import { 
-    enableOverlay, 
-    disableOverlay, 
-    updateOverlayContent, 
+import {
+    enableOverlay,
+    disableOverlay,
+    updateOverlayContent,
     isOverlayActive,
     setLineTimingData,
+    setRomanizationData,
+    setOriginalTextData,
     setQualityMetadata
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, isSameLanguage } from './languageDetection';
@@ -480,12 +482,15 @@ export async function translateCurrentLyrics(): Promise<void> {
                     apiVocalTexts = apiVocalTexts.slice(0, domCount);
                     if (apiVocalLineData) apiVocalLineData = apiVocalLineData.slice(0, domCount);
                 } else if (apiVocalTexts.length < domCount) {
-                    // Pad with romanized DOM text for excess lines the API doesn't cover
+                    // Pad with empty sentinels for excess DOM lines the API doesn't cover.
+                    // Never feed romanized DOM text to the translator — Google auto-detects
+                    // romaji as English and echoes it back unchanged, which then passes
+                    // through applyTranslations and renders as a bogus "translation".
                     for (let i = apiVocalTexts.length; i < domCount; i++) {
-                        apiVocalTexts.push(domLineTexts[i] || '');
+                        apiVocalTexts.push('');
                         if (apiVocalLineData) {
                             apiVocalLineData.push({
-                                text: domLineTexts[i] || '',
+                                text: '',
                                 startTime: 0,
                                 endTime: 0,
                                 isInstrumental: false,
@@ -660,13 +665,32 @@ export async function translateCurrentLyrics(): Promise<void> {
         state.lastTranslatedSongUri = currentTrackUri;
         lastTranslatedRomanizationState = romanizationOn;
         
+        let timingDataForOverlay: LyricLineData[] | null = null;
         if (useApiLines && apiVocalLineData) {
-            setLineTimingData(apiVocalLineData);
+            timingDataForOverlay = apiVocalLineData;
         } else if (matchedTimingData) {
-            setLineTimingData(matchedTimingData);
+            timingDataForOverlay = matchedTimingData;
         } else if (apiLineData) {
-            setLineTimingData(apiLineData);
+            timingDataForOverlay = apiLineData;
         }
+        if (timingDataForOverlay) {
+            setLineTimingData(timingDataForOverlay);
+        }
+
+        const romanizationByIndex = new Map<number, string>();
+        const originalByIndex = new Map<number, string>();
+        if (timingDataForOverlay) {
+            timingDataForOverlay.forEach((lineInfo, idx) => {
+                if (lineInfo?.romanizedText && lineInfo.romanizedText.trim()) {
+                    romanizationByIndex.set(idx, lineInfo.romanizedText);
+                }
+                if (lineInfo?.text && lineInfo.text.trim()) {
+                    originalByIndex.set(idx, lineInfo.text);
+                }
+            });
+        }
+        setRomanizationData(romanizationByIndex);
+        setOriginalTextData(originalByIndex);
         
         // Re-query DOM lines fresh to avoid stale references after async operations
         const freshLines = getLyricsLines();
@@ -700,6 +724,13 @@ function normalizeForComparison(text: string): string {
     return (text || '').toLowerCase().replace(/[\s\p{P}]+/gu, '').trim();
 }
 
+// Stricter echo check: strips ALL non-letter characters so "Kimi-Wa_Sekai!" and
+// "kimi wa sekai" normalize identically. Catches Google-Translate returning
+// lightly reformatted romaji when it auto-detects romaji-as-English.
+function looseLatinSkeleton(text: string): string {
+    return (text || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
 function applyTranslations(lines: NodeListOf<Element>): void {
     const translationMapByIndex = new Map<number, string>();
     lines.forEach((line, index) => {
@@ -709,9 +740,18 @@ function applyTranslations(lines: NodeListOf<Element>): void {
             translatedText = state.translatedLyrics.get(originalText);
         }
         const originalText = extractLineText(line);
-        if (translatedText && translatedText !== originalText && normalizeForComparison(translatedText) !== normalizeForComparison(originalText)) {
-            translationMapByIndex.set(index, translatedText);
+        if (!translatedText) return;
+        if (translatedText === originalText) return;
+        if (normalizeForComparison(translatedText) === normalizeForComparison(originalText)) return;
+        // Only engage the Latin-skeleton echo guard if BOTH sides are pure Latin —
+        // a genuine Japanese→English translation will always pass this (original is
+        // non-Latin), while an echoed-romaji "translation" gets dropped.
+        const bothLatin = /^[\p{Script=Latin}\p{N}\s\p{P}]+$/u.test(originalText)
+                       && /^[\p{Script=Latin}\p{N}\s\p{P}]+$/u.test(translatedText);
+        if (bothLatin && looseLatinSkeleton(translatedText) === looseLatinSkeleton(originalText)) {
+            return;
         }
+        translationMapByIndex.set(index, translatedText);
     });
     
     if (!isOverlayActive()) {
