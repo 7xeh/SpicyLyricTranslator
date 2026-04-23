@@ -2,7 +2,7 @@ import { storage } from './storage';
 import { state } from './state';
 import { SUPPORTED_LANGUAGES, clearTranslationCache, setPreferredApi } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
-import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog } from './updater';
+import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
 import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
@@ -398,9 +398,11 @@ function createNativeSettingsSection(): HTMLElement {
         }
     ));
 
+    const nativeVersionHash = getContentHashShort();
+    const nativeVersionLabel = `Version ${VERSION}${nativeVersionHash ? ` · ${nativeVersionHash}` : ''}`;
     sectionContent.appendChild(createNativeButton(
         'slt-settings.check-updates',
-        `Version ${VERSION}`,
+        nativeVersionLabel,
         'Check for Updates',
         async () => {
             const btn = document.getElementById('slt-settings.check-updates') as HTMLButtonElement;
@@ -803,6 +805,7 @@ function createSettingsUI(): HTMLElement {
         <div class="slt-setting-row" style="flex-direction: row; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <div>
                 <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
+                ${(() => { const h = getContentHashShort(); return h ? `<span style="margin: 0 8px; color: var(--spice-subtext);">·</span><span style="font-size: 12px; color: var(--spice-subtext); font-family: 'JetBrains Mono','Consolas',monospace;">${h}</span>` : ''; })()}
                 <span style="margin: 0 8px; color: var(--spice-subtext);">•</span>
                 <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
             </div>

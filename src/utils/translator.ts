@@ -1139,15 +1139,38 @@ export async function translateLyrics(
 
         if ((!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
             warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
-            const chunked = await translateChunkedBatch(uncachedLines.map(l => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
-            translatedLines = chunked.translations;
-            if (chunked.detectedLang) {
-                detectedLang = chunked.detectedLang;
+            try {
+                const chunked = await translateChunkedBatch(uncachedLines.map(l => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
+                translatedLines = chunked.translations;
+                if (chunked.detectedLang) {
+                    detectedLang = chunked.detectedLang;
+                }
+            } catch (chunkedError) {
+                warn('Chunked batch failed, falling back to per-line translation:', chunkedError);
+                translatedLines = null;
             }
         }
 
         if (!translatedLines || translatedLines.length !== uncachedLines.length) {
-            throw new Error(`Batch translation mismatch: Sent ${uncachedLines.length} lines, got ${translatedLines?.length ?? 0}. API might have stripped delimiters.`);
+            warn(`Batch parsing unreliable for target ${targetLang}, translating line-by-line (${uncachedLines.length} lines)`);
+            const perLineResults: string[] = [];
+            for (const item of uncachedLines) {
+                try {
+                    const single = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+                    perLineResults.push(single.translatedText);
+                    if (single.detectedLanguage && detectedLang === (detectedSourceLang || 'auto')) {
+                        detectedLang = single.detectedLanguage;
+                    }
+                } catch (singleError) {
+                    warn('Per-line translation failed for line:', item.index, singleError);
+                    perLineResults.push(item.text);
+                }
+            }
+            translatedLines = perLineResults;
+        }
+
+        if (!translatedLines || translatedLines.length !== uncachedLines.length) {
+            throw new Error(`Translation mismatch: Sent ${uncachedLines.length} lines, got ${translatedLines?.length ?? 0}.`);
         }
         
         uncachedLines.forEach((item, i) => {
