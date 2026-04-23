@@ -22,6 +22,7 @@ Desktop.ini
 *.bak
 *.sublime-workspace
 *.sublime-project
+*.claude
 
 # Environment variables and secrets
 .env

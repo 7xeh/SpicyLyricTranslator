@@ -4,12 +4,14 @@ import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats } from './translator';
 import { getCurrentTrackUri } from './trackCache';
 import { setViewingLyrics } from './connectivity';
-import { 
-    enableOverlay, 
-    disableOverlay, 
-    updateOverlayContent, 
+import {
+    enableOverlay,
+    disableOverlay,
+    updateOverlayContent,
     isOverlayActive,
     setLineTimingData,
+    setRomanizationData,
+    setOriginalTextData,
     setQualityMetadata
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, isSameLanguage } from './languageDetection';
@@ -663,13 +665,32 @@ export async function translateCurrentLyrics(): Promise<void> {
         state.lastTranslatedSongUri = currentTrackUri;
         lastTranslatedRomanizationState = romanizationOn;
         
+        let timingDataForOverlay: LyricLineData[] | null = null;
         if (useApiLines && apiVocalLineData) {
-            setLineTimingData(apiVocalLineData);
+            timingDataForOverlay = apiVocalLineData;
         } else if (matchedTimingData) {
-            setLineTimingData(matchedTimingData);
+            timingDataForOverlay = matchedTimingData;
         } else if (apiLineData) {
-            setLineTimingData(apiLineData);
+            timingDataForOverlay = apiLineData;
         }
+        if (timingDataForOverlay) {
+            setLineTimingData(timingDataForOverlay);
+        }
+
+        const romanizationByIndex = new Map<number, string>();
+        const originalByIndex = new Map<number, string>();
+        if (timingDataForOverlay) {
+            timingDataForOverlay.forEach((lineInfo, idx) => {
+                if (lineInfo?.romanizedText && lineInfo.romanizedText.trim()) {
+                    romanizationByIndex.set(idx, lineInfo.romanizedText);
+                }
+                if (lineInfo?.text && lineInfo.text.trim()) {
+                    originalByIndex.set(idx, lineInfo.text);
+                }
+            });
+        }
+        setRomanizationData(romanizationByIndex);
+        setOriginalTextData(originalByIndex);
         
         // Re-query DOM lines fresh to avoid stale references after async operations
         const freshLines = getLyricsLines();

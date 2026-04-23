@@ -55,7 +55,8 @@ export interface LyricLineData {
     startTime: number;
     endTime: number;
     isInstrumental: boolean;
-    
+    romanizedText?: string;
+
     words?: WordTimingData[];
 }
 
@@ -147,10 +148,13 @@ function getSpicyLyricsVersion(): string {
 async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> {
     const token = await getSpotifyAccessToken();
     const spicyVersion = getSpicyLyricsVersion();
-    
+
+    const lyricsOperationId = 'slt-lyrics-0';
+
     const body = {
         queries: [
             {
+                operationId: lyricsOperationId,
                 operation: 'lyrics',
                 variables: {
                     id: trackId,
@@ -162,10 +166,10 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
             version: spicyVersion,
         },
     };
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
+
     try {
         const res = await fetch(`${SPICY_LYRICS_API}/query`, {
             method: 'POST',
@@ -177,25 +181,32 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
             body: JSON.stringify(body),
             signal: controller.signal,
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         if (!res.ok) {
             throw new Error(`SpicyLyrics API request failed with status ${res.status}`);
         }
-        
+
         const data: QueryResponse = await res.json();
-        
-        const lyricsResult = data.queries?.[0]?.result;
+        const queries = Array.isArray(data?.queries) ? data.queries : [];
+
+        let lyricsResult: QueryResult | undefined =
+            queries.find(q => q?.operationId === lyricsOperationId && q?.result)?.result;
+
         if (!lyricsResult) {
-            warn('No lyrics query result found in API response');
+            lyricsResult = queries.find(q => q?.result && (q.result as any).httpStatus === 200)?.result;
+        }
+
+        if (!lyricsResult) {
+            warn('No lyrics query result found in API response', { queryCount: queries.length });
             return null;
         }
-        
+
         if (lyricsResult.httpStatus !== 200) {
             return null;
         }
-        
+
         let lyricsData: LyricsData;
         if (lyricsResult.format === 'json') {
             lyricsData = lyricsResult.data as LyricsData;
@@ -208,7 +219,7 @@ async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> 
         } else {
             return null;
         }
-        
+
         return lyricsData;
     } catch (err) {
         clearTimeout(timeoutId);
@@ -239,6 +250,8 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
         if (group.Lead?.Syllables && group.Lead.Syllables.length > 0) {
             const wordTimings: WordTimingData[] = [];
             let lineText = '';
+            let romanizedText = '';
+            let anyRomanized = false;
             for (const syllable of group.Lead.Syllables) {
                 wordTimings.push({
                     text: syllable.Text,
@@ -246,11 +259,18 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                     endTime: syllable.EndTime,
                     isPartOfWord: syllable.IsPartOfWord,
                 });
+                const romanSyl = syllable.RomanizedText ?? syllable.Text;
+                if (syllable.RomanizedText && syllable.RomanizedText !== syllable.Text) {
+                    anyRomanized = true;
+                }
                 if (syllable.IsPartOfWord) {
                     lineText += syllable.Text;
+                    romanizedText += romanSyl;
                 } else {
                     if (lineText.length > 0) lineText += ' ';
                     lineText += syllable.Text;
+                    if (romanizedText.length > 0) romanizedText += ' ';
+                    romanizedText += romanSyl;
                 }
             }
             lineData.push({
@@ -258,6 +278,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 startTime: group.Lead.StartTime,
                 endTime: group.Lead.EndTime,
                 isInstrumental: false,
+                romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, ' ').trim() : undefined,
                 words: wordTimings,
             });
             continue;
