@@ -531,8 +531,8 @@ var SpicyLyricTranslater = (() => {
   var detectionCache = /* @__PURE__ */ new Map();
   var DETECTION_CACHE_TTL = 30 * 60 * 1e3;
   var LANGUAGE_PATTERNS = [
-    { code: "ja", scripts: /[\u3040-\u30FF\u4E00-\u9FAF]/ },
-    { code: "zh", scripts: /[\u4E00-\u9FFF]/ },
+    { code: "zh", scripts: /[\u4E00-\u9FFF\u3400-\u4DBF]/ },
+    { code: "ja", scripts: /[\u3040-\u30FF]/ },
     { code: "ko", scripts: /[\uAC00-\uD7AF\u1100-\u11FF]/ },
     { code: "ar", scripts: /[\u0600-\u06FF]/ },
     { code: "he", scripts: /[\u0590-\u05FF]/ },
@@ -584,8 +584,13 @@ var SpicyLyricTranslater = (() => {
       return [];
     return matches.filter((word) => word.length > 1);
   }
+  var NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
   function detectLanguageHeuristic(text) {
-    if (!text || text.length < 10) {
+    if (!text)
+      return null;
+    const hasNonLatinScript = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text);
+    const minLength = hasNonLatinScript ? 1 : 10;
+    if (text.length < minLength) {
       return null;
     }
     const normalizedText = text.trim();
@@ -603,14 +608,20 @@ var SpicyLyricTranslater = (() => {
     }
     if (totalChars === 0)
       return null;
-    const dominantScript = Object.entries(scriptCounts).map(([code, count]) => ({ code, count, ratio: count / totalChars })).sort((a, b) => b.count - a.count)[0];
+    const hanCount = (normalizedText.match(/[\u4E00-\u9FFF\u3400-\u4DBF]/g) || []).length;
+    const kanaCount = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
+    const hangulCount = (normalizedText.match(/[\uAC00-\uD7AF\u1100-\u11FF]/g) || []).length;
+    if (kanaCount > 0 && (hanCount + kanaCount) / totalChars > 0.2) {
+      return { code: "ja", confidence: Math.min(0.95, 0.7 + (hanCount + kanaCount) / totalChars * 0.25) };
+    }
+    if (hangulCount > 0 && hangulCount / totalChars > 0.2) {
+      return { code: "ko", confidence: Math.min(0.95, 0.65 + hangulCount / totalChars * 0.3) };
+    }
+    if (hanCount > 0 && hanCount / totalChars > 0.2) {
+      return { code: "zh", confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
+    }
+    const dominantScript = Object.entries(scriptCounts).filter(([code]) => code !== "zh" && code !== "ja" && code !== "ko").map(([code, count]) => ({ code, count, ratio: count / totalChars })).sort((a, b) => b.count - a.count)[0];
     if (dominantScript && dominantScript.ratio > 0.2) {
-      if (dominantScript.code === "zh") {
-        const japaneseKana = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
-        if (japaneseKana > 0) {
-          return { code: "ja", confidence: 0.9 };
-        }
-      }
       return {
         code: dominantScript.code,
         confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)
@@ -880,26 +891,66 @@ var SpicyLyricTranslater = (() => {
     }
     return normalizedRepaired;
   }
+  function targetLangIsLatinScript(targetLang) {
+    const base = (targetLang || "").toLowerCase().split(/[-_]/)[0];
+    return !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el", "fa", "ur", "bn", "ta", "te", "kn", "ml", "gu", "pa", "or", "si", "my", "km", "lo", "ka", "am", "yi", "ug"].includes(base);
+  }
+  function sourceHasNonLatinScript(text) {
+    if (!text)
+      return false;
+    const hit = NON_LATIN_SEGMENT_REGEX.test(text);
+    NON_LATIN_SEGMENT_REGEX.lastIndex = 0;
+    return hit;
+  }
+  function shouldInvalidateIdentityTranslation(source, targetLang) {
+    if (!source)
+      return false;
+    const detected = detectLanguageHeuristic(source);
+    if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+      return true;
+    }
+    if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+      return true;
+    }
+    return false;
+  }
+  function looksLikeMarkerDebris(text) {
+    if (!text)
+      return false;
+    if (/\[\[\s*SLT/i.test(text))
+      return true;
+    if (/\bSLT[_\s-]*BATCH\b/i.test(text))
+      return true;
+    if (/\]\]/.test(text) && /\b\d+\b/.test(text) && text.length < 60)
+      return true;
+    if (/^\s*[A-Za-z]{2,}_\d+\s*\]?\]?/.test(text))
+      return true;
+    return false;
+  }
   function shouldInvalidateTrackCacheForMixedContent(sourceLines, cachedTranslatedLines, targetLang) {
     if (sourceLines.length === 0 || cachedTranslatedLines.length !== sourceLines.length) {
       return true;
     }
     let suspiciousUnchanged = 0;
+    let suspiciousDebris = 0;
     for (let i = 0; i < sourceLines.length; i++) {
       const sourceLine = normalizeSourceLineForFingerprint(sourceLines[i]);
       const translatedLine = normalizeSourceLineForFingerprint(cachedTranslatedLines[i] || "");
+      const rawTranslated = cachedTranslatedLines[i] || "";
+      if (looksLikeMarkerDebris(rawTranslated)) {
+        suspiciousDebris++;
+      }
       if (!sourceLine || sourceLine.length < 3) {
         continue;
       }
       if (sourceLine !== translatedLine) {
         continue;
       }
-      const detected = detectLanguageHeuristic(sourceLines[i]);
-      if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+      if (shouldInvalidateIdentityTranslation(sourceLines[i], targetLang)) {
         suspiciousUnchanged++;
       }
     }
-    return suspiciousUnchanged >= 2;
+    return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
   }
   async function rateLimitedDelay() {
     const now = Date.now();
@@ -1080,9 +1131,13 @@ var SpicyLyricTranslater = (() => {
           storage_default.setJSON("translation-cache", cache);
           return null;
         }
+        if (looksLikeMarkerDebris(normalized)) {
+          delete cache[key];
+          storage_default.setJSON("translation-cache", cache);
+          return null;
+        }
         if (normalized === text) {
-          const detected = detectLanguageHeuristic(text);
-          if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+          if (shouldInvalidateIdentityTranslation(text, targetLang)) {
             delete cache[key];
             storage_default.setJSON("translation-cache", cache);
             return null;
@@ -1492,7 +1547,7 @@ ${text}`
     return byIndex;
   }
   function normalizeTranslatedLine(text) {
-    return text.replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim();
+    return text.replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim();
   }
   function parseBatchTextFallbacks(translatedText, expectedCount) {
     const separatorSplit = translatedText.split(BATCH_SEPARATOR_REGEX).map((s) => normalizeTranslatedLine(s));
@@ -1617,9 +1672,41 @@ ${text}`
       throw new Error("Translation failed. Please try again later.");
     }
   }
+  function inferDominantSourceLangFromLines(lines) {
+    let zh = 0, ja = 0, ko = 0;
+    for (const line of lines) {
+      if (!line)
+        continue;
+      if (/[぀-ヿ]/.test(line)) {
+        ja++;
+        continue;
+      }
+      if (/[가-힯ᄀ-ᇿ]/.test(line)) {
+        ko++;
+        continue;
+      }
+      if (/[一-鿿㐀-䶿]/.test(line)) {
+        zh++;
+        continue;
+      }
+    }
+    if (ja > 0 && ja >= zh && ja >= ko)
+      return "ja";
+    if (ko > 0 && ko >= zh && ko >= ja)
+      return "ko";
+    if (zh > 0)
+      return "zh";
+    return void 0;
+  }
   async function translateLyrics(lines, targetLang, trackUri, detectedSourceLang) {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
+    if (!detectedSourceLang || detectedSourceLang === "auto" || detectedSourceLang === "unknown") {
+      const inferred = inferDominantSourceLangFromLines(lines);
+      if (inferred) {
+        detectedSourceLang = inferred;
+      }
+    }
     if (currentTrackUri) {
       const trackCache = getTrackCache(currentTrackUri, targetLang);
       if (trackCache && trackCache.lines.length === lines.length) {
@@ -1747,8 +1834,24 @@ ${text}`
       for (const item of uncachedLines) {
         const existing = cachedResults.get(item.index);
         const initialTranslation = existing?.translatedText || item.text;
-        const repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
-        const finalTranslation = normalizeTranslatedLine(repairedTranslation || "") || item.text;
+        let repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
+        let finalTranslation = normalizeTranslatedLine(repairedTranslation || "") || item.text;
+        const sourceIsNonLatin = sourceHasNonLatinScript(item.text);
+        const targetWantsLatin = targetLangIsLatinScript(targetLang);
+        const suspiciousOutput = looksLikeMarkerDebris(finalTranslation) || sourceIsNonLatin && targetWantsLatin && finalTranslation === item.text;
+        if (suspiciousOutput) {
+          try {
+            const direct = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+            const directNormalized = normalizeTranslatedLine(direct.translatedText || "");
+            if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
+              finalTranslation = directNormalized;
+            } else if (directNormalized && !looksLikeMarkerDebris(directNormalized)) {
+              finalTranslation = directNormalized;
+            }
+          } catch (directError) {
+            warn("Direct re-translation failed for suspicious line:", item.index, directError);
+          }
+        }
         cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
         cachedResults.set(item.index, {
           originalText: item.text,
@@ -4689,7 +4792,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.8" : "0.0.0";
+    return true ? "1.9.9" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6335,6 +6438,52 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var observedLyricsContent = null;
   var lastKnownRomanizationState = null;
   var lastTranslatedRomanizationState = null;
+  function normalizeMatchKey(text) {
+    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "").trim();
+  }
+  function lookupWithFallback(map, text) {
+    if (!text)
+      return void 0;
+    const norm = normalizeMatchKey(text);
+    if (norm) {
+      const direct = map.get(norm);
+      if (direct)
+        return direct;
+    }
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    if (nonLatinOnly && nonLatinOnly !== text) {
+      const nNorm = normalizeMatchKey(nonLatinOnly);
+      if (nNorm) {
+        const match = map.get(nNorm);
+        if (match)
+          return match;
+      }
+    }
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
+    if (latinOnly && latinOnly !== text) {
+      const lNorm = normalizeMatchKey(latinOnly);
+      if (lNorm) {
+        const match = map.get(lNorm);
+        if (match)
+          return match;
+      }
+    }
+    if (norm && norm.length >= 4) {
+      let best = null;
+      for (const [key, value] of map) {
+        if (key.length < 4)
+          continue;
+        if (norm.includes(key) || key.includes(norm)) {
+          if (!best || key.length > best.key.length) {
+            best = { key, value };
+          }
+        }
+      }
+      if (best)
+        return best.value;
+    }
+    return void 0;
+  }
   function getPIPWindow2() {
     try {
       const docPiP = globalThis.documentPictureInPicture;
@@ -6627,11 +6776,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     const currentRomanization = isRomanizationActive();
     const romanizationChanged = lastTranslatedRomanizationState !== null && currentRomanization !== lastTranslatedRomanizationState;
     if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0 && !romanizationChanged) {
-      const lines2 = getLyricsLines();
-      if (lines2.length > 0 && !document.querySelector(".slt-interleaved-translation, .slt-replace-line, .spicy-translated")) {
-        applyTranslations(lines2);
+      let hasRealTranslation = false;
+      for (const [src, dst] of state.translatedLyrics) {
+        if (src && dst && src !== dst) {
+          hasRealTranslation = true;
+          break;
+        }
       }
-      return;
+      if (hasRealTranslation) {
+        const lines2 = getLyricsLines();
+        if (lines2.length > 0 && !document.querySelector(".slt-interleaved-translation, .slt-replace-line, .spicy-translated")) {
+          applyTranslations(lines2);
+        }
+        return;
+      }
+      state.lastTranslatedSongUri = null;
+      state.translatedLyrics.clear();
     }
     if (romanizationChanged) {
       removeTranslations();
@@ -6853,28 +7013,48 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri2 || void 0, state.detectedLanguage || void 0);
       }
       state.translatedLyrics.clear();
+      const translationByContent = /* @__PURE__ */ new Map();
+      const qualityByContent = /* @__PURE__ */ new Map();
+      const romanizationByContent = /* @__PURE__ */ new Map();
+      const originalByContent = /* @__PURE__ */ new Map();
       translations.forEach((result, index) => {
-        const domText = domLineTexts[index];
-        if (domText) {
-          state.translatedLyrics.set(domText, result.translatedText);
+        const source = lineTexts[index];
+        const lineData = useApiLines && apiVocalLineData ? apiVocalLineData[index] : void 0;
+        const translated = result.translatedText;
+        const sourceNorm = normalizeMatchKey(source);
+        const romNorm = normalizeMatchKey(lineData?.romanizedText);
+        if (source && source.trim()) {
+          state.translatedLyrics.set(source, translated);
+          if (sourceNorm)
+            translationByContent.set(sourceNorm, translated);
         }
-        if (useApiLines && lineTexts[index] !== domText) {
-          state.translatedLyrics.set(lineTexts[index], result.translatedText);
+        if (lineData?.romanizedText && lineData.romanizedText.trim()) {
+          state.translatedLyrics.set(lineData.romanizedText, translated);
+          if (romNorm)
+            translationByContent.set(romNorm, translated);
         }
-      });
-      state._translationsByIndex = /* @__PURE__ */ new Map();
-      translations.forEach((result, index) => {
-        state._translationsByIndex.set(index, result.translatedText);
-      });
-      state._qualityByIndex = /* @__PURE__ */ new Map();
-      translations.forEach((result, index) => {
         if (result.wasTranslated) {
           const meta = {
             source: result.source || "api",
             api: result.apiProvider || state.preferredApi,
             detectedLanguage: state.detectedLanguage || result.detectedLanguage || void 0
           };
-          state._qualityByIndex.set(index, meta);
+          for (const norm of [sourceNorm, romNorm]) {
+            if (norm)
+              qualityByContent.set(norm, meta);
+          }
+        }
+        if (lineData) {
+          const romanized = lineData.romanizedText || "";
+          const original = lineData.text || "";
+          for (const norm of [sourceNorm, romNorm, normalizeMatchKey(lineData.text)]) {
+            if (!norm)
+              continue;
+            if (romanized.trim())
+              romanizationByContent.set(norm, romanized);
+            if (original.trim())
+              originalByContent.set(norm, original);
+          }
         }
       });
       state.lastTranslatedSongUri = currentTrackUri2;
@@ -6890,22 +7070,95 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (timingDataForOverlay) {
         setLineTimingData(timingDataForOverlay);
       }
-      const romanizationByIndex = /* @__PURE__ */ new Map();
-      const originalByIndex = /* @__PURE__ */ new Map();
-      if (timingDataForOverlay) {
-        timingDataForOverlay.forEach((lineInfo, idx) => {
-          if (lineInfo?.romanizedText && lineInfo.romanizedText.trim()) {
-            romanizationByIndex.set(idx, lineInfo.romanizedText);
+      if (apiVocalLineData) {
+        for (const lineData of apiVocalLineData) {
+          if (!lineData)
+            continue;
+          const romanized = lineData.romanizedText || "";
+          const original = lineData.text || "";
+          for (const key of [lineData.text, lineData.romanizedText]) {
+            const norm = normalizeMatchKey(key);
+            if (!norm)
+              continue;
+            if (romanized.trim())
+              romanizationByContent.set(norm, romanized);
+            if (original.trim())
+              originalByContent.set(norm, original);
           }
-          if (lineInfo?.text && lineInfo.text.trim()) {
-            originalByIndex.set(idx, lineInfo.text);
-          }
-        });
+        }
       }
-      setRomanizationData(romanizationByIndex);
-      setOriginalTextData(originalByIndex);
+      if (apiLineData) {
+        for (const lineData of apiLineData) {
+          if (!lineData)
+            continue;
+          const romanized = lineData.romanizedText || "";
+          const original = lineData.text || "";
+          for (const key of [lineData.text, lineData.romanizedText]) {
+            const norm = normalizeMatchKey(key);
+            if (!norm)
+              continue;
+            if (romanized.trim() && !romanizationByContent.has(norm))
+              romanizationByContent.set(norm, romanized);
+            if (original.trim() && !originalByContent.has(norm))
+              originalByContent.set(norm, original);
+          }
+        }
+      }
+      const buildIndexMapsForLines = (targetLines) => {
+        const translationsByIdx = /* @__PURE__ */ new Map();
+        const qualityByIdx = /* @__PURE__ */ new Map();
+        const romanizationByIdx = /* @__PURE__ */ new Map();
+        const originalByIdx = /* @__PURE__ */ new Map();
+        const targetArr = Array.from(targetLines);
+        const allowIndexFallback = targetArr.length === translations.length;
+        targetArr.forEach((line, domIdx) => {
+          const domText = extractLineText2(line);
+          if (!domText)
+            return;
+          let translation = lookupWithFallback(translationByContent, domText);
+          if (!translation && allowIndexFallback && translations[domIdx]) {
+            translation = translations[domIdx].translatedText;
+          }
+          if (translation)
+            translationsByIdx.set(domIdx, translation);
+          let meta = lookupWithFallback(qualityByContent, domText);
+          if (!meta && allowIndexFallback) {
+            const result = translations[domIdx];
+            if (result?.wasTranslated) {
+              meta = {
+                source: result.source || "api",
+                api: result.apiProvider || state.preferredApi,
+                detectedLanguage: state.detectedLanguage || result.detectedLanguage || void 0
+              };
+            }
+          }
+          if (meta)
+            qualityByIdx.set(domIdx, meta);
+          let rom = lookupWithFallback(romanizationByContent, domText);
+          if (!rom && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.romanizedText) {
+            rom = apiVocalLineData[domIdx].romanizedText;
+          }
+          if (rom)
+            romanizationByIdx.set(domIdx, rom);
+          let orig = lookupWithFallback(originalByContent, domText);
+          if (!orig && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.text) {
+            orig = apiVocalLineData[domIdx].text;
+          }
+          if (orig)
+            originalByIdx.set(domIdx, orig);
+        });
+        state._translationsByIndex = translationsByIdx;
+        state._qualityByIndex = qualityByIdx;
+        setRomanizationData(romanizationByIdx);
+        setOriginalTextData(originalByIdx);
+      };
+      buildIndexMapsForLines(lines);
       const freshLines = getLyricsLines();
-      if (freshLines.length > 0) {
+      const useFresh = freshLines.length > 0;
+      if (useFresh && freshLines !== lines) {
+        buildIndexMapsForLines(freshLines);
+      }
+      if (useFresh) {
         applyTranslations(freshLines);
       } else {
         applyTranslations(lines);

@@ -3,9 +3,13 @@ import { warn } from './debug';
 const detectionCache: Map<string, { language: string; confidence: number; timestamp: number }> = new Map();
 const DETECTION_CACHE_TTL = 30 * 60 * 1000;
 
+const HAN_REGEX = /[\u4E00-\u9FFF\u3400-\u4DBF]/;
+const KANA_REGEX = /[\u3040-\u30FF]/;
+const HANGUL_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF]/;
+
 const LANGUAGE_PATTERNS: { code: string; scripts: RegExp }[] = [
-    { code: 'ja', scripts: /[\u3040-\u30FF\u4E00-\u9FAF]/ },
-    { code: 'zh', scripts: /[\u4E00-\u9FFF]/ },
+    { code: 'zh', scripts: /[\u4E00-\u9FFF\u3400-\u4DBF]/ },
+    { code: 'ja', scripts: /[\u3040-\u30FF]/ },
     { code: 'ko', scripts: /[\uAC00-\uD7AF\u1100-\u11FF]/ },
     { code: 'ar', scripts: /[\u0600-\u06FF]/ },
     { code: 'he', scripts: /[\u0590-\u05FF]/ },
@@ -69,11 +73,17 @@ function tokenizeWords(text: string): string[] {
     return matches.filter(word => word.length > 1);
 }
 
+const NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
+
 export function detectLanguageHeuristic(text: string): { code: string; confidence: number } | null {
-    if (!text || text.length < 10) {
+    if (!text) return null;
+
+    const hasNonLatinScript = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text);
+    const minLength = hasNonLatinScript ? 1 : 10;
+    if (text.length < minLength) {
         return null;
     }
-    
+
     const normalizedText = text.trim();
     
     let totalChars = 0;
@@ -91,19 +101,29 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
     }
     
     if (totalChars === 0) return null;
-    
+
+    const hanCount = (normalizedText.match(/[\u4E00-\u9FFF\u3400-\u4DBF]/g) || []).length;
+    const kanaCount = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
+    const hangulCount = (normalizedText.match(/[\uAC00-\uD7AF\u1100-\u11FF]/g) || []).length;
+
+    if (kanaCount > 0 && (hanCount + kanaCount) / totalChars > 0.2) {
+        return { code: 'ja', confidence: Math.min(0.95, 0.7 + (hanCount + kanaCount) / totalChars * 0.25) };
+    }
+
+    if (hangulCount > 0 && hangulCount / totalChars > 0.2) {
+        return { code: 'ko', confidence: Math.min(0.95, 0.65 + hangulCount / totalChars * 0.3) };
+    }
+
+    if (hanCount > 0 && hanCount / totalChars > 0.2) {
+        return { code: 'zh', confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
+    }
+
     const dominantScript = Object.entries(scriptCounts)
+        .filter(([code]) => code !== 'zh' && code !== 'ja' && code !== 'ko')
         .map(([code, count]) => ({ code, count, ratio: count / totalChars }))
         .sort((a, b) => b.count - a.count)[0];
 
     if (dominantScript && dominantScript.ratio > 0.2) {
-        if (dominantScript.code === 'zh') {
-            const japaneseKana = (normalizedText.match(/[\u3040-\u30FF]/g) || []).length;
-            if (japaneseKana > 0) {
-                return { code: 'ja', confidence: 0.9 };
-            }
-        }
-
         return {
             code: dominantScript.code,
             confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)

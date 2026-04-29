@@ -29,6 +29,52 @@ let observedLyricsContent: Element | null = null;
 let lastKnownRomanizationState: boolean | null = null;
 let lastTranslatedRomanizationState: boolean | null = null;
 
+function normalizeMatchKey(text: string | undefined | null): string {
+    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
+}
+
+function lookupWithFallback<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
+    if (!text) return undefined;
+    const norm = normalizeMatchKey(text);
+    if (norm) {
+        const direct = map.get(norm);
+        if (direct) return direct;
+    }
+
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (nonLatinOnly && nonLatinOnly !== text) {
+        const nNorm = normalizeMatchKey(nonLatinOnly);
+        if (nNorm) {
+            const match = map.get(nNorm);
+            if (match) return match;
+        }
+    }
+
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (latinOnly && latinOnly !== text) {
+        const lNorm = normalizeMatchKey(latinOnly);
+        if (lNorm) {
+            const match = map.get(lNorm);
+            if (match) return match;
+        }
+    }
+
+    if (norm && norm.length >= 4) {
+        let best: { key: string; value: V } | null = null;
+        for (const [key, value] of map) {
+            if (key.length < 4) continue;
+            if (norm.includes(key) || key.includes(norm)) {
+                if (!best || key.length > best.key.length) {
+                    best = { key, value };
+                }
+            }
+        }
+        if (best) return best.value;
+    }
+
+    return undefined;
+}
+
 function getPIPWindow(): Window | null {
     try {
         const docPiP = (globalThis as any).documentPictureInPicture;
@@ -372,11 +418,22 @@ export async function translateCurrentLyrics(): Promise<void> {
     const romanizationChanged = lastTranslatedRomanizationState !== null && currentRomanization !== lastTranslatedRomanizationState;
     
     if (currentTrackUri && currentTrackUri === state.lastTranslatedSongUri && state.translatedLyrics.size > 0 && !romanizationChanged) {
-        const lines = getLyricsLines();
-        if (lines.length > 0 && !document.querySelector('.slt-interleaved-translation, .slt-replace-line, .spicy-translated')) {
-            applyTranslations(lines);
+        let hasRealTranslation = false;
+        for (const [src, dst] of state.translatedLyrics) {
+            if (src && dst && src !== dst) {
+                hasRealTranslation = true;
+                break;
+            }
         }
-        return;
+        if (hasRealTranslation) {
+            const lines = getLyricsLines();
+            if (lines.length > 0 && !document.querySelector('.slt-interleaved-translation, .slt-replace-line, .spicy-translated')) {
+                applyTranslations(lines);
+            }
+            return;
+        }
+        state.lastTranslatedSongUri = null;
+        state.translatedLyrics.clear();
     }
     
     if (romanizationChanged) {
@@ -634,37 +691,55 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
         
         state.translatedLyrics.clear();
-        
+
+        const translationByContent = new Map<string, string>();
+        const qualityByContent = new Map<string, TranslationQualityMeta>();
+        const romanizationByContent = new Map<string, string>();
+        const originalByContent = new Map<string, string>();
+
         translations.forEach((result, index) => {
-            const domText = domLineTexts[index];
-            if (domText) {
-                state.translatedLyrics.set(domText, result.translatedText);
+            const source = lineTexts[index];
+            const lineData = useApiLines && apiVocalLineData ? apiVocalLineData[index] : undefined;
+            const translated = result.translatedText;
+
+            const sourceNorm = normalizeMatchKey(source);
+            const romNorm = normalizeMatchKey(lineData?.romanizedText);
+
+            if (source && source.trim()) {
+                state.translatedLyrics.set(source, translated);
+                if (sourceNorm) translationByContent.set(sourceNorm, translated);
             }
-            if (useApiLines && lineTexts[index] !== domText) {
-                state.translatedLyrics.set(lineTexts[index], result.translatedText);
+
+            if (lineData?.romanizedText && lineData.romanizedText.trim()) {
+                state.translatedLyrics.set(lineData.romanizedText, translated);
+                if (romNorm) translationByContent.set(romNorm, translated);
             }
-        });
-        
-        state._translationsByIndex = new Map();
-        translations.forEach((result, index) => {
-            state._translationsByIndex!.set(index, result.translatedText);
-        });
-        
-        state._qualityByIndex = new Map();
-        translations.forEach((result, index) => {
+
             if (result.wasTranslated) {
                 const meta: TranslationQualityMeta = {
                     source: result.source || 'api',
                     api: result.apiProvider || state.preferredApi,
                     detectedLanguage: state.detectedLanguage || result.detectedLanguage || undefined
                 };
-                state._qualityByIndex!.set(index, meta);
+                for (const norm of [sourceNorm, romNorm]) {
+                    if (norm) qualityByContent.set(norm, meta);
+                }
+            }
+
+            if (lineData) {
+                const romanized = lineData.romanizedText || '';
+                const original = lineData.text || '';
+                for (const norm of [sourceNorm, romNorm, normalizeMatchKey(lineData.text)]) {
+                    if (!norm) continue;
+                    if (romanized.trim()) romanizationByContent.set(norm, romanized);
+                    if (original.trim()) originalByContent.set(norm, original);
+                }
             }
         });
-        
+
         state.lastTranslatedSongUri = currentTrackUri;
         lastTranslatedRomanizationState = romanizationOn;
-        
+
         let timingDataForOverlay: LyricLineData[] | null = null;
         if (useApiLines && apiVocalLineData) {
             timingDataForOverlay = apiVocalLineData;
@@ -677,24 +752,92 @@ export async function translateCurrentLyrics(): Promise<void> {
             setLineTimingData(timingDataForOverlay);
         }
 
-        const romanizationByIndex = new Map<number, string>();
-        const originalByIndex = new Map<number, string>();
-        if (timingDataForOverlay) {
-            timingDataForOverlay.forEach((lineInfo, idx) => {
-                if (lineInfo?.romanizedText && lineInfo.romanizedText.trim()) {
-                    romanizationByIndex.set(idx, lineInfo.romanizedText);
+        if (apiVocalLineData) {
+            for (const lineData of apiVocalLineData) {
+                if (!lineData) continue;
+                const romanized = lineData.romanizedText || '';
+                const original = lineData.text || '';
+                for (const key of [lineData.text, lineData.romanizedText]) {
+                    const norm = normalizeMatchKey(key);
+                    if (!norm) continue;
+                    if (romanized.trim()) romanizationByContent.set(norm, romanized);
+                    if (original.trim()) originalByContent.set(norm, original);
                 }
-                if (lineInfo?.text && lineInfo.text.trim()) {
-                    originalByIndex.set(idx, lineInfo.text);
-                }
-            });
+            }
         }
-        setRomanizationData(romanizationByIndex);
-        setOriginalTextData(originalByIndex);
-        
-        // Re-query DOM lines fresh to avoid stale references after async operations
+        if (apiLineData) {
+            for (const lineData of apiLineData) {
+                if (!lineData) continue;
+                const romanized = lineData.romanizedText || '';
+                const original = lineData.text || '';
+                for (const key of [lineData.text, lineData.romanizedText]) {
+                    const norm = normalizeMatchKey(key);
+                    if (!norm) continue;
+                    if (romanized.trim() && !romanizationByContent.has(norm)) romanizationByContent.set(norm, romanized);
+                    if (original.trim() && !originalByContent.has(norm)) originalByContent.set(norm, original);
+                }
+            }
+        }
+
+        const buildIndexMapsForLines = (targetLines: NodeListOf<Element> | Element[]): void => {
+            const translationsByIdx = new Map<number, string>();
+            const qualityByIdx = new Map<number, TranslationQualityMeta>();
+            const romanizationByIdx = new Map<number, string>();
+            const originalByIdx = new Map<number, string>();
+
+            const targetArr = Array.from(targetLines);
+            const allowIndexFallback = targetArr.length === translations.length;
+
+            targetArr.forEach((line, domIdx) => {
+                const domText = extractLineText(line);
+                if (!domText) return;
+
+                let translation = lookupWithFallback(translationByContent, domText);
+                if (!translation && allowIndexFallback && translations[domIdx]) {
+                    translation = translations[domIdx].translatedText;
+                }
+                if (translation) translationsByIdx.set(domIdx, translation);
+
+                let meta = lookupWithFallback(qualityByContent, domText);
+                if (!meta && allowIndexFallback) {
+                    const result = translations[domIdx];
+                    if (result?.wasTranslated) {
+                        meta = {
+                            source: result.source || 'api',
+                            api: result.apiProvider || state.preferredApi,
+                            detectedLanguage: state.detectedLanguage || result.detectedLanguage || undefined
+                        };
+                    }
+                }
+                if (meta) qualityByIdx.set(domIdx, meta);
+
+                let rom = lookupWithFallback(romanizationByContent, domText);
+                if (!rom && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.romanizedText) {
+                    rom = apiVocalLineData[domIdx].romanizedText;
+                }
+                if (rom) romanizationByIdx.set(domIdx, rom);
+
+                let orig = lookupWithFallback(originalByContent, domText);
+                if (!orig && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.text) {
+                    orig = apiVocalLineData[domIdx].text;
+                }
+                if (orig) originalByIdx.set(domIdx, orig);
+            });
+
+            state._translationsByIndex = translationsByIdx;
+            state._qualityByIndex = qualityByIdx;
+            setRomanizationData(romanizationByIdx);
+            setOriginalTextData(originalByIdx);
+        };
+
+        buildIndexMapsForLines(lines);
+
         const freshLines = getLyricsLines();
-        if (freshLines.length > 0) {
+        const useFresh = freshLines.length > 0;
+        if (useFresh && freshLines !== lines) {
+            buildIndexMapsForLines(freshLines);
+        }
+        if (useFresh) {
             applyTranslations(freshLines);
         } else {
             applyTranslations(lines);

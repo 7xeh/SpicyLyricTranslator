@@ -143,6 +143,39 @@ async function repairMixedLineTranslation(source: string, translated: string, ta
     return normalizedRepaired;
 }
 
+function targetLangIsLatinScript(targetLang: string): boolean {
+    const base = (targetLang || '').toLowerCase().split(/[-_]/)[0];
+    return !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el', 'fa', 'ur', 'bn', 'ta', 'te', 'kn', 'ml', 'gu', 'pa', 'or', 'si', 'my', 'km', 'lo', 'ka', 'am', 'yi', 'ug'].includes(base);
+}
+
+function sourceHasNonLatinScript(text: string): boolean {
+    if (!text) return false;
+    const hit = NON_LATIN_SEGMENT_REGEX.test(text);
+    NON_LATIN_SEGMENT_REGEX.lastIndex = 0;
+    return hit;
+}
+
+function shouldInvalidateIdentityTranslation(source: string, targetLang: string): boolean {
+    if (!source) return false;
+    const detected = detectLanguageHeuristic(source);
+    if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+        return true;
+    }
+    if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+        return true;
+    }
+    return false;
+}
+
+function looksLikeMarkerDebris(text: string): boolean {
+    if (!text) return false;
+    if (/\[\[\s*SLT/i.test(text)) return true;
+    if (/\bSLT[_\s-]*BATCH\b/i.test(text)) return true;
+    if (/\]\]/.test(text) && /\b\d+\b/.test(text) && text.length < 60) return true;
+    if (/^\s*[A-Za-z]{2,}_\d+\s*\]?\]?/.test(text)) return true;
+    return false;
+}
+
 function shouldInvalidateTrackCacheForMixedContent(
     sourceLines: string[],
     cachedTranslatedLines: string[],
@@ -153,10 +186,16 @@ function shouldInvalidateTrackCacheForMixedContent(
     }
 
     let suspiciousUnchanged = 0;
+    let suspiciousDebris = 0;
 
     for (let i = 0; i < sourceLines.length; i++) {
         const sourceLine = normalizeSourceLineForFingerprint(sourceLines[i]);
         const translatedLine = normalizeSourceLineForFingerprint(cachedTranslatedLines[i] || '');
+        const rawTranslated = cachedTranslatedLines[i] || '';
+
+        if (looksLikeMarkerDebris(rawTranslated)) {
+            suspiciousDebris++;
+        }
 
         if (!sourceLine || sourceLine.length < 3) {
             continue;
@@ -166,13 +205,12 @@ function shouldInvalidateTrackCacheForMixedContent(
             continue;
         }
 
-        const detected = detectLanguageHeuristic(sourceLines[i]);
-        if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+        if (shouldInvalidateIdentityTranslation(sourceLines[i], targetLang)) {
             suspiciousUnchanged++;
         }
     }
 
-    return suspiciousUnchanged >= 2;
+    return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
 }
 
 async function rateLimitedDelay(): Promise<void> {
@@ -369,9 +407,14 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
                 return null;
             }
 
+            if (looksLikeMarkerDebris(normalized)) {
+                delete cache[key];
+                storage.setJSON('translation-cache', cache);
+                return null;
+            }
+
             if (normalized === text) {
-                const detected = detectLanguageHeuristic(text);
-                if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+                if (shouldInvalidateIdentityTranslation(text, targetLang)) {
                     delete cache[key];
                     storage.setJSON('translation-cache', cache);
                     return null;
@@ -868,7 +911,11 @@ function parseMarkedBatchResponse(translatedText: string, expectedCount: number,
 
 function normalizeTranslatedLine(text: string): string {
     return text
-    .replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, '')
+        .replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, '')
+        .replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, '')
+        .replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, '')
+        .replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, '')
+        .replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, '')
         .replace(/\r?\n+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -1033,14 +1080,35 @@ export async function translateText(text: string, targetLang: string, sourceLang
     }
 }
 
+function inferDominantSourceLangFromLines(lines: string[]): string | undefined {
+    let zh = 0, ja = 0, ko = 0;
+    for (const line of lines) {
+        if (!line) continue;
+        if (/[぀-ヿ]/.test(line)) { ja++; continue; }
+        if (/[가-힯ᄀ-ᇿ]/.test(line)) { ko++; continue; }
+        if (/[一-鿿㐀-䶿]/.test(line)) { zh++; continue; }
+    }
+    if (ja > 0 && ja >= zh && ja >= ko) return 'ja';
+    if (ko > 0 && ko >= zh && ko >= ja) return 'ko';
+    if (zh > 0) return 'zh';
+    return undefined;
+}
+
 export async function translateLyrics(
-    lines: string[], 
-    targetLang: string, 
+    lines: string[],
+    targetLang: string,
     trackUri?: string,
     detectedSourceLang?: string
 ): Promise<TranslationResult[]> {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
+
+    if (!detectedSourceLang || detectedSourceLang === 'auto' || detectedSourceLang === 'unknown') {
+        const inferred = inferDominantSourceLangFromLines(lines);
+        if (inferred) {
+            detectedSourceLang = inferred;
+        }
+    }
     
     if (currentTrackUri) {
         const trackCache = getTrackCache(currentTrackUri, targetLang);
@@ -1187,8 +1255,28 @@ export async function translateLyrics(
         for (const item of uncachedLines) {
             const existing = cachedResults.get(item.index);
             const initialTranslation = existing?.translatedText || item.text;
-            const repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
-            const finalTranslation = normalizeTranslatedLine(repairedTranslation || '') || item.text;
+            let repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
+            let finalTranslation = normalizeTranslatedLine(repairedTranslation || '') || item.text;
+
+            const sourceIsNonLatin = sourceHasNonLatinScript(item.text);
+            const targetWantsLatin = targetLangIsLatinScript(targetLang);
+            const suspiciousOutput =
+                looksLikeMarkerDebris(finalTranslation) ||
+                (sourceIsNonLatin && targetWantsLatin && finalTranslation === item.text);
+
+            if (suspiciousOutput) {
+                try {
+                    const direct = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+                    const directNormalized = normalizeTranslatedLine(direct.translatedText || '');
+                    if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
+                        finalTranslation = directNormalized;
+                    } else if (directNormalized && !looksLikeMarkerDebris(directNormalized)) {
+                        finalTranslation = directNormalized;
+                    }
+                } catch (directError) {
+                    warn('Direct re-translation failed for suspicious line:', item.index, directError);
+                }
+            }
 
             cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
             cachedResults.set(item.index, {
