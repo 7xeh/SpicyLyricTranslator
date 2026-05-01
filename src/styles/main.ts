@@ -473,16 +473,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     opacity: 0.55;
 }
 
-.slt-ci-users-count.slt-ci-active .slt-ci-active-count {
-    color: #1db954;
-    font-weight: 600;
-}
-
-.slt-ci-users-count.slt-ci-active svg {
-    color: #1db954;
-    opacity: 0.8;
-}
-
 body.slt-overlay-active .LyricsContent {}
 
 .spicy-translate-overlay {

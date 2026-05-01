@@ -75,6 +75,79 @@ function tokenizeWords(text: string): string[] {
 
 const NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
 
+const JA_ROMAJI_SPECIFIC_TOKENS = new Set([
+    'desu', 'masu', 'mashita', 'deshita', 'darou', 'daro', 'desho', 'deshou',
+    'kimi', 'boku', 'watashi', 'anata', 'kokoro', 'sayonara', 'sayounara',
+    'arigatou', 'arigato', 'konnichiwa', 'ohayou', 'yoru', 'asa', 'tsuki',
+    'sora', 'hoshi', 'namida', 'yume', 'koi', 'aishiteru', 'suki',
+    'tsuzuku', 'tsuyoi', 'tsumetai', 'shiawase', 'chigau', 'chiisai',
+    'hajimete', 'mou', 'demo', 'sou', 'nai', 'naku',
+    'wa', 'wo', 'no', 'ni', 'ga', 'to', 'de', 'mo', 'ya', 'ka', 'ne', 'yo',
+    'da', 'datta', 'janai', 'iru', 'aru', 'naru', 'suru', 'shita', 'shite',
+    'iku', 'itta', 'kuru', 'kita', 'omou', 'omotta',
+]);
+
+const ROMAJI_SYLLABLE_REGEX = /^(?:[kgsztdnhbpmrw]?y?[aeiou]{1,2}|tsu|shi|chi|n)+n?$/i;
+
+function countRomajiTokens(words: string[]): { romaji: number; specific: number } {
+    let romaji = 0;
+    let specific = 0;
+    for (const word of words) {
+        if (JA_ROMAJI_SPECIFIC_TOKENS.has(word)) {
+            specific++;
+            romaji++;
+            continue;
+        }
+        if (word.length >= 2 && ROMAJI_SYLLABLE_REGEX.test(word)) {
+            romaji++;
+        }
+    }
+    return { romaji, specific };
+}
+
+export function detectRomanizedJapanese(text: string): { confidence: number; ratio: number; specificHits: number } | null {
+    if (!text) return null;
+    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(text)) return null;
+    const words = tokenizeWords(text);
+    if (words.length < 4) return null;
+    const { romaji, specific } = countRomajiTokens(words);
+    const ratio = romaji / words.length;
+    if (specific < 1) return null;
+    if (ratio < 0.4) return null;
+    return {
+        confidence: Math.min(0.9, 0.5 + ratio * 0.4 + Math.min(specific, 4) * 0.05),
+        ratio,
+        specificHits: specific,
+    };
+}
+
+export function scanCorpusForCjk(
+    lines: string[]
+): { code: 'ja' | 'zh' | 'ko'; confidence: number; kana: number; kanji: number; hangul: number } | null {
+    let kana = 0;
+    let kanji = 0;
+    let hangul = 0;
+    for (const line of lines) {
+        if (!line) continue;
+        const k = line.match(/[\u3040-\u30FF]/g);
+        if (k) kana += k.length;
+        const h = line.match(/[\u4E00-\u9FFF\u3400-\u4DBF]/g);
+        if (h) kanji += h.length;
+        const ha = line.match(/[\uAC00-\uD7AF\u1100-\u11FF]/g);
+        if (ha) hangul += ha.length;
+    }
+    if (kana >= 4 || (kana >= 1 && kanji >= 6)) {
+        return { code: 'ja', confidence: 0.92, kana, kanji, hangul };
+    }
+    if (hangul >= 4) {
+        return { code: 'ko', confidence: 0.92, kana, kanji, hangul };
+    }
+    if (kanji >= 8 && kana === 0) {
+        return { code: 'zh', confidence: 0.9, kana, kanji, hangul };
+    }
+    return null;
+}
+
 export function detectLanguageHeuristic(text: string): { code: string; confidence: number } | null {
     if (!text) return null;
 
@@ -209,6 +282,18 @@ export async function detectLyricsLanguage(
         }
     }
 
+    const corpusScan = scanCorpusForCjk(lyrics);
+    if (corpusScan) {
+        if (trackUri) {
+            detectionCache.set(trackUri, {
+                language: corpusScan.code,
+                confidence: corpusScan.confidence,
+                timestamp: Date.now()
+            });
+        }
+        return { code: corpusScan.code, confidence: corpusScan.confidence };
+    }
+
     const sampleText = buildSampleText(lyrics);
 
     if (sampleText.length < 20) {
@@ -216,6 +301,22 @@ export async function detectLyricsLanguage(
     }
 
     const heuristic = detectLanguageHeuristic(sampleText);
+
+    if (heuristic && heuristic.code === 'en') {
+        const romaji = detectRomanizedJapanese(sampleText);
+        if (romaji) {
+            const result = { code: 'ja', confidence: romaji.confidence };
+            if (trackUri) {
+                detectionCache.set(trackUri, {
+                    language: result.code,
+                    confidence: result.confidence,
+                    timestamp: Date.now()
+                });
+            }
+            return result;
+        }
+    }
+
     if (heuristic && heuristic.confidence >= 0.7) {
         if (trackUri) {
             detectionCache.set(trackUri, { 
@@ -267,16 +368,25 @@ export function assessMixedLanguageContent(
     
     for (const line of lines) {
         const trimmed = (line || '').trim();
-        if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed)) continue;
+        if (!trimmed || /^[•♪♫\s\-–—]+$/.test(trimmed)) continue;
 
-        if (targetIsLatin) {
-            const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
-            if (hasNonLatin) {
+        const hasNonLatin = NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed);
+
+        if (!hasNonLatin && trimmed.length < 3) continue;
+
+        if (targetIsLatin && hasNonLatin) {
+            nonTargetCount++;
+            continue;
+        }
+
+        if (targetIsLatin && !hasNonLatin && targetBase !== 'ja') {
+            const romaji = detectRomanizedJapanese(trimmed);
+            if (romaji && !isSameLanguage('ja', targetLanguage)) {
                 nonTargetCount++;
                 continue;
             }
         }
-        
+
         const detected = detectLanguageHeuristic(trimmed);
 
         if (!detected) {
@@ -285,22 +395,22 @@ export function assessMixedLanguageContent(
             }
             continue;
         }
-        
+
         if (isSameLanguage(detected.code, targetLanguage)) {
             targetCount++;
-        } else if (detected.confidence >= 0.65) {
+        } else if (detected.confidence >= 0.6) {
             nonTargetCount++;
         } else {
             uncertainCount++;
         }
     }
-    
+
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0) return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
 
-    const hasMixedContent = nonTargetCount >= 2 ||
-        (nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3);
-    
+    const hasMixedContent = nonTargetCount >= 1 ||
+        (uncertainCount > 0 && uncertainCount / totalChecked > 0.3);
+
     return { hasMixedContent, nonTargetCount, uncertainCount };
 }
 
@@ -313,10 +423,33 @@ export async function shouldSkipTranslation(
     if (nonEmptyLyrics.length === 0) {
         return { skip: false };
     }
-    
+
+    const corpusScan = scanCorpusForCjk(nonEmptyLyrics);
+    if (corpusScan) {
+        if (isSameLanguage(corpusScan.code, targetLanguage)) {
+            const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+            if (mixedCheck.hasMixedContent) {
+                return { skip: false, detectedLanguage: corpusScan.code };
+            }
+            return {
+                skip: true,
+                reason: `Lyrics already in ${corpusScan.code.toUpperCase()}`,
+                detectedLanguage: corpusScan.code
+            };
+        }
+        return { skip: false, detectedLanguage: corpusScan.code };
+    }
+
     const sampleText = buildSampleText(nonEmptyLyrics);
-    const quickHeuristic = detectLanguageHeuristic(sampleText);
-    
+    let quickHeuristic = detectLanguageHeuristic(sampleText);
+
+    if (quickHeuristic && quickHeuristic.code === 'en') {
+        const romaji = detectRomanizedJapanese(sampleText);
+        if (romaji) {
+            quickHeuristic = { code: 'ja', confidence: romaji.confidence };
+        }
+    }
+
     if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
         if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
             const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
@@ -402,6 +535,8 @@ export function getLanguageName(code: string): string {
 export default {
     detectLanguageHeuristic,
     detectLyricsLanguage,
+    detectRomanizedJapanese,
+    scanCorpusForCjk,
     isSameLanguage,
     assessMixedLanguageContent,
     shouldSkipTranslation,

@@ -3,7 +3,6 @@ import { Icons } from './icons';
 import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats } from './translator';
 import { getCurrentTrackUri } from './trackCache';
-import { setViewingLyrics } from './connectivity';
 import {
     enableOverlay,
     disableOverlay,
@@ -14,7 +13,7 @@ import {
     setOriginalTextData,
     setQualityMetadata
 } from './translationOverlay';
-import { shouldSkipTranslation, detectLanguageHeuristic, isSameLanguage } from './languageDetection';
+import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage } from './languageDetection';
 import { openSettingsModal } from './settings';
 import { warn, error } from './debug';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
@@ -334,20 +333,33 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
             continue;
         }
 
-        if (targetIsLatin) {
-            const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line);
-            if (hasNonLatin) {
+        const trimmed = line.trim();
+        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
+
+        if (targetIsLatin && hasNonLatin) {
+            indexes.push(i);
+            continue;
+        }
+
+        if (hasNonLatin && trimmed.length < 10) {
+            indexes.push(i);
+            continue;
+        }
+
+        if (targetIsLatin && !hasNonLatin && targetBase !== 'ja') {
+            const romaji = detectRomanizedJapanese(trimmed);
+            if (romaji) {
                 indexes.push(i);
                 continue;
             }
         }
 
-        const detected = detectLanguageHeuristic(line);
+        const detected = detectLanguageHeuristic(trimmed);
         if (!detected) {
             continue;
         }
 
-        if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.7) {
+        if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.6) {
             indexes.push(i);
         }
     }
@@ -632,6 +644,16 @@ export async function translateCurrentLyrics(): Promise<void> {
                 : { skip: false, detectedLanguage: apiLanguage };
         } else if (romanizationOn) {
             skipCheck = { skip: false, detectedLanguage: 'unknown' };
+        } else if (apiLanguage && apiLanguage !== 'unknown') {
+            const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
+            if (apiLangSame) {
+                const heuristicCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
+                skipCheck = heuristicCheck.skip
+                    ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
+                    : { skip: false, detectedLanguage: apiLanguage };
+            } else {
+                skipCheck = { skip: false, detectedLanguage: apiLanguage };
+            }
         } else {
             skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
         }
@@ -1031,8 +1053,6 @@ export function setupLyricsObserver(): void {
 }
 
 export async function onSpicyLyricsOpen(): Promise<void> {
-    setViewingLyrics(true);
-    
     let viewControls = await waitForElement('#SpicyLyricsPage .ViewControls', 3000);
     if (!viewControls && document.body.classList.contains('SpicySidebarLyrics__Active')) {
         viewControls = await waitForElement('.Root__right-sidebar #SpicyLyricsPage .ViewControls', 2000);
@@ -1063,7 +1083,6 @@ export async function onSpicyLyricsOpen(): Promise<void> {
 }
 
 export function onSpicyLyricsClose(): void {
-    setViewingLyrics(false);
     if (translateDebounceTimer) {
         clearTimeout(translateDebounceTimer);
         translateDebounceTimer = null;

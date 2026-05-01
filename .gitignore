@@ -33,6 +33,5 @@ Desktop.ini
 secrets/
 config.local.json
 
-# Don't ignore builds folder - it contains the pre-built extension for easy installation
-!builds/
-!builds/*.js
+# TypeScript
+*.tsbuildinfo

@@ -585,6 +585,140 @@ var SpicyLyricTranslater = (() => {
     return matches.filter((word) => word.length > 1);
   }
   var NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
+  var JA_ROMAJI_SPECIFIC_TOKENS = /* @__PURE__ */ new Set([
+    "desu",
+    "masu",
+    "mashita",
+    "deshita",
+    "darou",
+    "daro",
+    "desho",
+    "deshou",
+    "kimi",
+    "boku",
+    "watashi",
+    "anata",
+    "kokoro",
+    "sayonara",
+    "sayounara",
+    "arigatou",
+    "arigato",
+    "konnichiwa",
+    "ohayou",
+    "yoru",
+    "asa",
+    "tsuki",
+    "sora",
+    "hoshi",
+    "namida",
+    "yume",
+    "koi",
+    "aishiteru",
+    "suki",
+    "tsuzuku",
+    "tsuyoi",
+    "tsumetai",
+    "shiawase",
+    "chigau",
+    "chiisai",
+    "hajimete",
+    "mou",
+    "demo",
+    "sou",
+    "nai",
+    "naku",
+    "wa",
+    "wo",
+    "no",
+    "ni",
+    "ga",
+    "to",
+    "de",
+    "mo",
+    "ya",
+    "ka",
+    "ne",
+    "yo",
+    "da",
+    "datta",
+    "janai",
+    "iru",
+    "aru",
+    "naru",
+    "suru",
+    "shita",
+    "shite",
+    "iku",
+    "itta",
+    "kuru",
+    "kita",
+    "omou",
+    "omotta"
+  ]);
+  var ROMAJI_SYLLABLE_REGEX = /^(?:[kgsztdnhbpmrw]?y?[aeiou]{1,2}|tsu|shi|chi|n)+n?$/i;
+  function countRomajiTokens(words) {
+    let romaji = 0;
+    let specific = 0;
+    for (const word of words) {
+      if (JA_ROMAJI_SPECIFIC_TOKENS.has(word)) {
+        specific++;
+        romaji++;
+        continue;
+      }
+      if (word.length >= 2 && ROMAJI_SYLLABLE_REGEX.test(word)) {
+        romaji++;
+      }
+    }
+    return { romaji, specific };
+  }
+  function detectRomanizedJapanese(text) {
+    if (!text)
+      return null;
+    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(text))
+      return null;
+    const words = tokenizeWords(text);
+    if (words.length < 4)
+      return null;
+    const { romaji, specific } = countRomajiTokens(words);
+    const ratio = romaji / words.length;
+    if (specific < 1)
+      return null;
+    if (ratio < 0.4)
+      return null;
+    return {
+      confidence: Math.min(0.9, 0.5 + ratio * 0.4 + Math.min(specific, 4) * 0.05),
+      ratio,
+      specificHits: specific
+    };
+  }
+  function scanCorpusForCjk(lines) {
+    let kana = 0;
+    let kanji = 0;
+    let hangul = 0;
+    for (const line of lines) {
+      if (!line)
+        continue;
+      const k = line.match(/[\u3040-\u30FF]/g);
+      if (k)
+        kana += k.length;
+      const h = line.match(/[\u4E00-\u9FFF\u3400-\u4DBF]/g);
+      if (h)
+        kanji += h.length;
+      const ha = line.match(/[\uAC00-\uD7AF\u1100-\u11FF]/g);
+      if (ha)
+        hangul += ha.length;
+    }
+    if (kana >= 4 || kana >= 1 && kanji >= 6) {
+      return { code: "ja", confidence: 0.92, kana, kanji, hangul };
+    }
+    if (hangul >= 4) {
+      return { code: "ko", confidence: 0.92, kana, kanji, hangul };
+    }
+    if (kanji >= 8 && kana === 0) {
+      return { code: "zh", confidence: 0.9, kana, kanji, hangul };
+    }
+    return null;
+  }
   function detectLanguageHeuristic(text) {
     if (!text)
       return null;
@@ -687,11 +821,36 @@ var SpicyLyricTranslater = (() => {
         return { code: cached.language, confidence: cached.confidence };
       }
     }
+    const corpusScan = scanCorpusForCjk(lyrics);
+    if (corpusScan) {
+      if (trackUri) {
+        detectionCache.set(trackUri, {
+          language: corpusScan.code,
+          confidence: corpusScan.confidence,
+          timestamp: Date.now()
+        });
+      }
+      return { code: corpusScan.code, confidence: corpusScan.confidence };
+    }
     const sampleText = buildSampleText(lyrics);
     if (sampleText.length < 20) {
       return { code: "unknown", confidence: 0 };
     }
     const heuristic = detectLanguageHeuristic(sampleText);
+    if (heuristic && heuristic.code === "en") {
+      const romaji = detectRomanizedJapanese(sampleText);
+      if (romaji) {
+        const result = { code: "ja", confidence: romaji.confidence };
+        if (trackUri) {
+          detectionCache.set(trackUri, {
+            language: result.code,
+            confidence: result.confidence,
+            timestamp: Date.now()
+          });
+        }
+        return result;
+      }
+    }
     if (heuristic && heuristic.confidence >= 0.7) {
       if (trackUri) {
         detectionCache.set(trackUri, {
@@ -733,11 +892,18 @@ var SpicyLyricTranslater = (() => {
     const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "el"].includes(targetBase);
     for (const line of lines) {
       const trimmed = (line || "").trim();
-      if (trimmed.length < 3 || /^[•♪♫\s\-–—]+$/.test(trimmed))
+      if (!trimmed || /^[•♪♫\s\-–—]+$/.test(trimmed))
         continue;
-      if (targetIsLatin) {
-        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
-        if (hasNonLatin) {
+      const hasNonLatin = NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed);
+      if (!hasNonLatin && trimmed.length < 3)
+        continue;
+      if (targetIsLatin && hasNonLatin) {
+        nonTargetCount++;
+        continue;
+      }
+      if (targetIsLatin && !hasNonLatin && targetBase !== "ja") {
+        const romaji = detectRomanizedJapanese(trimmed);
+        if (romaji && !isSameLanguage("ja", targetLanguage)) {
           nonTargetCount++;
           continue;
         }
@@ -751,7 +917,7 @@ var SpicyLyricTranslater = (() => {
       }
       if (isSameLanguage(detected.code, targetLanguage)) {
         targetCount++;
-      } else if (detected.confidence >= 0.65) {
+      } else if (detected.confidence >= 0.6) {
         nonTargetCount++;
       } else {
         uncertainCount++;
@@ -760,7 +926,7 @@ var SpicyLyricTranslater = (() => {
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0)
       return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
-    const hasMixedContent = nonTargetCount >= 2 || nonTargetCount > 0 && uncertainCount > 0 && (nonTargetCount + uncertainCount) / totalChecked > 0.3;
+    const hasMixedContent = nonTargetCount >= 1 || uncertainCount > 0 && uncertainCount / totalChecked > 0.3;
     return { hasMixedContent, nonTargetCount, uncertainCount };
   }
   async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
@@ -768,8 +934,29 @@ var SpicyLyricTranslater = (() => {
     if (nonEmptyLyrics.length === 0) {
       return { skip: false };
     }
+    const corpusScan = scanCorpusForCjk(nonEmptyLyrics);
+    if (corpusScan) {
+      if (isSameLanguage(corpusScan.code, targetLanguage)) {
+        const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
+        if (mixedCheck.hasMixedContent) {
+          return { skip: false, detectedLanguage: corpusScan.code };
+        }
+        return {
+          skip: true,
+          reason: `Lyrics already in ${corpusScan.code.toUpperCase()}`,
+          detectedLanguage: corpusScan.code
+        };
+      }
+      return { skip: false, detectedLanguage: corpusScan.code };
+    }
     const sampleText = buildSampleText(nonEmptyLyrics);
-    const quickHeuristic = detectLanguageHeuristic(sampleText);
+    let quickHeuristic = detectLanguageHeuristic(sampleText);
+    if (quickHeuristic && quickHeuristic.code === "en") {
+      const romaji = detectRomanizedJapanese(sampleText);
+      if (romaji) {
+        quickHeuristic = { code: "ja", confidence: romaji.confidence };
+      }
+    }
     if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
       if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
         const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
@@ -4205,16 +4392,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     opacity: 0.55;
 }
 
-.slt-ci-users-count.slt-ci-active .slt-ci-active-count {
-    color: #1db954;
-    font-weight: 600;
-}
-
-.slt-ci-users-count.slt-ci-active svg {
-    color: #1db954;
-    opacity: 0.8;
-}
-
 body.slt-overlay-active .LyricsContent {}
 
 .spicy-translate-overlay {
@@ -4792,7 +4969,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "1.9.9" : "0.0.0";
+    return true ? "2.0.0" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -5932,503 +6109,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     </svg>`
   };
 
-  // src/utils/connectivity.ts
-  var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
-  var CLIENT_ID_KEY = "client-id";
-  function getOrCreateClientId() {
-    let clientId = storage.get(CLIENT_ID_KEY);
-    if (!clientId) {
-      clientId = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
-      storage.set(CLIENT_ID_KEY, clientId);
-    }
-    return clientId;
-  }
-  var HEARTBEAT_INTERVAL = 3e4;
-  var LATENCY_CHECK_INTERVAL = 15e3;
-  var CONNECTION_TIMEOUT = 5e3;
-  var INITIAL_DELAY = 3e3;
-  var LATENCY_SAMPLES = 3;
-  var SAMPLE_DELAY = 500;
-  var LATENCY_THRESHOLDS = {
-    GREAT: 150,
-    OK: 300,
-    BAD: 500
-  };
-  var indicatorState = {
-    state: "disconnected",
-    sessionId: null,
-    latencyMs: null,
-    totalUsers: 0,
-    activeUsers: 0,
-    isViewingLyrics: false,
-    region: "",
-    lastHeartbeat: 0,
-    isInitialized: false
-  };
-  var heartbeatInterval = null;
-  var latencyInterval = null;
-  var containerElement = null;
-  function getLatencyClass(latencyMs) {
-    if (latencyMs <= LATENCY_THRESHOLDS.GREAT)
-      return "slt-ci-great";
-    if (latencyMs <= LATENCY_THRESHOLDS.OK)
-      return "slt-ci-ok";
-    if (latencyMs <= LATENCY_THRESHOLDS.BAD)
-      return "slt-ci-bad";
-    return "slt-ci-horrible";
-  }
-  function createIndicatorElement() {
-    const container = document.createElement("div");
-    container.className = "SLT_ConnectionIndicator";
-    container.innerHTML = `
-        <div class="slt-ci-button" title="Connection Status">
-            <div class="slt-ci-dot"></div>
-            <div class="slt-ci-expanded">
-                <div class="slt-ci-stats-row">
-                    <span class="slt-ci-ping" title="Round-trip latency to SLT server">--ms</span>
-                    <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-total" title="Total users with extension installed">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                        <span class="slt-ci-total-count">0</span>
-                    </span>
-                    <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-active" title="Users currently viewing lyrics">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                            <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                        <span class="slt-ci-active-count">0</span>
-                    </span>
-                </div>
-            </div>
-        </div>
-    `;
-    return container;
-  }
-  function updateUI() {
-    if (!containerElement)
-      return;
-    const button = containerElement.querySelector(".slt-ci-button");
-    const dot = containerElement.querySelector(".slt-ci-dot");
-    const pingEl = containerElement.querySelector(".slt-ci-ping");
-    const totalCountEl = containerElement.querySelector(".slt-ci-total-count");
-    const activeCountEl = containerElement.querySelector(".slt-ci-active-count");
-    if (!button || !dot)
-      return;
-    dot.classList.remove("slt-ci-connecting", "slt-ci-connected", "slt-ci-error", "slt-ci-great", "slt-ci-ok", "slt-ci-bad", "slt-ci-horrible");
-    switch (indicatorState.state) {
-      case "connected":
-        dot.classList.add("slt-ci-connected");
-        if (indicatorState.latencyMs !== null) {
-          dot.classList.add(getLatencyClass(indicatorState.latencyMs));
-          if (pingEl) {
-            pingEl.textContent = `${indicatorState.latencyMs}ms`;
-            pingEl.className = `slt-ci-ping ${getLatencyClass(indicatorState.latencyMs)}`;
-          }
-        }
-        if (totalCountEl)
-          totalCountEl.textContent = `${indicatorState.totalUsers}`;
-        if (activeCountEl)
-          activeCountEl.textContent = `${indicatorState.activeUsers}`;
-        button.setAttribute("title", `Connected \xB7 ${indicatorState.latencyMs}ms \xB7 ${indicatorState.totalUsers} installed \xB7 ${indicatorState.activeUsers} viewing`);
-        break;
-      case "connecting":
-      case "reconnecting":
-        dot.classList.add("slt-ci-connecting");
-        if (pingEl) {
-          pingEl.textContent = "--ms";
-          pingEl.className = "slt-ci-ping";
-        }
-        button.setAttribute("title", "Connecting...");
-        break;
-      case "error":
-        dot.classList.add("slt-ci-error");
-        if (pingEl) {
-          pingEl.textContent = "ERR";
-          pingEl.className = "slt-ci-ping slt-ci-horrible";
-        }
-        button.setAttribute("title", "Connection error \u2014 retrying...");
-        break;
-      case "disconnected":
-      default:
-        if (pingEl) {
-          pingEl.textContent = "--ms";
-          pingEl.className = "slt-ci-ping";
-        }
-        button.setAttribute("title", "Disconnected");
-        break;
-    }
-    if (typeof Spicetify !== "undefined" && Spicetify.Tippy && button && !button._tippy) {
-      const baseOnShow = Spicetify.TippyProps?.onShow;
-      Spicetify.Tippy(button, {
-        ...Spicetify.TippyProps,
-        interactive: true,
-        appendTo: document.body,
-        delay: [200, 100],
-        allowHTML: true,
-        content: getTooltipContent(),
-        onShow(instance) {
-          if (typeof baseOnShow === "function")
-            baseOnShow(instance);
-          instance.setContent(getTooltipContent());
-        }
-      });
-    } else if (button?._tippy) {
-      button._tippy.setContent(getTooltipContent());
-    }
-  }
-  function getLatencyColor(ms) {
-    if (ms <= LATENCY_THRESHOLDS.GREAT)
-      return "#1db954";
-    if (ms <= LATENCY_THRESHOLDS.OK)
-      return "#ffe666";
-    if (ms <= LATENCY_THRESHOLDS.BAD)
-      return "#ff944d";
-    return "#e74c3c";
-  }
-  function getLatencyLabel(ms) {
-    if (ms <= LATENCY_THRESHOLDS.GREAT)
-      return "Excellent";
-    if (ms <= LATENCY_THRESHOLDS.OK)
-      return "Good";
-    if (ms <= LATENCY_THRESHOLDS.BAD)
-      return "Fair";
-    return "Poor";
-  }
-  function getTooltipContent() {
-    switch (indicatorState.state) {
-      case "connected": {
-        const latencyColor = indicatorState.latencyMs !== null ? getLatencyColor(indicatorState.latencyMs) : "#888";
-        const latencyLabel = indicatorState.latencyMs !== null ? getLatencyLabel(indicatorState.latencyMs) : "...";
-        const safeRegion = (indicatorState.region || "").replace(/[<>"'&]/g, "");
-        const regionText = safeRegion ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${safeRegion}</span>` : "";
-        return `
-                <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;font-size:12px;min-width:160px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:default;" title="Connection status: ${latencyLabel}">
-                        <div style="display:flex;align-items:center;gap:6px;">
-                            <span style="width:7px;height:7px;border-radius:50%;background:${latencyColor};box-shadow:0 0 6px ${latencyColor}80;"></span>
-                            <span style="font-weight:600;">SLT Server</span>
-                        </div>
-                        ${regionText}
-                    </div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.06);">
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Round-trip latency to SLT server">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Ping</span>
-                            <span style="font-weight:700;color:${latencyColor};font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;">${indicatorState.latencyMs}ms</span>
-                            <span style="font-size:9px;opacity:0.4;">${latencyLabel}</span>
-                        </div>
-                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Total users with the extension installed">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Users</span>
-                            <span style="font-weight:700;font-size:13px;">${indicatorState.totalUsers}</span>
-                            <span style="font-size:9px;opacity:0.4;">installed</span>
-                        </div>
-                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Users currently viewing lyrics">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Active</span>
-                            <span style="font-weight:700;color:#1db954;font-size:13px;">${indicatorState.activeUsers}</span>
-                            <span style="font-size:9px;opacity:0.4;">viewing</span>
-                        </div>
-                    </div>
-                    <div style="font-size:10px;color:rgba(255,255,255,0.35);text-align:center;padding-top:2px;border-top:1px solid rgba(255,255,255,0.06);cursor:default;" title="No tracking or personal information is collected">
-                        No personal data collected
-                    </div>
-                </div>
-            `;
-      }
-      case "connecting":
-      case "reconnecting":
-        return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;"><span style="width:6px;height:6px;border-radius:50%;background:#888;animation:slt-ci-pulse 1.5s ease-in-out infinite;"></span>Connecting to SLT server...</div>`;
-      case "error":
-        return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;color:#e74c3c;"><span style="width:6px;height:6px;border-radius:50%;background:#e74c3c;"></span>Connection error \u2014 retrying...</div>`;
-      default:
-        return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;opacity:0.7;"><span style="width:6px;height:6px;border-radius:50%;background:#666;"></span>Disconnected</div>`;
-    }
-  }
-  async function fetchWithTimeout2(url, options = {}, timeout = CONNECTION_TIMEOUT) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(id);
-      return response;
-    } catch (error2) {
-      clearTimeout(id);
-      throw error2;
-    }
-  }
-  async function measureLatency() {
-    try {
-      const startTime = performance.now();
-      const response = await fetchWithTimeout2(`${API_BASE}?action=ping&_=${Date.now()}`);
-      if (!response.ok)
-        return null;
-      await response.json();
-      return Math.round(performance.now() - startTime);
-    } catch (error2) {
-      return null;
-    }
-  }
-  async function measureLatencyAccurate() {
-    const samples = [];
-    for (let i = 0; i < LATENCY_SAMPLES; i++) {
-      if (i > 0) {
-        await new Promise((resolve) => setTimeout(resolve, SAMPLE_DELAY));
-      }
-      const latency = await measureLatency();
-      if (latency !== null) {
-        samples.push(latency);
-      }
-    }
-    if (samples.length === 0)
-      return null;
-    if (samples.length === 1)
-      return samples[0];
-    samples.sort((a, b) => a - b);
-    const trimmed = samples.slice(0, -1);
-    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
-    return Math.round(avg);
-  }
-  async function sendHeartbeat() {
-    try {
-      const shareData = storage.get("share-usage-data") === "true";
-      const params = new URLSearchParams({
-        action: "heartbeat",
-        session: indicatorState.sessionId || "",
-        version: storage.get("extension-version") || "1.0.0",
-        active: shareData && indicatorState.isViewingLyrics ? "true" : "false",
-        clientId: getOrCreateClientId()
-      });
-      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
-      if (!response.ok)
-        throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (data.success) {
-        indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
-        indicatorState.totalUsers = data.totalUsers || 0;
-        indicatorState.activeUsers = data.activeUsers || 0;
-        indicatorState.region = data.region || "";
-        indicatorState.lastHeartbeat = Date.now();
-        if (indicatorState.state !== "connected") {
-          indicatorState.state = "connected";
-          updateUI();
-        }
-        return true;
-      }
-      return false;
-    } catch (error2) {
-      return false;
-    }
-  }
-  async function connect() {
-    indicatorState.state = "connecting";
-    updateUI();
-    try {
-      const params = new URLSearchParams({
-        action: "connect",
-        version: storage.get("extension-version") || "1.0.0",
-        clientId: getOrCreateClientId()
-      });
-      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
-      if (!response.ok)
-        throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (data.success) {
-        indicatorState.sessionId = data.sessionId;
-        indicatorState.totalUsers = data.totalUsers || 0;
-        indicatorState.activeUsers = data.activeUsers || 0;
-        indicatorState.region = data.region || "";
-        indicatorState.state = "connected";
-        indicatorState.lastHeartbeat = Date.now();
-        setTimeout(async () => {
-          const latency = await measureLatencyAccurate();
-          if (latency !== null) {
-            indicatorState.latencyMs = latency;
-            updateUI();
-          }
-        }, 1e3);
-        updateUI();
-        return true;
-      }
-      throw new Error("Connection failed");
-    } catch (error2) {
-      const isAbortError = error2 instanceof Error && error2.name === "AbortError";
-      if (!isAbortError) {
-      }
-      indicatorState.state = "error";
-      updateUI();
-      setTimeout(() => {
-        if (indicatorState.state === "error") {
-          indicatorState.state = "reconnecting";
-          updateUI();
-          connect();
-        }
-      }, 5e3);
-      return false;
-    }
-  }
-  async function disconnect() {
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
-    if (latencyInterval) {
-      clearInterval(latencyInterval);
-      latencyInterval = null;
-    }
-    if (indicatorState.sessionId) {
-      try {
-        const params = new URLSearchParams({
-          action: "disconnect",
-          session: indicatorState.sessionId
-        });
-        await fetch(`${API_BASE}?${params}`);
-      } catch (e) {
-      }
-    }
-    indicatorState.state = "disconnected";
-    indicatorState.sessionId = null;
-    indicatorState.latencyMs = null;
-    indicatorState.activeUsers = 0;
-    updateUI();
-  }
-  function startPeriodicChecks() {
-    heartbeatInterval = setInterval(async () => {
-      const success = await sendHeartbeat();
-      if (!success && indicatorState.state === "connected") {
-        indicatorState.state = "reconnecting";
-        updateUI();
-        connect();
-      }
-    }, HEARTBEAT_INTERVAL);
-    latencyInterval = setInterval(async () => {
-      const latency = await measureLatency();
-      if (latency !== null) {
-        indicatorState.latencyMs = latency;
-        updateUI();
-      }
-    }, LATENCY_CHECK_INTERVAL);
-  }
-  function getIndicatorContainer() {
-    const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
-    if (topBarContentRight)
-      return topBarContentRight;
-    const userWidget = document.querySelector(".main-userWidget-box");
-    if (userWidget && userWidget.parentNode)
-      return userWidget.parentNode;
-    const historyButtons = document.querySelector(".main-topBar-historyButtons");
-    if (historyButtons && historyButtons.parentNode)
-      return historyButtons.parentNode;
-    return null;
-  }
-  function waitForElement(selector, timeout = 1e4) {
-    return new Promise((resolve) => {
-      const element = document.querySelector(selector);
-      if (element) {
-        resolve(element);
-        return;
-      }
-      const observer = new MutationObserver((mutations, obs) => {
-        const el = document.querySelector(selector);
-        if (el) {
-          obs.disconnect();
-          resolve(el);
-        }
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(document.querySelector(selector));
-      }, timeout);
-    });
-  }
-  async function appendToDOM() {
-    if (containerElement && containerElement.parentNode)
-      return true;
-    const container = getIndicatorContainer();
-    if (container) {
-      containerElement = createIndicatorElement();
-      container.insertBefore(containerElement, container.firstChild);
-      return true;
-    }
-    const topBarContentRight = await waitForElement(".main-topBar-topbarContentRight");
-    if (topBarContentRight) {
-      containerElement = createIndicatorElement();
-      topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
-      return true;
-    }
-    return false;
-  }
-  async function initConnectionIndicator() {
-    if (indicatorState.isInitialized)
-      return;
-    const appended = await appendToDOM();
-    if (!appended)
-      return;
-    indicatorState.isInitialized = true;
-    await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
-    const connected = await connect();
-    if (connected) {
-      startPeriodicChecks();
-    }
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        if (latencyInterval) {
-          clearInterval(latencyInterval);
-          latencyInterval = null;
-        }
-      } else {
-        if (indicatorState.state === "connected") {
-          latencyInterval = setInterval(async () => {
-            const latency = await measureLatency();
-            if (latency !== null) {
-              indicatorState.latencyMs = latency;
-              updateUI();
-            }
-          }, LATENCY_CHECK_INTERVAL);
-          setTimeout(async () => {
-            const latency = await measureLatencyAccurate();
-            if (latency !== null) {
-              indicatorState.latencyMs = latency;
-              updateUI();
-            }
-          }, 500);
-        }
-      }
-    });
-    window.addEventListener("beforeunload", () => {
-      disconnect();
-    });
-  }
-  function getConnectionState() {
-    return { ...indicatorState };
-  }
-  async function refreshConnection() {
-    await disconnect();
-    await connect();
-    if (indicatorState.state === "connected") {
-      startPeriodicChecks();
-    }
-  }
-  function setViewingLyrics(isViewing) {
-    if (indicatorState.isViewingLyrics !== isViewing) {
-      indicatorState.isViewingLyrics = isViewing;
-      if (indicatorState.state === "connected") {
-        sendHeartbeat().then(() => updateUI());
-      }
-    }
-  }
-  function notifyShareDataChanged() {
-    if (indicatorState.state === "connected") {
-      sendHeartbeat().then(() => updateUI());
-    }
-  }
-
   // src/utils/core.ts
   var lyricsObserver = null;
   var translateDebounceTimer = null;
@@ -6546,7 +6226,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return document.querySelector("#SpicyLyricsPage .LyricsContainer .LyricsContent") || document.querySelector("#SpicyLyricsPage .LyricsContent") || document.querySelector(".spicy-pip-wrapper .LyricsContent") || document.querySelector(".Cinema--Container .LyricsContent") || document.querySelector(".LyricsContainer .LyricsContent");
   }
-  function waitForElement2(selector, timeout = 1e4) {
+  function waitForElement(selector, timeout = 1e4) {
     return new Promise((resolve) => {
       const element = document.querySelector(selector);
       if (element) {
@@ -6701,18 +6381,28 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (!line || line.trim().length === 0) {
         continue;
       }
-      if (targetIsLatin) {
-        const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line);
-        if (hasNonLatin) {
+      const trimmed = line.trim();
+      const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
+      if (targetIsLatin && hasNonLatin) {
+        indexes.push(i);
+        continue;
+      }
+      if (hasNonLatin && trimmed.length < 10) {
+        indexes.push(i);
+        continue;
+      }
+      if (targetIsLatin && !hasNonLatin && targetBase !== "ja") {
+        const romaji = detectRomanizedJapanese(trimmed);
+        if (romaji) {
           indexes.push(i);
           continue;
         }
       }
-      const detected = detectLanguageHeuristic(line);
+      const detected = detectLanguageHeuristic(trimmed);
       if (!detected) {
         continue;
       }
-      if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.7) {
+      if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.6) {
         indexes.push(i);
       }
     }
@@ -6961,6 +6651,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         skipCheck = apiLangSame ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage } : { skip: false, detectedLanguage: apiLanguage };
       } else if (romanizationOn) {
         skipCheck = { skip: false, detectedLanguage: "unknown" };
+      } else if (apiLanguage && apiLanguage !== "unknown") {
+        const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
+        if (apiLangSame) {
+          const heuristicCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
+          skipCheck = heuristicCheck.skip ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage } : { skip: false, detectedLanguage: apiLanguage };
+        } else {
+          skipCheck = { skip: false, detectedLanguage: apiLanguage };
+        }
       } else {
         skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
       }
@@ -7325,13 +7023,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
   }
   async function onSpicyLyricsOpen() {
-    setViewingLyrics(true);
-    let viewControls = await waitForElement2("#SpicyLyricsPage .ViewControls", 3e3);
+    let viewControls = await waitForElement("#SpicyLyricsPage .ViewControls", 3e3);
     if (!viewControls && document.body.classList.contains("SpicySidebarLyrics__Active")) {
-      viewControls = await waitForElement2(".Root__right-sidebar #SpicyLyricsPage .ViewControls", 2e3);
+      viewControls = await waitForElement(".Root__right-sidebar #SpicyLyricsPage .ViewControls", 2e3);
     }
     if (!viewControls)
-      viewControls = await waitForElement2(".ViewControls", 2e3);
+      viewControls = await waitForElement(".ViewControls", 2e3);
     if (viewControls)
       insertTranslateButton();
     setupLyricsObserver();
@@ -7354,7 +7051,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
   }
   function onSpicyLyricsClose() {
-    setViewingLyrics(false);
     if (translateDebounceTimer) {
       clearTimeout(translateDebounceTimer);
       translateDebounceTimer = null;
@@ -7460,16 +7156,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var SETTINGS_ID = "spicy-lyric-translator-settings";
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
-    row.className = "x-settings-row qV_CxbowaNkMarye";
+    row.className = "x-settings-row";
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <label class="x-toggle-wrapper _nD_jYvjV80Rf8sX">
-                <input id="${id}" class="x-toggle-input vTxmx3oTF8tWUPD7" type="checkbox" ${checked ? "checked" : ""}>
-                <span class="x-toggle-indicator t3q6uAPe7y0rAqRKWrapper hzLQN8eYDPYyn1km">
-                    <span class="x-toggle-indicator t3q6uAPe7y0rAqRK"></span>
+        <div class="x-settings-secondColumn">
+            <label class="x-toggle-wrapper">
+                <input id="${id}" class="x-toggle-input" type="checkbox" ${checked ? "checked" : ""}>
+                <span class="x-toggle-indicatorWrapper">
+                    <span class="x-toggle-indicator"></span>
                 </span>
             </label>
         </div>
@@ -7480,14 +7176,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function createNativeDropdown(id, label, options, currentValue, onChange) {
     const row = document.createElement("div");
-    row.className = "x-settings-row qV_CxbowaNkMarye";
+    row.className = "x-settings-row";
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+        <div class="x-settings-secondColumn">
             <span>
-                <select class="main-dropDown-dropDown lu9EejNhmuMFF3oS" id="${id}">
+                <select class="main-dropDown-dropDown" id="${id}">
                     ${options.map((opt) => `<option value="${opt.value}" ${opt.value === currentValue ? "selected" : ""}>${opt.text}</option>`).join("")}
                 </select>
             </span>
@@ -7499,13 +7195,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function createNativeButton(id, label, buttonText, onClick) {
     const row = document.createElement("div");
-    row.className = "x-settings-row qV_CxbowaNkMarye";
+    row.className = "x-settings-row";
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <button id="${id}" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
+        <div class="x-settings-secondColumn">
+            <button id="${id}" class="encore-text-body-small-bold e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary e-10310-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
         </div>
     `;
     const button = row.querySelector("button");
@@ -7517,7 +7213,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     section.id = SETTINGS_ID;
     section.innerHTML = `
         <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
-            <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
+            <h2 class="e-10310-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
     const sectionContent = section.querySelector(".x-settings-section.fNaaQ0Cp8Yzy19j8");
@@ -7592,14 +7288,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     ));
     const customApiRow = document.createElement("div");
     customApiRow.id = "slt-settings-custom-api-row";
-    customApiRow.className = "x-settings-row qV_CxbowaNkMarye";
+    customApiRow.className = "x-settings-row";
     customApiRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
     customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector("input");
@@ -7619,14 +7315,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(customApiRow);
     const customApiKeyRow = document.createElement("div");
     customApiKeyRow.id = "slt-settings-custom-api-key-row";
-    customApiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
+    customApiKeyRow.className = "x-settings-row";
     customApiKeyRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
     customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="API key">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector("input");
@@ -7640,14 +7336,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(customApiKeyRow);
     const deeplKeyRow = document.createElement("div");
     deeplKeyRow.id = "slt-settings-deepl-key-row";
-    deeplKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
+    deeplKeyRow.className = "x-settings-row";
     deeplKeyRow.style.display = storage.get("preferred-api") === "deepl" ? "" : "none";
     deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector("input");
@@ -7661,14 +7357,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(deeplKeyRow);
     const openaiKeyRow = document.createElement("div");
     openaiKeyRow.id = "slt-settings-openai-key-row";
-    openaiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
+    openaiKeyRow.className = "x-settings-row";
     openaiKeyRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
     openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="sk-...">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector("input");
@@ -7682,14 +7378,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(openaiKeyRow);
     const openaiModelRow = document.createElement("div");
     openaiModelRow.id = "slt-settings-openai-model-row";
-    openaiModelRow.className = "x-settings-row qV_CxbowaNkMarye";
+    openaiModelRow.className = "x-settings-row";
     openaiModelRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
     openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="gpt-4o-mini">
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector("input");
@@ -7703,14 +7399,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     sectionContent.appendChild(openaiModelRow);
     const geminiKeyRow = document.createElement("div");
     geminiKeyRow.id = "slt-settings-gemini-key-row";
-    geminiKeyRow.className = "x-settings-row qV_CxbowaNkMarye";
+    geminiKeyRow.className = "x-settings-row";
     geminiKeyRow.style.display = storage.get("preferred-api") === "gemini" ? "" : "none";
     geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="AIza...">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector("input");
@@ -7759,15 +7455,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         state.vocabularyMode = checked;
         document.body.classList.toggle("slt-vocabulary-mode", checked);
         reapplyTranslations();
-      }
-    ));
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.share-usage-data",
-      "Share Active Viewing Status",
-      storage.get("share-usage-data") === "true",
-      (checked) => {
-        storage.set("share-usage-data", String(checked));
-        notifyShareDataChanged();
       }
     ));
     sectionContent.appendChild(createNativeToggle(
@@ -7870,21 +7557,21 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     ));
     const githubRow = document.createElement("div");
-    githubRow.className = "x-settings-row qV_CxbowaNkMarye";
+    githubRow.className = "x-settings-row";
     githubRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <a href="${REPO_URL}" target="_blank" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button e-10180-legacy-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
+        <div class="x-settings-secondColumn">
+            <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer" class="encore-text-body-small-bold e-10310-legacy-button--small e-10310-button--trailing e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary e-10310-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-10310-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-10310-icon" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
         </div>
     `;
     sectionContent.appendChild(githubRow);
     const shortcutRow = document.createElement("div");
-    shortcutRow.className = "x-settings-row qV_CxbowaNkMarye";
+    shortcutRow.className = "x-settings-row";
     shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <span class="e-91000-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
+        <div class="x-settings-firstColumn">
+            <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
         </div>
     `;
     sectionContent.appendChild(shortcutRow);
@@ -8181,14 +7868,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         </div>
 
         <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-share-usage-data">Share Active Viewing Status</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-share-usage-data" ${storage.get("share-usage-data") === "true" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
             <label for="slt-hide-connection-indicator">Hide Connection Status</label>
             <label class="slt-toggle">
                 <input type="checkbox" id="slt-hide-connection-indicator" ${storage.get("hide-connection-indicator") === "true" ? "checked" : ""}>
@@ -8240,7 +7919,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const showNotificationsCheckbox = container.querySelector("#slt-show-notifications");
       const showQualityIndicatorCheckbox = container.querySelector("#slt-show-quality-indicator");
       const vocabularyModeCheckbox = container.querySelector("#slt-vocabulary-mode");
-      const shareUsageDataCheckbox = container.querySelector("#slt-share-usage-data");
       const hideConnectionIndicatorCheckbox = container.querySelector("#slt-hide-connection-indicator");
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
@@ -8333,10 +8011,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         state.vocabularyMode = vocabularyModeCheckbox.checked;
         document.body.classList.toggle("slt-vocabulary-mode", vocabularyModeCheckbox.checked);
         reapplyTranslations();
-      });
-      shareUsageDataCheckbox?.addEventListener("change", () => {
-        storage.set("share-usage-data", String(shareUsageDataCheckbox.checked));
-        notifyShareDataChanged();
       });
       hideConnectionIndicatorCheckbox?.addEventListener("change", () => {
         storage.set("hide-connection-indicator", String(hideConnectionIndicatorCheckbox.checked));
@@ -9042,6 +8716,386 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (!registerMenuItem()) {
         setTimeout(registerMenuItem, 2e3);
       }
+    }
+  }
+
+  // src/utils/connectivity.ts
+  var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
+  var CLIENT_ID_KEY = "client-id";
+  function getOrCreateClientId() {
+    let clientId = storage.get(CLIENT_ID_KEY);
+    if (!clientId) {
+      clientId = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
+      storage.set(CLIENT_ID_KEY, clientId);
+    }
+    return clientId;
+  }
+  var HEARTBEAT_INTERVAL = 3e4;
+  var LATENCY_CHECK_INTERVAL = 15e3;
+  var CONNECTION_TIMEOUT = 5e3;
+  var INITIAL_DELAY = 3e3;
+  var LATENCY_SAMPLES = 3;
+  var SAMPLE_DELAY = 500;
+  var LATENCY_THRESHOLDS = {
+    GREAT: 150,
+    OK: 300,
+    BAD: 500
+  };
+  var indicatorState = {
+    state: "disconnected",
+    sessionId: null,
+    latencyMs: null,
+    totalUsers: 0,
+    region: "",
+    lastHeartbeat: 0,
+    isInitialized: false
+  };
+  var heartbeatInterval = null;
+  var latencyInterval = null;
+  var containerElement = null;
+  function getLatencyClass(latencyMs) {
+    if (latencyMs <= LATENCY_THRESHOLDS.GREAT)
+      return "slt-ci-great";
+    if (latencyMs <= LATENCY_THRESHOLDS.OK)
+      return "slt-ci-ok";
+    if (latencyMs <= LATENCY_THRESHOLDS.BAD)
+      return "slt-ci-bad";
+    return "slt-ci-horrible";
+  }
+  function createIndicatorElement() {
+    const container = document.createElement("div");
+    container.className = "SLT_ConnectionIndicator";
+    container.innerHTML = `
+        <div class="slt-ci-button" aria-label="Connection Status">
+            <div class="slt-ci-dot"></div>
+            <div class="slt-ci-expanded">
+                <div class="slt-ci-stats-row">
+                    <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
+                    <span class="slt-ci-sep"></span>
+                    <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                        <span class="slt-ci-total-count">0</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    `;
+    return container;
+  }
+  function updateUI() {
+    if (!containerElement)
+      return;
+    const button = containerElement.querySelector(".slt-ci-button");
+    const dot = containerElement.querySelector(".slt-ci-dot");
+    const pingEl = containerElement.querySelector(".slt-ci-ping");
+    const totalCountEl = containerElement.querySelector(".slt-ci-total-count");
+    if (!button || !dot)
+      return;
+    dot.classList.remove("slt-ci-connecting", "slt-ci-connected", "slt-ci-error", "slt-ci-great", "slt-ci-ok", "slt-ci-bad", "slt-ci-horrible");
+    switch (indicatorState.state) {
+      case "connected":
+        dot.classList.add("slt-ci-connected");
+        if (indicatorState.latencyMs !== null) {
+          dot.classList.add(getLatencyClass(indicatorState.latencyMs));
+          if (pingEl) {
+            pingEl.textContent = `${indicatorState.latencyMs}ms`;
+            pingEl.className = `slt-ci-ping ${getLatencyClass(indicatorState.latencyMs)}`;
+          }
+        }
+        if (totalCountEl)
+          totalCountEl.textContent = `${indicatorState.totalUsers}`;
+        button.setAttribute("aria-label", `Connected \xB7 ${indicatorState.latencyMs}ms \xB7 ${indicatorState.totalUsers} installed`);
+        break;
+      case "connecting":
+      case "reconnecting":
+        dot.classList.add("slt-ci-connecting");
+        if (pingEl) {
+          pingEl.textContent = "--ms";
+          pingEl.className = "slt-ci-ping";
+        }
+        button.setAttribute("aria-label", "Connecting...");
+        break;
+      case "error":
+        dot.classList.add("slt-ci-error");
+        if (pingEl) {
+          pingEl.textContent = "ERR";
+          pingEl.className = "slt-ci-ping slt-ci-horrible";
+        }
+        button.setAttribute("aria-label", "Connection error \u2014 retrying...");
+        break;
+      case "disconnected":
+      default:
+        if (pingEl) {
+          pingEl.textContent = "--ms";
+          pingEl.className = "slt-ci-ping";
+        }
+        button.setAttribute("aria-label", "Disconnected");
+        break;
+    }
+  }
+  async function fetchWithTimeout2(url, options = {}, timeout = CONNECTION_TIMEOUT) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return response;
+    } catch (error2) {
+      clearTimeout(id);
+      throw error2;
+    }
+  }
+  async function measureLatency() {
+    try {
+      const startTime = performance.now();
+      const response = await fetchWithTimeout2(`${API_BASE}?action=ping&_=${Date.now()}`);
+      if (!response.ok)
+        return null;
+      await response.json();
+      return Math.round(performance.now() - startTime);
+    } catch (error2) {
+      return null;
+    }
+  }
+  async function measureLatencyAccurate() {
+    const samples = [];
+    for (let i = 0; i < LATENCY_SAMPLES; i++) {
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, SAMPLE_DELAY));
+      }
+      const latency = await measureLatency();
+      if (latency !== null) {
+        samples.push(latency);
+      }
+    }
+    if (samples.length === 0)
+      return null;
+    if (samples.length === 1)
+      return samples[0];
+    samples.sort((a, b) => a - b);
+    const trimmed = samples.slice(0, -1);
+    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
+    return Math.round(avg);
+  }
+  async function sendHeartbeat() {
+    try {
+      const params = new URLSearchParams({
+        action: "heartbeat",
+        session: indicatorState.sessionId || "",
+        version: storage.get("extension-version") || "1.0.0",
+        clientId: getOrCreateClientId()
+      });
+      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
+      if (!response.ok)
+        throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.success) {
+        indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
+        indicatorState.totalUsers = data.totalUsers || 0;
+        indicatorState.region = data.region || "";
+        indicatorState.lastHeartbeat = Date.now();
+        if (indicatorState.state !== "connected") {
+          indicatorState.state = "connected";
+          updateUI();
+        }
+        return true;
+      }
+      return false;
+    } catch (error2) {
+      return false;
+    }
+  }
+  async function connect() {
+    indicatorState.state = "connecting";
+    updateUI();
+    try {
+      const params = new URLSearchParams({
+        action: "connect",
+        version: storage.get("extension-version") || "1.0.0",
+        clientId: getOrCreateClientId()
+      });
+      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
+      if (!response.ok)
+        throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.success) {
+        indicatorState.sessionId = data.sessionId;
+        indicatorState.totalUsers = data.totalUsers || 0;
+        indicatorState.region = data.region || "";
+        indicatorState.state = "connected";
+        indicatorState.lastHeartbeat = Date.now();
+        setTimeout(async () => {
+          const latency = await measureLatencyAccurate();
+          if (latency !== null) {
+            indicatorState.latencyMs = latency;
+            updateUI();
+          }
+        }, 1e3);
+        updateUI();
+        return true;
+      }
+      throw new Error("Connection failed");
+    } catch (error2) {
+      const isAbortError = error2 instanceof Error && error2.name === "AbortError";
+      if (!isAbortError) {
+      }
+      indicatorState.state = "error";
+      updateUI();
+      setTimeout(() => {
+        if (indicatorState.state === "error") {
+          indicatorState.state = "reconnecting";
+          updateUI();
+          connect();
+        }
+      }, 5e3);
+      return false;
+    }
+  }
+  async function disconnect() {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    if (latencyInterval) {
+      clearInterval(latencyInterval);
+      latencyInterval = null;
+    }
+    if (indicatorState.sessionId) {
+      try {
+        const params = new URLSearchParams({
+          action: "disconnect",
+          session: indicatorState.sessionId
+        });
+        await fetch(`${API_BASE}?${params}`);
+      } catch (e) {
+      }
+    }
+    indicatorState.state = "disconnected";
+    indicatorState.sessionId = null;
+    indicatorState.latencyMs = null;
+    updateUI();
+  }
+  function startPeriodicChecks() {
+    heartbeatInterval = setInterval(async () => {
+      const success = await sendHeartbeat();
+      if (!success && indicatorState.state === "connected") {
+        indicatorState.state = "reconnecting";
+        updateUI();
+        connect();
+      }
+    }, HEARTBEAT_INTERVAL);
+    latencyInterval = setInterval(async () => {
+      const latency = await measureLatency();
+      if (latency !== null) {
+        indicatorState.latencyMs = latency;
+        updateUI();
+      }
+    }, LATENCY_CHECK_INTERVAL);
+  }
+  function getIndicatorContainer() {
+    const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
+    if (topBarContentRight)
+      return topBarContentRight;
+    const userWidget = document.querySelector(".main-userWidget-box");
+    if (userWidget && userWidget.parentNode)
+      return userWidget.parentNode;
+    const historyButtons = document.querySelector(".main-topBar-historyButtons");
+    if (historyButtons && historyButtons.parentNode)
+      return historyButtons.parentNode;
+    return null;
+  }
+  function waitForElement2(selector, timeout = 1e4) {
+    return new Promise((resolve) => {
+      const element = document.querySelector(selector);
+      if (element) {
+        resolve(element);
+        return;
+      }
+      const observer = new MutationObserver((mutations, obs) => {
+        const el = document.querySelector(selector);
+        if (el) {
+          obs.disconnect();
+          resolve(el);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => {
+        observer.disconnect();
+        resolve(document.querySelector(selector));
+      }, timeout);
+    });
+  }
+  async function appendToDOM() {
+    if (containerElement && containerElement.parentNode)
+      return true;
+    const container = getIndicatorContainer();
+    if (container) {
+      containerElement = createIndicatorElement();
+      container.insertBefore(containerElement, container.firstChild);
+      return true;
+    }
+    const topBarContentRight = await waitForElement2(".main-topBar-topbarContentRight");
+    if (topBarContentRight) {
+      containerElement = createIndicatorElement();
+      topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
+      return true;
+    }
+    return false;
+  }
+  async function initConnectionIndicator() {
+    if (indicatorState.isInitialized)
+      return;
+    const appended = await appendToDOM();
+    if (!appended)
+      return;
+    indicatorState.isInitialized = true;
+    await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
+    const connected = await connect();
+    if (connected) {
+      startPeriodicChecks();
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (latencyInterval) {
+          clearInterval(latencyInterval);
+          latencyInterval = null;
+        }
+      } else {
+        if (indicatorState.state === "connected") {
+          latencyInterval = setInterval(async () => {
+            const latency = await measureLatency();
+            if (latency !== null) {
+              indicatorState.latencyMs = latency;
+              updateUI();
+            }
+          }, LATENCY_CHECK_INTERVAL);
+          setTimeout(async () => {
+            const latency = await measureLatencyAccurate();
+            if (latency !== null) {
+              indicatorState.latencyMs = latency;
+              updateUI();
+            }
+          }, 500);
+        }
+      }
+    });
+    window.addEventListener("beforeunload", () => {
+      disconnect();
+    });
+  }
+  function getConnectionState() {
+    return { ...indicatorState };
+  }
+  async function refreshConnection() {
+    await disconnect();
+    await connect();
+    if (indicatorState.state === "connected") {
+      startPeriodicChecks();
     }
   }
 

@@ -33,8 +33,6 @@ interface ConnectionIndicatorState {
     sessionId: string | null;
     latencyMs: number | null;
     totalUsers: number;
-    activeUsers: number;
-    isViewingLyrics: boolean;
     region: string;
     lastHeartbeat: number;
     isInitialized: boolean;
@@ -45,8 +43,6 @@ const indicatorState: ConnectionIndicatorState = {
     sessionId: null,
     latencyMs: null,
     totalUsers: 0,
-    activeUsers: 0,
-    isViewingLyrics: false,
     region: '',
     lastHeartbeat: 0,
     isInitialized: false
@@ -68,13 +64,13 @@ function createIndicatorElement(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'SLT_ConnectionIndicator';
     container.innerHTML = `
-        <div class="slt-ci-button" title="Connection Status">
+        <div class="slt-ci-button" aria-label="Connection Status">
             <div class="slt-ci-dot"></div>
             <div class="slt-ci-expanded">
                 <div class="slt-ci-stats-row">
-                    <span class="slt-ci-ping" title="Round-trip latency to SLT server">--ms</span>
+                    <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
                     <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-total" title="Total users with extension installed">
+                    <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
                             <circle cx="9" cy="7" r="4"/>
@@ -82,14 +78,6 @@ function createIndicatorElement(): HTMLElement {
                             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                         </svg>
                         <span class="slt-ci-total-count">0</span>
-                    </span>
-                    <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-active" title="Users currently viewing lyrics">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                            <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                        <span class="slt-ci-active-count">0</span>
                     </span>
                 </div>
             </div>
@@ -105,7 +93,6 @@ function updateUI(): void {
     const dot = containerElement.querySelector('.slt-ci-dot');
     const pingEl = containerElement.querySelector('.slt-ci-ping');
     const totalCountEl = containerElement.querySelector('.slt-ci-total-count');
-    const activeCountEl = containerElement.querySelector('.slt-ci-active-count');
     
     if (!button || !dot) return;
 
@@ -122,111 +109,27 @@ function updateUI(): void {
                 }
             }
             if (totalCountEl) totalCountEl.textContent = `${indicatorState.totalUsers}`;
-            if (activeCountEl) activeCountEl.textContent = `${indicatorState.activeUsers}`;
-            button.setAttribute('title', `Connected · ${indicatorState.latencyMs}ms · ${indicatorState.totalUsers} installed · ${indicatorState.activeUsers} viewing`);
+            button.setAttribute('aria-label', `Connected · ${indicatorState.latencyMs}ms · ${indicatorState.totalUsers} installed`);
             break;
 
         case 'connecting':
         case 'reconnecting':
             dot.classList.add('slt-ci-connecting');
             if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
-            button.setAttribute('title', 'Connecting...');
+            button.setAttribute('aria-label', 'Connecting...');
             break;
 
         case 'error':
             dot.classList.add('slt-ci-error');
             if (pingEl) { pingEl.textContent = 'ERR'; pingEl.className = 'slt-ci-ping slt-ci-horrible'; }
-            button.setAttribute('title', 'Connection error — retrying...');
+            button.setAttribute('aria-label', 'Connection error — retrying...');
             break;
 
         case 'disconnected':
         default:
             if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
-            button.setAttribute('title', 'Disconnected');
+            button.setAttribute('aria-label', 'Disconnected');
             break;
-    }
-
-    if (typeof Spicetify !== 'undefined' && Spicetify.Tippy && button && !(button as any)._tippy) {
-        const baseOnShow = Spicetify.TippyProps?.onShow;
-        Spicetify.Tippy(button, {
-            ...Spicetify.TippyProps,
-            interactive: true,
-            appendTo: document.body,
-            delay: [200, 100],
-            allowHTML: true,
-            content: getTooltipContent(),
-            onShow(instance: any) {
-                if (typeof baseOnShow === 'function') baseOnShow(instance);
-                instance.setContent(getTooltipContent());
-            }
-        });
-    } else if ((button as any)?._tippy) {
-        (button as any)._tippy.setContent(getTooltipContent());
-    }
-}
-
-function getLatencyColor(ms: number): string {
-    if (ms <= LATENCY_THRESHOLDS.GREAT) return '#1db954';
-    if (ms <= LATENCY_THRESHOLDS.OK) return '#ffe666';
-    if (ms <= LATENCY_THRESHOLDS.BAD) return '#ff944d';
-    return '#e74c3c';
-}
-
-function getLatencyLabel(ms: number): string {
-    if (ms <= LATENCY_THRESHOLDS.GREAT) return 'Excellent';
-    if (ms <= LATENCY_THRESHOLDS.OK) return 'Good';
-    if (ms <= LATENCY_THRESHOLDS.BAD) return 'Fair';
-    return 'Poor';
-}
-
-function getTooltipContent(): string {
-    switch (indicatorState.state) {
-        case 'connected': {
-            const latencyColor = indicatorState.latencyMs !== null ? getLatencyColor(indicatorState.latencyMs) : '#888';
-            const latencyLabel = indicatorState.latencyMs !== null ? getLatencyLabel(indicatorState.latencyMs) : '...';
-            const safeRegion = (indicatorState.region || '').replace(/[<>"'&]/g, '');
-            const regionText = safeRegion ? `<span style="opacity:0.5;font-size:10px;" title="Server region">${safeRegion}</span>` : '';
-            return `
-                <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;font-size:12px;min-width:160px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:default;" title="Connection status: ${latencyLabel}">
-                        <div style="display:flex;align-items:center;gap:6px;">
-                            <span style="width:7px;height:7px;border-radius:50%;background:${latencyColor};box-shadow:0 0 6px ${latencyColor}80;"></span>
-                            <span style="font-weight:600;">SLT Server</span>
-                        </div>
-                        ${regionText}
-                    </div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.06);">
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Round-trip latency to SLT server">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Ping</span>
-                            <span style="font-weight:700;color:${latencyColor};font-family:'JetBrains Mono',Consolas,monospace;font-size:13px;">${indicatorState.latencyMs}ms</span>
-                            <span style="font-size:9px;opacity:0.4;">${latencyLabel}</span>
-                        </div>
-                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Total users with the extension installed">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Users</span>
-                            <span style="font-weight:700;font-size:13px;">${indicatorState.totalUsers}</span>
-                            <span style="font-size:9px;opacity:0.4;">installed</span>
-                        </div>
-                        <div style="width:1px;height:28px;background:rgba(255,255,255,0.08);"></div>
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;cursor:default;" title="Users currently viewing lyrics">
-                            <span style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.05em;">Active</span>
-                            <span style="font-weight:700;color:#1db954;font-size:13px;">${indicatorState.activeUsers}</span>
-                            <span style="font-size:9px;opacity:0.4;">viewing</span>
-                        </div>
-                    </div>
-                    <div style="font-size:10px;color:rgba(255,255,255,0.35);text-align:center;padding-top:2px;border-top:1px solid rgba(255,255,255,0.06);cursor:default;" title="No tracking or personal information is collected">
-                        No personal data collected
-                    </div>
-                </div>
-            `;
-        }
-        case 'connecting':
-        case 'reconnecting':
-            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;"><span style="width:6px;height:6px;border-radius:50%;background:#888;animation:slt-ci-pulse 1.5s ease-in-out infinite;"></span>Connecting to SLT server...</div>`;
-        case 'error':
-            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;color:#e74c3c;"><span style="width:6px;height:6px;border-radius:50%;background:#e74c3c;"></span>Connection error — retrying...</div>`;
-        default:
-            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0;opacity:0.7;"><span style="width:6px;height:6px;border-radius:50%;background:#666;"></span>Disconnected</div>`;
     }
 }
 
@@ -281,12 +184,10 @@ async function measureLatencyAccurate(): Promise<number | null> {
 
 async function sendHeartbeat(): Promise<boolean> {
     try {
-        const shareData = storage.get('share-usage-data') === 'true';
         const params = new URLSearchParams({
             action: 'heartbeat',
             session: indicatorState.sessionId || '',
             version: storage.get('extension-version') || '1.0.0',
-            active: (shareData && indicatorState.isViewingLyrics) ? 'true' : 'false',
             clientId: getOrCreateClientId()
         });
 
@@ -297,7 +198,6 @@ async function sendHeartbeat(): Promise<boolean> {
         if (data.success) {
             indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
             indicatorState.totalUsers = data.totalUsers || 0;
-            indicatorState.activeUsers = data.activeUsers || 0;
             indicatorState.region = data.region || '';
             indicatorState.lastHeartbeat = Date.now();
             
@@ -332,7 +232,6 @@ async function connect(): Promise<boolean> {
         if (data.success) {
             indicatorState.sessionId = data.sessionId;
             indicatorState.totalUsers = data.totalUsers || 0;
-            indicatorState.activeUsers = data.activeUsers || 0;
             indicatorState.region = data.region || '';
             indicatorState.state = 'connected';
             indicatorState.lastHeartbeat = Date.now();
@@ -391,7 +290,6 @@ async function disconnect(): Promise<void> {
     indicatorState.state = 'disconnected';
     indicatorState.sessionId = null;
     indicatorState.latencyMs = null;
-    indicatorState.activeUsers = 0;
     updateUI();
 }
 
@@ -540,26 +438,9 @@ export async function refreshConnection(): Promise<void> {
     }
 }
 
-export function setViewingLyrics(isViewing: boolean): void {
-    if (indicatorState.isViewingLyrics !== isViewing) {
-        indicatorState.isViewingLyrics = isViewing;
-        if (indicatorState.state === 'connected') {
-            sendHeartbeat().then(() => updateUI());
-        }
-    }
-}
-
-export function notifyShareDataChanged(): void {
-    if (indicatorState.state === 'connected') {
-        sendHeartbeat().then(() => updateUI());
-    }
-}
-
 export default {
     init: initConnectionIndicator,
     cleanup: cleanupConnectionIndicator,
     getState: getConnectionState,
-    refresh: refreshConnection,
-    setViewingLyrics: setViewingLyrics,
-    notifyShareDataChanged: notifyShareDataChanged
+    refresh: refreshConnection
 };

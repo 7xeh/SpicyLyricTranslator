@@ -6,23 +6,22 @@ import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog
 import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
-import { notifyShareDataChanged } from './connectivity';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row qV_CxbowaNkMarye';
+    row.className = 'x-settings-row';
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <label class="x-toggle-wrapper _nD_jYvjV80Rf8sX">
-                <input id="${id}" class="x-toggle-input vTxmx3oTF8tWUPD7" type="checkbox" ${checked ? 'checked' : ''}>
-                <span class="x-toggle-indicator t3q6uAPe7y0rAqRKWrapper hzLQN8eYDPYyn1km">
-                    <span class="x-toggle-indicator t3q6uAPe7y0rAqRK"></span>
+        <div class="x-settings-secondColumn">
+            <label class="x-toggle-wrapper">
+                <input id="${id}" class="x-toggle-input" type="checkbox" ${checked ? 'checked' : ''}>
+                <span class="x-toggle-indicatorWrapper">
+                    <span class="x-toggle-indicator"></span>
                 </span>
             </label>
         </div>
@@ -36,14 +35,14 @@ function createNativeToggle(id: string, label: string, checked: boolean, onChang
 
 function createNativeDropdown(id: string, label: string, options: { value: string; text: string }[], currentValue: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row qV_CxbowaNkMarye';
+    row.className = 'x-settings-row';
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
+        <div class="x-settings-secondColumn">
             <span>
-                <select class="main-dropDown-dropDown lu9EejNhmuMFF3oS" id="${id}">
+                <select class="main-dropDown-dropDown" id="${id}">
                     ${options.map(opt => `<option value="${opt.value}" ${opt.value === currentValue ? 'selected' : ''}>${opt.text}</option>`).join('')}
                 </select>
             </span>
@@ -58,13 +57,13 @@ function createNativeDropdown(id: string, label: string, options: { value: strin
 
 function createNativeButton(id: string, label: string, buttonText: string, onClick: () => void): HTMLElement {
     const row = document.createElement('div');
-    row.className = 'x-settings-row qV_CxbowaNkMarye';
+    row.className = 'x-settings-row';
     row.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <button id="${id}" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
+        <div class="x-settings-secondColumn">
+            <button id="${id}" class="encore-text-body-small-bold e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary e-10310-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
         </div>
     `;
     
@@ -79,7 +78,7 @@ function createNativeSettingsSection(): HTMLElement {
     section.id = SETTINGS_ID;
     section.innerHTML = `
         <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
-            <h2 class="e-91000-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
+            <h2 class="e-10310-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
     
@@ -154,14 +153,14 @@ function createNativeSettingsSection(): HTMLElement {
     
     const customApiRow = document.createElement('div');
     customApiRow.id = 'slt-settings-custom-api-row';
-    customApiRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    customApiRow.className = 'x-settings-row';
     customApiRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
     customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
         </div>
     `;
     const customApiInput = customApiRow.querySelector('input') as HTMLInputElement;
@@ -182,14 +181,14 @@ function createNativeSettingsSection(): HTMLElement {
     // Custom API Key row
     const customApiKeyRow = document.createElement('div');
     customApiKeyRow.id = 'slt-settings-custom-api-key-row';
-    customApiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    customApiKeyRow.className = 'x-settings-row';
     customApiKeyRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
     customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="API key">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="API key">
         </div>
     `;
     const customApiKeyInput = customApiKeyRow.querySelector('input') as HTMLInputElement;
@@ -204,14 +203,14 @@ function createNativeSettingsSection(): HTMLElement {
     // DeepL API Key row
     const deeplKeyRow = document.createElement('div');
     deeplKeyRow.id = 'slt-settings-deepl-key-row';
-    deeplKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    deeplKeyRow.className = 'x-settings-row';
     deeplKeyRow.style.display = storage.get('preferred-api') === 'deepl' ? '' : 'none';
     deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
         </div>
     `;
     const deeplKeyInput = deeplKeyRow.querySelector('input') as HTMLInputElement;
@@ -226,14 +225,14 @@ function createNativeSettingsSection(): HTMLElement {
     // OpenAI API Key row
     const openaiKeyRow = document.createElement('div');
     openaiKeyRow.id = 'slt-settings-openai-key-row';
-    openaiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    openaiKeyRow.className = 'x-settings-row';
     openaiKeyRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
     openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="sk-...">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="sk-...">
         </div>
     `;
     const openaiKeyInput = openaiKeyRow.querySelector('input') as HTMLInputElement;
@@ -248,14 +247,14 @@ function createNativeSettingsSection(): HTMLElement {
     // OpenAI Model row
     const openaiModelRow = document.createElement('div');
     openaiModelRow.id = 'slt-settings-openai-model-row';
-    openaiModelRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    openaiModelRow.className = 'x-settings-row';
     openaiModelRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
     openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="gpt-4o-mini">
+        <div class="x-settings-secondColumn">
+            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="gpt-4o-mini">
         </div>
     `;
     const openaiModelInput = openaiModelRow.querySelector('input') as HTMLInputElement;
@@ -270,14 +269,14 @@ function createNativeSettingsSection(): HTMLElement {
     // Gemini API Key row
     const geminiKeyRow = document.createElement('div');
     geminiKeyRow.id = 'slt-settings-gemini-key-row';
-    geminiKeyRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    geminiKeyRow.className = 'x-settings-row';
     geminiKeyRow.style.display = storage.get('preferred-api') === 'gemini' ? '' : 'none';
     geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown lu9EejNhmuMFF3oS" style="width: 200px;" value="" placeholder="AIza...">
+        <div class="x-settings-secondColumn">
+            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="AIza...">
         </div>
     `;
     const geminiKeyInput = geminiKeyRow.querySelector('input') as HTMLInputElement;
@@ -329,16 +328,6 @@ function createNativeSettingsSection(): HTMLElement {
             state.vocabularyMode = checked;
             document.body.classList.toggle('slt-vocabulary-mode', checked);
             reapplyTranslations();
-        }
-    ));
-
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.share-usage-data',
-        'Share Active Viewing Status',
-        storage.get('share-usage-data') === 'true',
-        (checked) => {
-            storage.set('share-usage-data', String(checked));
-            notifyShareDataChanged();
         }
     ));
 
@@ -446,22 +435,22 @@ function createNativeSettingsSection(): HTMLElement {
     ));
     
     const githubRow = document.createElement('div');
-    githubRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    githubRow.className = 'x-settings-row';
     githubRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <label class="e-91000-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
         </div>
-        <div class="x-settings-secondColumn hgljrmQksnQei4xj">
-            <a href="${REPO_URL}" target="_blank" class="encore-text-body-small-bold e-10180-legacy-button--small e-10180-legacy-button-secondary--text-base encore-internal-color-text-base e-10180-legacy-button e-10180-legacy-button-secondary e-10180-overflow-wrap-anywhere x-settings-button e-10180-legacy-button--trailing" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-91000-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-91000-icon e-91000-baseline" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
+        <div class="x-settings-secondColumn">
+            <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer" class="encore-text-body-small-bold e-10310-legacy-button--small e-10310-button--trailing e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary e-10310-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary">View<span aria-hidden="true" class="e-10310-button__icon-wrapper"><svg data-encore-id="icon" role="img" aria-hidden="true" class="e-10310-icon" viewBox="0 0 16 16" style="--encore-icon-height: var(--encore-graphic-size-decorative-smaller); --encore-icon-width: var(--encore-graphic-size-decorative-smaller);"><path d="M1 2.75A.75.75 0 0 1 1.75 2H7v1.5H2.5v11h10.219V9h1.5v6.25a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75z"></path><path d="M15 1v4.993a.75.75 0 1 1-1.5 0V3.56L8.78 8.28a.75.75 0 0 1-1.06-1.06l4.72-4.72h-2.433a.75.75 0 0 1 0-1.5z"></path></svg></span></a>
         </div>
     `;
     sectionContent.appendChild(githubRow);
     
     const shortcutRow = document.createElement('div');
-    shortcutRow.className = 'x-settings-row qV_CxbowaNkMarye';
+    shortcutRow.className = 'x-settings-row';
     shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn FLjFgCRmVaE0WSqc">
-            <span class="e-91000-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
+        <div class="x-settings-firstColumn">
+            <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
         </div>
     `;
     sectionContent.appendChild(shortcutRow);
@@ -783,14 +772,6 @@ function createSettingsUI(): HTMLElement {
         </div>
 
         <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-share-usage-data">Share Active Viewing Status</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-share-usage-data" ${storage.get('share-usage-data') === 'true' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
             <label for="slt-hide-connection-indicator">Hide Connection Status</label>
             <label class="slt-toggle">
                 <input type="checkbox" id="slt-hide-connection-indicator" ${storage.get('hide-connection-indicator') === 'true' ? 'checked' : ''}>
@@ -840,7 +821,6 @@ function createSettingsUI(): HTMLElement {
         const showNotificationsCheckbox = container.querySelector('#slt-show-notifications') as HTMLInputElement;
         const showQualityIndicatorCheckbox = container.querySelector('#slt-show-quality-indicator') as HTMLInputElement;
         const vocabularyModeCheckbox = container.querySelector('#slt-vocabulary-mode') as HTMLInputElement;
-        const shareUsageDataCheckbox = container.querySelector('#slt-share-usage-data') as HTMLInputElement;
         const hideConnectionIndicatorCheckbox = container.querySelector('#slt-hide-connection-indicator') as HTMLInputElement;
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
@@ -941,11 +921,6 @@ function createSettingsUI(): HTMLElement {
             state.vocabularyMode = vocabularyModeCheckbox.checked;
             document.body.classList.toggle('slt-vocabulary-mode', vocabularyModeCheckbox.checked);
             reapplyTranslations();
-        });
-
-        shareUsageDataCheckbox?.addEventListener('change', () => {
-            storage.set('share-usage-data', String(shareUsageDataCheckbox.checked));
-            notifyShareDataChanged();
         });
 
         hideConnectionIndicatorCheckbox?.addEventListener('change', () => {
