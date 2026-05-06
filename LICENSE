@@ -1,0 +1,124 @@
+SLT Source-Available License v1.0
+Copyright (C) 2026 7xeh (https://7xeh.dev). All rights reserved.
+
+This software (the "Software") is published as source-available under
+the terms below. It is NOT open source under the OSI definition.
+
+================================================================
+1. WHAT YOU MAY DO
+================================================================
+
+You are permitted, free of charge, to:
+
+  (a) View, read, and study the source code of the Software for any
+      lawful purpose.
+
+  (b) Clone or fork the repository (including via GitHub's fork
+      feature) for the purpose of:
+        - Personal study and learning;
+        - Local modification for your own private use;
+        - Preparing and submitting pull requests back to the original
+          repository at https://github.com/7xeh/SpicyLyricTranslate.
+
+  (c) Run the Software on your own systems for personal,
+      non-commercial use.
+
+================================================================
+2. WHAT YOU MAY NOT DO
+================================================================
+
+Without prior, explicit, written permission from the copyright holder
+(7xeh), you MAY NOT:
+
+  (a) Publish, release, distribute, or otherwise make available the
+      Software, in original or modified form, as a separate project,
+      package, plugin, extension, or product. This includes, without
+      limitation:
+        - Publishing the Software (or any derivative) to the Spicetify
+          Marketplace, npm, any package registry, app store, or any
+          other distribution channel;
+        - Releasing pre-built binaries, compiled bundles, or installers
+          based on the Software;
+        - Hosting the Software as a service or making it available
+          through a website or web application.
+
+  (b) Use the Software, in original or modified form, for any
+      commercial purpose. "Commercial purpose" includes, without
+      limitation:
+        - Selling the Software or access to it;
+        - Bundling the Software into any paid product or service;
+        - Using the Software to generate revenue, directly or
+          indirectly.
+
+  (c) Publish or release any "alternative version", "free version",
+      "community edition", "fork", "rebrand", or substantially similar
+      derivative of the Software, regardless of whether any payment is
+      received.
+
+  (d) Remove, alter, or obscure this license, the copyright notice, or
+      attribution to the original author in any copy or derivative
+      of the Software.
+
+================================================================
+3. CONTRIBUTIONS
+================================================================
+
+By submitting a pull request, issue, patch, or other contribution to
+the original repository, you grant 7xeh a perpetual, worldwide,
+royalty-free, irrevocable, sublicensable license to use, reproduce,
+modify, distribute, and relicense your contribution as part of the
+Software under any terms 7xeh chooses, including future commercial
+licenses.
+
+================================================================
+4. TERMINATION
+================================================================
+
+The permissions granted in Section 1 terminate automatically and
+immediately if you violate any term of this license. Upon termination,
+you must cease all use of the Software and destroy all copies in your
+possession.
+
+================================================================
+5. NO WARRANTY
+================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT,
+OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE
+OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================
+6. INDEPENDENCE FROM THIRD-PARTY SOFTWARE
+================================================================
+
+The Software is designed to operate alongside the "Spicy Lyrics"
+extension by Spikerko (https://github.com/Spikerko/spicy-lyrics),
+which is licensed separately under AGPL-3.0.
+
+The Software is an independent work. It does not incorporate, bundle,
+or statically link any source code, assets, or compiled output from
+Spicy Lyrics. The Software interacts with Spicy Lyrics solely through
+public interfaces: DOM elements rendered in the host application,
+publicly accessible HTTP endpoints, and browser-managed local storage
+keys. Such interface-level interoperation does not constitute a
+derivative work under applicable copyright law.
+
+Accordingly, the licensing terms of Spicy Lyrics (AGPL-3.0) apply only
+to Spicy Lyrics' own source code and do not extend to the Software.
+The Software is licensed solely under the terms set forth in this
+license.
+
+End users are responsible for complying with the licenses of any
+third-party software they install alongside the Software, including
+Spicy Lyrics and Spicetify.
+
+================================================================
+7. CONTACT
+================================================================
+
+For commercial licensing, redistribution permission, or any other
+inquiries, contact: https://7xeh.dev

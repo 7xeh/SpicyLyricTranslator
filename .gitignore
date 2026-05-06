@@ -32,6 +32,7 @@ Desktop.ini
 *.key
 secrets/
 config.local.json
+.mailmap
 
 # TypeScript
 *.tsbuildinfo
