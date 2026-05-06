@@ -1,6 +1,7 @@
 import { warn } from './debug';
 
-const SPICY_LYRICS_API = 'https://api.spicylyrics.org';
+const SPICY_API_HOST = 'api.spicylyrics.org';
+const SPICY_QUERY_PATH = '/query';
 
 interface SyllableData {
     Text: string;
@@ -73,27 +74,110 @@ interface QueryResponse {
     }>;
 }
 
+const captureCache = new Map<string, LyricsData>();
+let interceptorInstalled = false;
 
-async function getSpotifyAccessToken(): Promise<string> {
+function isLyricsData(obj: any): obj is LyricsData {
+    if (!obj || typeof obj !== 'object') return false;
+    if (typeof obj.Type === 'string' && (obj.Type === 'Static' || obj.Type === 'Line' || obj.Type === 'Syllable')) {
+        return true;
+    }
+    if (Array.isArray(obj.Content) || Array.isArray(obj.Lines)) return true;
+    return false;
+}
+
+function extractTrackIdFromBody(bodyText: string | null | undefined): string | null {
+    if (!bodyText) return null;
     try {
-        if ((globalThis as any).Spicetify?.CosmosAsync) {
-            const result = await (globalThis as any).Spicetify.CosmosAsync.get('sp://oauth/v2/token');
-            if (result?.accessToken) {
-                return result.accessToken;
+        const parsed = JSON.parse(bodyText);
+        const queries = parsed?.queries;
+        if (!Array.isArray(queries)) return null;
+        for (const q of queries) {
+            const id = q?.variables?.id;
+            if (typeof id === 'string' && id.length > 0) return id;
+        }
+    } catch {}
+    return null;
+}
+
+function processCapturedResponse(trackId: string, payload: QueryResponse): void {
+    const queries = Array.isArray(payload?.queries) ? payload.queries : [];
+    for (const q of queries) {
+        const result = q?.result;
+        if (!result || result.httpStatus !== 200) continue;
+
+        let lyricsData: LyricsData | null = null;
+        if (result.format === 'json' && isLyricsData(result.data)) {
+            lyricsData = result.data as LyricsData;
+        } else if (result.format === 'text' && typeof result.data === 'string') {
+            try {
+                const parsed = JSON.parse(result.data);
+                if (isLyricsData(parsed)) lyricsData = parsed;
+            } catch {}
+        }
+
+        if (lyricsData) {
+            captureCache.set(trackId, lyricsData);
+            return;
+        }
+    }
+}
+
+function installFetchInterceptor(): void {
+    if (interceptorInstalled) return;
+    if (typeof window === 'undefined' || typeof window.fetch !== 'function') return;
+    interceptorInstalled = true;
+
+    const origFetch = window.fetch.bind(window);
+
+    window.fetch = async function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+        let url: string;
+        try {
+            if (typeof input === 'string') url = input;
+            else if (input instanceof URL) url = input.href;
+            else url = (input as Request).url;
+        } catch {
+            return origFetch(input as any, init);
+        }
+
+        if (!url.includes(SPICY_API_HOST) || !url.includes(SPICY_QUERY_PATH)) {
+            return origFetch(input as any, init);
+        }
+
+        let trackId: string | null = null;
+        try {
+            if (typeof init?.body === 'string') {
+                trackId = extractTrackIdFromBody(init.body);
+            } else if (input instanceof Request) {
+                const cloned = input.clone();
+                const bodyText = await cloned.text();
+                trackId = extractTrackIdFromBody(bodyText);
             }
+        } catch {}
+
+        const response = await origFetch(input as any, init);
+
+        if (trackId) {
+            const capturedTrackId = trackId;
+            response.clone().json().then((data: QueryResponse) => {
+                processCapturedResponse(capturedTrackId, data);
+            }).catch(() => {});
         }
-    } catch (e) {
+
+        return response;
+    };
+}
+
+installFetchInterceptor();
+
+async function waitForCapture(trackId: string, timeoutMs: number = 8000, pollMs: number = 100): Promise<LyricsData | null> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        const cached = captureCache.get(trackId);
+        if (cached) return cached;
+        await new Promise(resolve => setTimeout(resolve, pollMs));
     }
-    
-    try {
-        const session = (globalThis as any).Spicetify?.Platform?.Session;
-        if (session?.accessToken) {
-            return session.accessToken;
-        }
-    } catch (e) {
-    }
-    
-    throw new Error('Could not obtain Spotify access token');
+    return captureCache.get(trackId) ?? null;
 }
 
 
@@ -118,122 +202,10 @@ function getTrackIdFromUri(trackUri: string): string | null {
 }
 
 
-function getSpicyLyricsVersion(): string {
-    try {
-        const metadata = (globalThis as any)._spicy_lyrics_metadata;
-        if (metadata?.LoadedVersion && typeof metadata.LoadedVersion === 'string') {
-            return metadata.LoadedVersion;
-        }
-    } catch (e) {}
-    
-    try {
-        const session = (globalThis as any)._spicy_lyrics_session;
-        const ver = session?.SpicyLyrics?.GetCurrentVersion?.();
-        if (ver?.Text) {
-            return ver.Text;
-        }
-    } catch (e) {}
-    
-    try {
-        const stored = (globalThis as any).Spicetify?.LocalStorage?.get('SpicyLyrics-previous-version');
-        if (stored && /^\d+\.\d+\.\d+/.test(stored)) {
-            return stored;
-        }
-    } catch (e) {}
-    
-    return '5.19.11';
-}
-
-
-async function querySpicyLyricsAPI(trackId: string): Promise<LyricsData | null> {
-    const token = await getSpotifyAccessToken();
-    const spicyVersion = getSpicyLyricsVersion();
-
-    const lyricsOperationId = 'slt-lyrics-0';
-
-    const body = {
-        queries: [
-            {
-                operationId: lyricsOperationId,
-                operation: 'lyrics',
-                variables: {
-                    id: trackId,
-                    auth: 'SpicyLyrics-WebAuth',
-                },
-            },
-        ],
-        client: {
-            version: spicyVersion,
-        },
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    try {
-        const res = await fetch(`${SPICY_LYRICS_API}/query`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'SpicyLyrics-Version': spicyVersion,
-                'SpicyLyrics-WebAuth': `Bearer ${token}`,
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!res.ok) {
-            throw new Error(`SpicyLyrics API request failed with status ${res.status}`);
-        }
-
-        const data: QueryResponse = await res.json();
-        const queries = Array.isArray(data?.queries) ? data.queries : [];
-
-        let lyricsResult: QueryResult | undefined =
-            queries.find(q => q?.operationId === lyricsOperationId && q?.result)?.result;
-
-        if (!lyricsResult) {
-            lyricsResult = queries.find(q => q?.result && (q.result as any).httpStatus === 200)?.result;
-        }
-
-        if (!lyricsResult) {
-            warn('No lyrics query result found in API response', { queryCount: queries.length });
-            return null;
-        }
-
-        if (lyricsResult.httpStatus !== 200) {
-            return null;
-        }
-
-        let lyricsData: LyricsData;
-        if (lyricsResult.format === 'json') {
-            lyricsData = lyricsResult.data as LyricsData;
-        } else if (lyricsResult.format === 'text' && typeof lyricsResult.data === 'string') {
-            try {
-                lyricsData = JSON.parse(lyricsResult.data) as LyricsData;
-            } catch {
-                return null;
-            }
-        } else {
-            return null;
-        }
-
-        return lyricsData;
-    } catch (err) {
-        clearTimeout(timeoutId);
-        if ((err as Error).name === 'AbortError') {
-        }
-        throw err;
-    }
-}
-
-
 function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
     const lineData: LyricLineData[] = [];
     if (!lyrics.Content) return lineData;
-    
+
     for (const group of lyrics.Content) {
         if (group.Type === 'Instrumental') {
             const st = group.Lead?.StartTime ?? group.StartTime ?? 0;
@@ -246,7 +218,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             });
             continue;
         }
-        
+
         if (group.Lead?.Syllables && group.Lead.Syllables.length > 0) {
             const wordTimings: WordTimingData[] = [];
             let lineText = '';
@@ -283,7 +255,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             });
             continue;
         }
-        
+
         if (group.Text !== undefined && group.StartTime !== undefined && group.EndTime !== undefined) {
             lineData.push({
                 text: String(group.Text).trim(),
@@ -293,7 +265,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             });
             continue;
         }
-        
+
         if (group.Lead) {
             const leadText = (group.Lead as any).Text;
             if (leadText !== undefined) {
@@ -306,9 +278,9 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 continue;
             }
         }
-        
+
     }
-    
+
     return lineData;
 }
 
@@ -355,7 +327,7 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
     if (!trackId) {
         return null;
     }
-    
+
     if (trackId === cachedTrackId && cachedLineData) {
         return {
             lines: cachedLineData.map(l => l.text),
@@ -363,26 +335,26 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
             language: cachedLanguage || undefined
         };
     }
-    
+
     try {
-        const lyrics = await querySpicyLyricsAPI(trackId);
+        const lyrics = await waitForCapture(trackId);
         if (!lyrics) {
             return null;
         }
-        
+
         const lineData = extractLinesData(lyrics);
         if (lineData.length === 0) {
             return null;
         }
-        
+
         cachedTrackId = trackId;
         cachedLineData = lineData;
         cachedLanguage = lyrics.Language || null;
-        
+
         const lines = lineData.map(l => l.text);
         return { lines, lineData, language: lyrics.Language || undefined };
     } catch (err) {
-        warn('Failed to fetch lyrics from SpicyLyrics API:', err);
+        warn('Failed to capture lyrics from Spicy Lyrics fetch:', err);
         return null;
     }
 }
@@ -402,7 +374,7 @@ export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines:
     }
 
     try {
-        const lyrics = await querySpicyLyricsAPI(trackId);
+        const lyrics = await waitForCapture(trackId);
         if (!lyrics) {
             return null;
         }
@@ -422,7 +394,7 @@ export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines:
             language: lyrics.Language || undefined
         };
     } catch (err) {
-        warn('Failed to fetch lyrics for track URI:', trackUri, err);
+        warn('Failed to capture lyrics for track URI:', trackUri, err);
         return null;
     }
 }

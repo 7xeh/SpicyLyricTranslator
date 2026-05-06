@@ -3,11 +3,11 @@
   "name": "[SLT]  Spicy Lyric Translator",
   "description": "A Spicetify extension that adds real-time translation to Spicy Lyrics.",
   "author": "7xeh",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "main": "loader/SLT-loader.js",
   "preview": "https://github.com/7xeh/SpicyLyricTranslate/blob/main/preview.png?raw=true",
   "readme": "README.md",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": "https://github.com/7xeh/SpicyLyricTranslate",
   "spicetify": {
     "minVersion": "2.0.0"
