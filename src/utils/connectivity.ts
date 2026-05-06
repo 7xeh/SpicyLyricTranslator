@@ -2,15 +2,35 @@ import { storage } from './storage';
 
 const API_BASE = 'https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php';
 const CLIENT_ID_KEY = 'client-id';
+const CLIENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function createUuid(): string {
+    if (crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0'));
+    return [
+        hex.slice(0, 4).join(''),
+        hex.slice(4, 6).join(''),
+        hex.slice(6, 8).join(''),
+        hex.slice(8, 10).join(''),
+        hex.slice(10, 16).join('')
+    ].join('-');
+}
 
 function getOrCreateClientId(): string {
     let clientId = storage.get(CLIENT_ID_KEY);
-    if (!clientId) {
-        clientId = crypto.randomUUID?.() ?? 
-            (Array.from(crypto.getRandomValues(new Uint8Array(16)))
-                .map(b => b.toString(16).padStart(2, '0')).join(''));
+
+    if (!clientId || !CLIENT_ID_REGEX.test(clientId)) {
+        clientId = createUuid();
         storage.set(CLIENT_ID_KEY, clientId);
     }
+
     return clientId;
 }
 const HEARTBEAT_INTERVAL = 30000;

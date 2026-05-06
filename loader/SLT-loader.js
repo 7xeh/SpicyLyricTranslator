@@ -297,14 +297,32 @@
         const response = await fetch(`https://${API_HOST}/apps/spicylyrictranslate/api/version.php?action=version&_=${Date.now()}`);
         if (!response.ok) throw new Error('Failed to fetch version info');
         const data = await response.json();
+
+        if (!data.version || !/^\d+\.\d+\.\d+$/.test(data.version)) {
+            throw new Error('Invalid release version metadata');
+        }
+
+        const downloadUrl = data.download_url || `${EXTENSION_BASE_URL}/versions/v${data.version}/spicy-lyric-translater.js`;
+        const parsedDownloadUrl = new URL(downloadUrl, `https://${API_HOST}`);
+        if (parsedDownloadUrl.host !== API_HOST) {
+            throw new Error('Invalid release download URL');
+        }
+
         return {
             version: data.version,
-            hash: data.hash || data.sha256 || data.checksum || null
+            hash: data.hash || data.sha256 || data.checksum || null,
+            downloadUrl: parsedDownloadUrl.href
         };
     };
 
-    const loadExtension = async (version, expectedHash = null) => {
-        const url = `${EXTENSION_BASE_URL}/v${version}/spicy-lyric-translater.js?_=${Date.now()}`;
+    const withCacheBust = (url) => {
+        const parsedUrl = new URL(url, `https://${API_HOST}`);
+        parsedUrl.searchParams.set('_', Date.now().toString());
+        return parsedUrl.href;
+    };
+
+    const loadExtension = async (version, expectedHash = null, downloadUrl = null) => {
+        const url = withCacheBust(downloadUrl || `${EXTENSION_BASE_URL}/versions/v${version}/spicy-lyric-translater.js`);
         
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Failed to load extension: ${response.status}`);
@@ -327,7 +345,7 @@
             storageSet('hotfix-detected', 'true');
         }
 
-        window._spicy_lyric_translater_metadata = { 
+        const metadata = {
             LoadedVersion: version,
             LoadedAt: Date.now(),
             IsLoader: true,
@@ -346,6 +364,9 @@
                 log
             }
         };
+
+        window._spicy_lyric_translater_metadata = metadata;
+        window._spicy_lyric_translator_metadata = metadata;
         
         const script = document.createElement('script');
         script.textContent = code;
@@ -413,7 +434,7 @@
             lastFullCheckTime = now;
             log.debug(`Running full hotfix check for v${info.version}...`);
 
-            const url = `${EXTENSION_BASE_URL}/v${info.version}/spicy-lyric-translater.js?_=${now}`;
+            const url = withCacheBust(info.downloadUrl || `${EXTENSION_BASE_URL}/versions/v${info.version}/spicy-lyric-translater.js`);
             const response = await fetch(url);
             if (!response.ok) {
                 scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
@@ -500,7 +521,7 @@
         for (let i = 0; i < retries; i++) {
             try {
                 const info = await getVersionInfo();
-                await loadExtension(info.version, info.hash);
+                await loadExtension(info.version, info.hash, info.downloadUrl);
                 startHotfixChecker();
                 return;
             } catch (err) {

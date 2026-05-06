@@ -3,13 +3,34 @@ import { warn, error as logError } from './debug';
 
 declare const __VERSION__: string;
 
+const METADATA_KEYS = [
+    '_spicy_lyric_translater_metadata',
+    '_spicy_lyric_translator_metadata'
+] as const;
+
+function getLoaderMetadata(): any {
+    for (const key of METADATA_KEYS) {
+        const metadata = (window as any)[key];
+        if (metadata) return metadata;
+    }
+    return null;
+}
+
+function clearLoaderMetadata(): void {
+    for (const key of METADATA_KEYS) {
+        if ((window as any)[key]) {
+            (window as any)[key] = {};
+        }
+    }
+}
+
 const isLoaderMode = (): boolean => {
-    const metadata = (window as any)._spicy_lyric_translator_metadata;
+    const metadata = getLoaderMetadata();
     return metadata?.IsLoader === true;
 };
 
 const getLoadedVersion = (): string => {
-    const metadata = (window as any)._spicy_lyric_translator_metadata;
+    const metadata = getLoaderMetadata();
     if (metadata?.LoadedVersion) {
         return metadata.LoadedVersion;
     }
@@ -20,7 +41,7 @@ const CURRENT_VERSION = getLoadedVersion();
 const GITHUB_REPO = '7xeh/SpicyLyricTranslator';
 const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-const EXTENSION_FILENAME = 'spicy-lyric-translator.js';
+const EXTENSION_FILENAME = 'spicy-lyric-translater.js';
 
 const UPDATE_API_URL = 'https://7xeh.dev/apps/spicylyrictranslate/api/version.php';
 
@@ -154,7 +175,7 @@ export function getCurrentVersion(): VersionInfo {
 
 export function getContentHash(): string {
     try {
-        const metadata = (window as any)._spicy_lyric_translator_metadata;
+        const metadata = getLoaderMetadata();
         const hash = metadata?.ContentHash;
         if (typeof hash === 'string' && hash.length > 0) return hash;
     } catch {}
@@ -189,6 +210,10 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
             const version = parseVersion(data.version);
             
             if (version) {
+                const downloadUrl = typeof data.download_url === 'string' && data.download_url.length > 0
+                    ? data.download_url
+                    : `${UPDATE_API_URL}?action=download&version=${encodeURIComponent(version.text)}`;
+
                 return {
                     version,
                     release: {
@@ -199,12 +224,12 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
                         published_at: data.published_at || new Date().toISOString(),
                         assets: [{
                             name: EXTENSION_FILENAME,
-                            browser_download_url: data.download_url,
+                            browser_download_url: downloadUrl,
                             size: 0,
                             download_count: 0
                         }]
                     },
-                    downloadUrl: data.download_url
+                    downloadUrl
                 };
             }
         }
@@ -328,9 +353,7 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
         
         await new Promise(r => setTimeout(r, 300));
         
-        if ((window as any)._spicy_lyric_translator_metadata) {
-            (window as any)._spicy_lyric_translator_metadata = {};
-        }
+        clearLoaderMetadata();
         
         window.location.reload();
         
@@ -393,9 +416,7 @@ async function performSilentAutoUpdate(version: VersionInfo, releaseBody?: strin
             storage.set('pending-update-changelog', releaseBody);
         }
 
-        if ((window as any)._spicy_lyric_translator_metadata) {
-            (window as any)._spicy_lyric_translator_metadata = {};
-        }
+        clearLoaderMetadata();
 
         window.setTimeout(() => {
             window.location.reload();

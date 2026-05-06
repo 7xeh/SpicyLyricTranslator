@@ -4959,8 +4959,27 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/utils/updater.ts
+  var METADATA_KEYS = [
+    "_spicy_lyric_translater_metadata",
+    "_spicy_lyric_translator_metadata"
+  ];
+  function getLoaderMetadata() {
+    for (const key of METADATA_KEYS) {
+      const metadata = window[key];
+      if (metadata)
+        return metadata;
+    }
+    return null;
+  }
+  function clearLoaderMetadata() {
+    for (const key of METADATA_KEYS) {
+      if (window[key]) {
+        window[key] = {};
+      }
+    }
+  }
   var getLoadedVersion = () => {
-    const metadata = window._spicy_lyric_translator_metadata;
+    const metadata = getLoaderMetadata();
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
@@ -4970,7 +4989,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
   var RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-  var EXTENSION_FILENAME = "spicy-lyric-translator.js";
+  var EXTENSION_FILENAME = "spicy-lyric-translater.js";
   var UPDATE_API_URL = "https://7xeh.dev/apps/spicylyrictranslate/api/version.php";
   var updateState = {
     isUpdating: false,
@@ -5056,7 +5075,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
   function getContentHash() {
     try {
-      const metadata = window._spicy_lyric_translator_metadata;
+      const metadata = getLoaderMetadata();
       const hash = metadata?.ContentHash;
       if (typeof hash === "string" && hash.length > 0)
         return hash;
@@ -5087,6 +5106,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const data = await response.json();
         const version = parseVersion(data.version);
         if (version) {
+          const downloadUrl = typeof data.download_url === "string" && data.download_url.length > 0 ? data.download_url : `${UPDATE_API_URL}?action=download&version=${encodeURIComponent(version.text)}`;
           return {
             version,
             release: {
@@ -5097,12 +5117,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
               published_at: data.published_at || (/* @__PURE__ */ new Date()).toISOString(),
               assets: [{
                 name: EXTENSION_FILENAME,
-                browser_download_url: data.download_url,
+                browser_download_url: downloadUrl,
                 size: 0,
                 download_count: 0
               }]
             },
-            downloadUrl: data.download_url
+            downloadUrl
           };
         }
       }
@@ -5181,9 +5201,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       updateState.status = "Reloading Spotify...";
       updateProgress();
       await new Promise((r) => setTimeout(r, 300));
-      if (window._spicy_lyric_translator_metadata) {
-        window._spicy_lyric_translator_metadata = {};
-      }
+      clearLoaderMetadata();
       window.location.reload();
     } catch (error2) {
       error("Update failed:", error2);
@@ -8717,10 +8735,27 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   // src/utils/connectivity.ts
   var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
   var CLIENT_ID_KEY = "client-id";
+  var CLIENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  function createUuid() {
+    if (crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+    return [
+      hex.slice(0, 4).join(""),
+      hex.slice(4, 6).join(""),
+      hex.slice(6, 8).join(""),
+      hex.slice(8, 10).join(""),
+      hex.slice(10, 16).join("")
+    ].join("-");
+  }
   function getOrCreateClientId() {
     let clientId = storage.get(CLIENT_ID_KEY);
-    if (!clientId) {
-      clientId = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (!clientId || !CLIENT_ID_REGEX.test(clientId)) {
+      clientId = createUuid();
       storage.set(CLIENT_ID_KEY, clientId);
     }
     return clientId;
