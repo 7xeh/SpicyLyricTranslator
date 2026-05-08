@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import { OverlayMode } from './translationOverlay';
+import type { CustomApiFormat } from './translator';
 
 export interface TranslationQualityMeta {
     source: 'cache' | 'api';
@@ -18,6 +19,8 @@ export interface ExtensionState {
     preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
     customApiUrl: string;
     customApiKey: string;
+    customApiFormat: CustomApiFormat;
+    customApiModel: string;
     deeplApiKey: string;
     openaiApiKey: string;
     openaiModel: string;
@@ -45,6 +48,8 @@ export const state: ExtensionState = {
     preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom') || 'google',
     customApiUrl: storage.get('custom-api-url') || '',
     customApiKey: storage.getSecret('custom-api-key') || '',
+    customApiFormat: (storage.get('custom-api-format') as CustomApiFormat) || 'generic',
+    customApiModel: storage.get('custom-api-model') || '',
     deeplApiKey: storage.getSecret('deepl-api-key') || '',
     openaiApiKey: storage.getSecret('openai-api-key') || '',
     openaiModel: storage.get('openai-model') || 'gpt-4o-mini',

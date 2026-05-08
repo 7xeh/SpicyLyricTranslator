@@ -1,11 +1,11 @@
 import { storage } from './storage';
 import { state } from './state';
-import { SUPPORTED_LANGUAGES, clearTranslationCache, setPreferredApi } from './translator';
+import { clearTranslationCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
-import { OverlayMode } from './translationOverlay';
 import { reapplyTranslations } from './core';
 import { fetchLyricsForTrackUri } from './lyricsFetcher';
+import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 
@@ -73,6 +73,90 @@ function createNativeButton(id: string, label: string, buttonText: string, onCli
     return row;
 }
 
+function createNativeInput(id: string, label: string, type: string, currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'x-settings-row';
+    row.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml(placeholder)}">
+        </div>
+    `;
+
+    const input = row.querySelector('input') as HTMLInputElement;
+    if (input) input.value = currentValue;
+    input?.addEventListener('change', () => onChange(input.value));
+
+    return row;
+}
+
+function runSettingEffects(effects: SettingsEffect[], value: string | boolean): void {
+    if (effects.includes('qualityIndicatorClass')) {
+        document.body.classList.toggle('slt-hide-quality-indicator', !Boolean(value));
+    }
+    if (effects.includes('vocabularyModeClass')) {
+        document.body.classList.toggle('slt-vocabulary-mode', Boolean(value));
+    }
+    if (effects.includes('connectionIndicatorClass')) {
+        document.body.classList.toggle('slt-hide-connection-indicator', Boolean(value));
+    }
+    if (effects.includes('reapplyTranslations')) {
+        reapplyTranslations();
+    }
+}
+
+function updateSettingFieldVisibility(root: ParentNode, visibleDisplay: string): void {
+    const api = getCurrentApiPreference();
+    SETTINGS_SCHEMA.forEach(field => {
+        const row = root.querySelector(`[data-slt-setting-field="${field.id}"]`) as HTMLElement | null;
+        if (row) {
+            row.style.display = isSettingFieldVisible(field, api) ? visibleDisplay : 'none';
+        }
+    });
+}
+
+function handleSettingChange(field: SettingsField, value: string | boolean, root?: ParentNode, visibleDisplay: string = ''): void {
+    const effects = writeSettingValue(field, value);
+    runSettingEffects(effects, value);
+    if (effects.includes('providerVisibility') && root) {
+        updateSettingFieldVisibility(root, visibleDisplay);
+    }
+}
+
+function getNativeSettingInputId(field: SettingsField): string {
+    return `slt-settings.${field.id}`;
+}
+
+function getModalSettingInputId(field: SettingsField): string {
+    return `slt-${field.id}`;
+}
+
+function createNativeFieldRow(field: SettingsField, root: ParentNode): HTMLElement {
+    const id = getNativeSettingInputId(field);
+    const value = readSettingValue(field);
+    let row: HTMLElement;
+
+    if (field.type === 'toggle') {
+        row = createNativeToggle(id, field.label, Boolean(value), checked => handleSettingChange(field, checked, root));
+    } else if (field.type === 'select') {
+        row = createNativeDropdown(id, field.label, field.options || [], String(value), selected => handleSettingChange(field, selected, root));
+    } else {
+        row = createNativeInput(id, field.label, field.type === 'password' ? 'password' : 'text', String(value), field.placeholder || '', inputValue => handleSettingChange(field, inputValue, root));
+    }
+
+    row.dataset.sltSettingField = field.id;
+    row.style.display = isSettingFieldVisible(field) ? '' : 'none';
+    return row;
+}
+
+function renderNativeSettingsFields(container: HTMLElement): void {
+    SETTINGS_SCHEMA.forEach(field => {
+        container.appendChild(createNativeFieldRow(field, container));
+    });
+}
+
 function createNativeSettingsSection(): HTMLElement {
     const section = document.createElement('div');
     section.id = SETTINGS_ID;
@@ -84,263 +168,7 @@ function createNativeSettingsSection(): HTMLElement {
     
     const sectionContent = section.querySelector('.x-settings-section.fNaaQ0Cp8Yzy19j8') as HTMLElement;
 
-    const languageOptions = SUPPORTED_LANGUAGES.map(l => ({ value: l.code, text: l.name }));
-    sectionContent.appendChild(createNativeDropdown(
-        'slt-settings.target-language',
-        'Target Language',
-        languageOptions,
-        storage.get('target-language') || 'en',
-        (value) => {
-            storage.set('target-language', value);
-            state.targetLanguage = value;
-        }
-    ));
-    
-    sectionContent.appendChild(createNativeDropdown(
-        'slt-settings.overlay-mode',
-        'Translation Display',
-        [
-            { value: 'replace', text: 'Replace (default)' },
-            { value: 'interleaved', text: 'Below each line' }
-        ],
-        storage.get('overlay-mode') || 'replace',
-        (value) => {
-            const mode = value as OverlayMode;
-            storage.set('overlay-mode', mode);
-            state.overlayMode = mode;
-            reapplyTranslations();
-        }
-    ));
-    
-    sectionContent.appendChild(createNativeDropdown(
-        'slt-settings.preferred-api',
-        'Translation API',
-        [
-            { value: 'google', text: 'Google Translate' },
-            { value: 'libretranslate', text: 'LibreTranslate' },
-            { value: 'deepl', text: 'DeepL' },
-            { value: 'openai', text: 'OpenAI' },
-            { value: 'gemini', text: 'Gemini' },
-            { value: 'custom', text: 'Custom API' }
-        ],
-        storage.get('preferred-api') || 'google',
-        (value) => {
-            const api = value as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
-            storage.set('preferred-api', api);
-            state.preferredApi = api;
-            setPreferredApi(api, storage.get('custom-api-url') || '', {
-                customApiKey: state.customApiKey,
-                deeplApiKey: state.deeplApiKey,
-                openaiApiKey: state.openaiApiKey,
-                openaiModel: state.openaiModel,
-                geminiApiKey: state.geminiApiKey
-            });
-            
-            const customRow = document.getElementById('slt-settings-custom-api-row');
-            const customKeyRow = document.getElementById('slt-settings-custom-api-key-row');
-            const deeplRow = document.getElementById('slt-settings-deepl-key-row');
-            const openaiRow = document.getElementById('slt-settings-openai-key-row');
-            const openaiModelRow = document.getElementById('slt-settings-openai-model-row');
-            const geminiRow = document.getElementById('slt-settings-gemini-key-row');
-            if (customRow) customRow.style.display = api === 'custom' ? '' : 'none';
-            if (customKeyRow) customKeyRow.style.display = api === 'custom' ? '' : 'none';
-            if (deeplRow) deeplRow.style.display = api === 'deepl' ? '' : 'none';
-            if (openaiRow) openaiRow.style.display = api === 'openai' ? '' : 'none';
-            if (openaiModelRow) openaiModelRow.style.display = api === 'openai' ? '' : 'none';
-            if (geminiRow) geminiRow.style.display = api === 'gemini' ? '' : 'none';
-        }
-    ));
-    
-    const customApiRow = document.createElement('div');
-    customApiRow.id = 'slt-settings-custom-api-row';
-    customApiRow.className = 'x-settings-row';
-    customApiRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
-    customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
-        </div>
-    `;
-    const customApiInput = customApiRow.querySelector('input') as HTMLInputElement;
-    if (customApiInput) customApiInput.value = storage.get('custom-api-url') || '';
-    customApiInput?.addEventListener('change', () => {
-        storage.set('custom-api-url', customApiInput.value);
-        state.customApiUrl = customApiInput.value;
-        setPreferredApi(state.preferredApi, customApiInput.value, {
-            customApiKey: state.customApiKey,
-            deeplApiKey: state.deeplApiKey,
-            openaiApiKey: state.openaiApiKey,
-            openaiModel: state.openaiModel,
-            geminiApiKey: state.geminiApiKey
-        });
-    });
-    sectionContent.appendChild(customApiRow);
-
-    // Custom API Key row
-    const customApiKeyRow = document.createElement('div');
-    customApiKeyRow.id = 'slt-settings-custom-api-key-row';
-    customApiKeyRow.className = 'x-settings-row';
-    customApiKeyRow.style.display = storage.get('preferred-api') === 'custom' ? '' : 'none';
-    customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="API key">
-        </div>
-    `;
-    const customApiKeyInput = customApiKeyRow.querySelector('input') as HTMLInputElement;
-    if (customApiKeyInput) customApiKeyInput.value = storage.getSecret('custom-api-key') || '';
-    customApiKeyInput?.addEventListener('change', () => {
-        storage.setSecret('custom-api-key', customApiKeyInput.value);
-        state.customApiKey = customApiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
-    });
-    sectionContent.appendChild(customApiKeyRow);
-
-    // DeepL API Key row
-    const deeplKeyRow = document.createElement('div');
-    deeplKeyRow.id = 'slt-settings-deepl-key-row';
-    deeplKeyRow.className = 'x-settings-row';
-    deeplKeyRow.style.display = storage.get('preferred-api') === 'deepl' ? '' : 'none';
-    deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
-        </div>
-    `;
-    const deeplKeyInput = deeplKeyRow.querySelector('input') as HTMLInputElement;
-    if (deeplKeyInput) deeplKeyInput.value = storage.getSecret('deepl-api-key') || '';
-    deeplKeyInput?.addEventListener('change', () => {
-        storage.setSecret('deepl-api-key', deeplKeyInput.value);
-        state.deeplApiKey = deeplKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
-    });
-    sectionContent.appendChild(deeplKeyRow);
-
-    // OpenAI API Key row
-    const openaiKeyRow = document.createElement('div');
-    openaiKeyRow.id = 'slt-settings-openai-key-row';
-    openaiKeyRow.className = 'x-settings-row';
-    openaiKeyRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
-    openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="sk-...">
-        </div>
-    `;
-    const openaiKeyInput = openaiKeyRow.querySelector('input') as HTMLInputElement;
-    if (openaiKeyInput) openaiKeyInput.value = storage.getSecret('openai-api-key') || '';
-    openaiKeyInput?.addEventListener('change', () => {
-        storage.setSecret('openai-api-key', openaiKeyInput.value);
-        state.openaiApiKey = openaiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
-    });
-    sectionContent.appendChild(openaiKeyRow);
-
-    // OpenAI Model row
-    const openaiModelRow = document.createElement('div');
-    openaiModelRow.id = 'slt-settings-openai-model-row';
-    openaiModelRow.className = 'x-settings-row';
-    openaiModelRow.style.display = storage.get('preferred-api') === 'openai' ? '' : 'none';
-    openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="gpt-4o-mini">
-        </div>
-    `;
-    const openaiModelInput = openaiModelRow.querySelector('input') as HTMLInputElement;
-    if (openaiModelInput) openaiModelInput.value = storage.get('openai-model') || 'gpt-4o-mini';
-    openaiModelInput?.addEventListener('change', () => {
-        storage.set('openai-model', openaiModelInput.value);
-        state.openaiModel = openaiModelInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
-    });
-    sectionContent.appendChild(openaiModelRow);
-
-    // Gemini API Key row
-    const geminiKeyRow = document.createElement('div');
-    geminiKeyRow.id = 'slt-settings-gemini-key-row';
-    geminiKeyRow.className = 'x-settings-row';
-    geminiKeyRow.style.display = storage.get('preferred-api') === 'gemini' ? '' : 'none';
-    geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="AIza...">
-        </div>
-    `;
-    const geminiKeyInput = geminiKeyRow.querySelector('input') as HTMLInputElement;
-    if (geminiKeyInput) geminiKeyInput.value = storage.getSecret('gemini-api-key') || '';
-    geminiKeyInput?.addEventListener('change', () => {
-        storage.setSecret('gemini-api-key', geminiKeyInput.value);
-        state.geminiApiKey = geminiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiKeyInput.value });
-    });
-    sectionContent.appendChild(geminiKeyRow);
-    
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.auto-translate',
-        'Auto-Translate on Song Change',
-        storage.get('auto-translate') === 'true',
-        (checked) => {
-            storage.set('auto-translate', String(checked));
-            state.autoTranslate = checked;
-        }
-    ));
-    
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.show-notifications',
-        'Show Notifications',
-        storage.get('show-notifications') !== 'false',
-        (checked) => {
-            storage.set('show-notifications', String(checked));
-            state.showNotifications = checked;
-        }
-    ));
-
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.show-quality-indicator',
-        'Show Translation Quality Indicator',
-        storage.get('show-quality-indicator') !== 'false',
-        (checked) => {
-            storage.set('show-quality-indicator', String(checked));
-            state.showQualityIndicator = checked;
-            document.body.classList.toggle('slt-hide-quality-indicator', !checked);
-        }
-    ));
-
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.vocabulary-mode',
-        'Vocabulary / Learning Mode',
-        storage.get('vocabulary-mode') === 'true',
-        (checked) => {
-            storage.set('vocabulary-mode', String(checked));
-            state.vocabularyMode = checked;
-            document.body.classList.toggle('slt-vocabulary-mode', checked);
-            reapplyTranslations();
-        }
-    ));
-
-    sectionContent.appendChild(createNativeToggle(
-        'slt-settings.hide-connection-indicator',
-        'Hide Connection Status',
-        storage.get('hide-connection-indicator') === 'true',
-        (checked) => {
-            storage.set('hide-connection-indicator', String(checked));
-            state.hideConnectionIndicator = checked;
-            document.body.classList.toggle('slt-hide-connection-indicator', checked);
-        }
-    ));
+    renderNativeSettingsFields(sectionContent);
 
     sectionContent.appendChild(createNativeButton(
         'slt-settings.view-cache',
@@ -554,62 +382,128 @@ function watchForSettingsPage(): void {
     });
 }
 
+function renderModalSettingsMarkup(): string {
+    return SETTINGS_SCHEMA.map(field => {
+        const id = getModalSettingInputId(field);
+        const value = readSettingValue(field);
+        const display = isSettingFieldVisible(field) ? 'grid' : 'none';
+        const description = field.description ? `<span class="slt-description">${escapeHtml(field.description)}</span>` : '';
+
+        if (field.type === 'toggle') {
+            return `
+        <div class="slt-modal-field slt-modal-toggle-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <label class="slt-toggle">
+                    <input type="checkbox" id="${id}" ${value === true ? 'checked' : ''}>
+                    <span class="slt-toggle-slider"></span>
+                </label>
+            </div>
+        </div>`;
+        }
+
+        if (field.type === 'select') {
+            return `
+        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <select id="${id}">
+                    ${(field.options || []).map(option => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.text)}</option>`).join('')}
+                </select>
+            </div>
+        </div>`;
+        }
+
+        return `
+        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <input type="${field.type}" id="${id}" value="${escapeHtml(String(value))}" placeholder="${escapeHtml(field.placeholder || '')}">
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function bindModalSettingsFields(container: HTMLElement): void {
+    SETTINGS_SCHEMA.forEach(field => {
+        const control = container.querySelector(`#${getModalSettingInputId(field)}`) as HTMLInputElement | HTMLSelectElement | null;
+        if (!control) return;
+
+        const eventName = field.type === 'toggle' ? 'change' : 'change';
+        control.addEventListener(eventName, () => {
+            const value = field.type === 'toggle'
+                ? (control as HTMLInputElement).checked
+                : control.value;
+            handleSettingChange(field, value, container, 'grid');
+        });
+    });
+}
+
 function createSettingsUI(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'slt-settings-container';
     container.innerHTML = `
         <style>
             .slt-settings-container {
-                padding: 20px;
+                padding: 18px 22px 22px;
                 display: flex;
                 flex-direction: column;
-                gap: 18px;
-                width: min(760px, 92vw);
+                gap: 10px;
+                width: min(680px, 90vw);
                 max-width: 100%;
-                max-height: 78vh;
+                max-height: 72vh;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: auto;
             }
-            .slt-setting-row {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
+            .slt-modal-field {
+                grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
+                align-items: center;
+                gap: 18px;
+                padding: 9px 0;
             }
-            .slt-setting-row label {
-                font-size: 15px;
+            .slt-modal-field-copy {
+                min-width: 0;
+            }
+            .slt-modal-field-copy label {
+                display: block;
+                font-size: 14px;
                 font-weight: 500;
                 color: var(--spice-text);
+                line-height: 1.35;
             }
-            .slt-setting-row select,
-            .slt-setting-row input[type="text"] {
-                padding: 10px 14px;
+            .slt-modal-field-control {
+                display: flex;
+                justify-content: flex-end;
+                min-width: 0;
+            }
+            .slt-modal-field select,
+            .slt-modal-field input[type="text"],
+            .slt-modal-field input[type="password"] {
+                width: 100%;
+                min-height: 40px;
+                padding: 8px 12px;
                 border-radius: 4px;
                 border: 1px solid var(--spice-button-disabled);
                 background: var(--spice-card);
                 color: var(--spice-text);
-                font-size: 15px;
+                font-size: 14px;
+                box-sizing: border-box;
             }
-            .slt-setting-row select:focus,
-            .slt-setting-row input[type="text"]:focus {
+            .slt-modal-field select:focus,
+            .slt-modal-field input[type="text"]:focus,
+            .slt-modal-field input[type="password"]:focus {
                 outline: none;
                 border-color: var(--spice-button);
-            }
-            .slt-toggle-row {
-                flex-direction: row;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-            }
-            .slt-toggle-row > label:first-child {
-                margin: 0;
-                line-height: 1.35;
-                flex: 1;
-            }
-            .slt-toggle-row .slt-toggle {
-                margin-left: auto;
-                flex-shrink: 0;
             }
             .slt-toggle {
                 position: relative;
@@ -650,15 +544,16 @@ function createSettingsUI(): HTMLElement {
                 transform: translateX(20px);
             }
             .slt-button {
-                padding: 11px 22px;
+                padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
                 background: var(--spice-button);
                 color: var(--spice-text);
-                font-size: 15px;
+                font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
                 transition: transform 0.1s, background 0.2s;
+                white-space: nowrap;
             }
             .slt-button:hover {
                 transform: scale(1.02);
@@ -667,267 +562,90 @@ function createSettingsUI(): HTMLElement {
             .slt-button:active {
                 transform: scale(0.98);
             }
+            .slt-button.secondary {
+                background: var(--spice-card);
+                border: 1px solid var(--spice-button-disabled);
+            }
             .slt-description {
-                font-size: 13px;
+                display: block;
+                font-size: 12px;
                 color: var(--spice-subtext);
-                margin-top: 0;
+                margin-top: 3px;
                 line-height: 1.35;
+            }
+            .slt-modal-actions,
+            .slt-modal-footer {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                flex-wrap: wrap;
+                padding-top: 12px;
+            }
+            .slt-modal-actions {
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                margin-top: 4px;
+            }
+            .slt-modal-footer {
+                color: var(--spice-subtext);
+                font-size: 13px;
+                padding-bottom: 2px;
+            }
+            .slt-modal-footer-buttons {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .slt-modal-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .slt-modal-shortcut {
+                color: var(--spice-subtext);
+                font-size: 12px;
+                opacity: 0.7;
+                padding-top: 2px;
+            }
+            @media (max-width: 620px) {
+                .slt-modal-field {
+                    grid-template-columns: 1fr;
+                    gap: 8px;
+                }
+                .slt-modal-field-control {
+                    justify-content: stretch;
+                }
             }
         </style>
         
-        <div class="slt-setting-row">
-            <label for="slt-target-language">Target Language</label>
-            <select id="slt-target-language">
-                ${SUPPORTED_LANGUAGES.map(l => 
-                    `<option value="${l.code}" ${l.code === (storage.get('target-language') || 'en') ? 'selected' : ''}>${l.name}</option>`
-                ).join('')}
-            </select>
+        ${renderModalSettingsMarkup()}
+
+        <div class="slt-modal-actions">
+            <button class="slt-button secondary" id="slt-view-cache">View Translation Cache</button>
         </div>
         
-        <div class="slt-setting-row">
-            <label for="slt-overlay-mode">Translation Display</label>
-            <select id="slt-overlay-mode">
-                <option value="replace" ${(storage.get('overlay-mode') || 'replace') === 'replace' ? 'selected' : ''}>Replace (default)</option>
-                <option value="interleaved" ${storage.get('overlay-mode') === 'interleaved' ? 'selected' : ''}>Below each line</option>
-            </select>
-            <span class="slt-description">How translated lyrics are displayed</span>
-        </div>
-        
-        <div class="slt-setting-row">
-            <label for="slt-preferred-api">Translation API</label>
-            <select id="slt-preferred-api">
-                <option value="google" ${(storage.get('preferred-api') || 'google') === 'google' ? 'selected' : ''}>Google Translate</option>
-                <option value="libretranslate" ${storage.get('preferred-api') === 'libretranslate' ? 'selected' : ''}>LibreTranslate</option>
-                <option value="deepl" ${storage.get('preferred-api') === 'deepl' ? 'selected' : ''}>DeepL</option>
-                <option value="openai" ${storage.get('preferred-api') === 'openai' ? 'selected' : ''}>OpenAI</option>
-                <option value="gemini" ${storage.get('preferred-api') === 'gemini' ? 'selected' : ''}>Gemini</option>
-                <option value="custom" ${storage.get('preferred-api') === 'custom' ? 'selected' : ''}>Custom API</option>
-            </select>
-        </div>
-        
-        <div class="slt-setting-row" id="slt-custom-api-row" style="display: ${storage.get('preferred-api') === 'custom' ? 'flex' : 'none'}">
-            <label for="slt-custom-api-url">Custom API URL</label>
-            <input type="text" id="slt-custom-api-url" value="${storage.get('custom-api-url') || ''}" placeholder="https://your-api.com/translate">
-            <span class="slt-description">LibreTranslate-compatible API endpoint</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-custom-api-key-row" style="display: ${storage.get('preferred-api') === 'custom' ? 'flex' : 'none'}">
-            <label for="slt-custom-api-key">Custom API Key (optional)</label>
-            <input type="password" id="slt-custom-api-key" value="${storage.get('custom-api-key') || ''}" placeholder="API key">
-        </div>
-
-        <div class="slt-setting-row" id="slt-deepl-key-row" style="display: ${storage.get('preferred-api') === 'deepl' ? 'flex' : 'none'}">
-            <label for="slt-deepl-api-key">DeepL API Key</label>
-            <input type="password" id="slt-deepl-api-key" value="${storage.get('deepl-api-key') || ''}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
-            <span class="slt-description">Get a free key at deepl.com/pro-api</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-openai-key-row" style="display: ${storage.get('preferred-api') === 'openai' ? 'flex' : 'none'}">
-            <label for="slt-openai-api-key">OpenAI API Key</label>
-            <input type="password" id="slt-openai-api-key" value="${storage.get('openai-api-key') || ''}" placeholder="sk-...">
-        </div>
-
-        <div class="slt-setting-row" id="slt-openai-model-row" style="display: ${storage.get('preferred-api') === 'openai' ? 'flex' : 'none'}">
-            <label for="slt-openai-model">OpenAI Model</label>
-            <input type="text" id="slt-openai-model" value="${storage.get('openai-model') || 'gpt-4o-mini'}" placeholder="gpt-4o-mini">
-            <span class="slt-description">e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-gemini-key-row" style="display: ${storage.get('preferred-api') === 'gemini' ? 'flex' : 'none'}">
-            <label for="slt-gemini-api-key">Gemini API Key</label>
-            <input type="password" id="slt-gemini-api-key" value="${storage.get('gemini-api-key') || ''}" placeholder="AIza...">
-            <span class="slt-description">Get a key at aistudio.google.com/apikey</span>
-        </div>
-        
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-auto-translate">Auto-Translate on Song Change</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-auto-translate" ${storage.get('auto-translate') === 'true' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-        
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-show-notifications">Show Notifications</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-show-notifications" ${storage.get('show-notifications') !== 'false' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-show-quality-indicator">Show Translation Quality Indicator</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-show-quality-indicator" ${storage.get('show-quality-indicator') !== 'false' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-vocabulary-mode">Vocabulary / Learning Mode</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-vocabulary-mode" ${storage.get('vocabulary-mode') === 'true' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-hide-connection-indicator">Hide Connection Status</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-hide-connection-indicator" ${storage.get('hide-connection-indicator') === 'true' ? 'checked' : ''}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row">
-            <button class="slt-button" id="slt-view-cache">View Translation Cache</button>
-        </div>
-        
-        <div class="slt-setting-row" style="flex-direction: row; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div class="slt-modal-footer">
             <div>
                 <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
                 ${(() => { const h = getContentHashShort(); return h ? `<span style="margin: 0 8px; color: var(--spice-subtext);">·</span><span style="font-size: 12px; color: var(--spice-subtext); font-family: 'JetBrains Mono','Consolas',monospace;">${h}</span>` : ''; })()}
                 <span style="margin: 0 8px; color: var(--spice-subtext);">•</span>
                 <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
             </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button class="slt-button" id="slt-view-changelog-popup" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">View Changelog</button>
-                <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            <div class="slt-modal-footer-buttons">
+                <button class="slt-button secondary" id="slt-view-changelog-popup">View Changelog</button>
+                <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
             </div>
         </div>
         
-        <div class="slt-setting-row" style="padding-top: 0; opacity: 0.6;">
-            <span class="slt-description">Keyboard shortcut: Alt+T to toggle translation</span>
-        </div>
+        <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
     
     setTimeout(() => {
-        const targetLangSelect = container.querySelector('#slt-target-language') as HTMLSelectElement;
-        const overlayModeSelect = container.querySelector('#slt-overlay-mode') as HTMLSelectElement;
-        const preferredApiSelect = container.querySelector('#slt-preferred-api') as HTMLSelectElement;
-        const customApiUrlInput = container.querySelector('#slt-custom-api-url') as HTMLInputElement;
-        const customApiRow = container.querySelector('#slt-custom-api-row') as HTMLElement;
-        const customApiKeyInput = container.querySelector('#slt-custom-api-key') as HTMLInputElement;
-        const customApiKeyRow = container.querySelector('#slt-custom-api-key-row') as HTMLElement;
-        const deeplApiKeyInput = container.querySelector('#slt-deepl-api-key') as HTMLInputElement;
-        const deeplKeyRow = container.querySelector('#slt-deepl-key-row') as HTMLElement;
-        const openaiApiKeyInput = container.querySelector('#slt-openai-api-key') as HTMLInputElement;
-        const openaiKeyRow = container.querySelector('#slt-openai-key-row') as HTMLElement;
-        const openaiModelInput = container.querySelector('#slt-openai-model') as HTMLInputElement;
-        const openaiModelRow = container.querySelector('#slt-openai-model-row') as HTMLElement;
-        const geminiApiKeyInput = container.querySelector('#slt-gemini-api-key') as HTMLInputElement;
-        const geminiKeyRow = container.querySelector('#slt-gemini-key-row') as HTMLElement;
-        const autoTranslateCheckbox = container.querySelector('#slt-auto-translate') as HTMLInputElement;
-        const showNotificationsCheckbox = container.querySelector('#slt-show-notifications') as HTMLInputElement;
-        const showQualityIndicatorCheckbox = container.querySelector('#slt-show-quality-indicator') as HTMLInputElement;
-        const vocabularyModeCheckbox = container.querySelector('#slt-vocabulary-mode') as HTMLInputElement;
-        const hideConnectionIndicatorCheckbox = container.querySelector('#slt-hide-connection-indicator') as HTMLInputElement;
+        bindModalSettingsFields(container);
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
-        
-        targetLangSelect?.addEventListener('change', () => {
-            storage.set('target-language', targetLangSelect.value);
-            state.targetLanguage = targetLangSelect.value;
-        });
-        
-        overlayModeSelect?.addEventListener('change', () => {
-            const mode = overlayModeSelect.value as OverlayMode;
-            storage.set('overlay-mode', mode);
-            state.overlayMode = mode;
-            reapplyTranslations();
-        });
-        
-        preferredApiSelect?.addEventListener('change', () => {
-            const api = preferredApiSelect.value as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
-            storage.set('preferred-api', api);
-            state.preferredApi = api;
-            setPreferredApi(api, customApiUrlInput?.value || '', {
-                customApiKey: state.customApiKey,
-                deeplApiKey: state.deeplApiKey,
-                openaiApiKey: state.openaiApiKey,
-                openaiModel: state.openaiModel,
-                geminiApiKey: state.geminiApiKey
-            });
-            
-            if (customApiRow) customApiRow.style.display = api === 'custom' ? 'flex' : 'none';
-            if (customApiKeyRow) customApiKeyRow.style.display = api === 'custom' ? 'flex' : 'none';
-            if (deeplKeyRow) deeplKeyRow.style.display = api === 'deepl' ? 'flex' : 'none';
-            if (openaiKeyRow) openaiKeyRow.style.display = api === 'openai' ? 'flex' : 'none';
-            if (openaiModelRow) openaiModelRow.style.display = api === 'openai' ? 'flex' : 'none';
-            if (geminiKeyRow) geminiKeyRow.style.display = api === 'gemini' ? 'flex' : 'none';
-        });
-        
-        customApiUrlInput?.addEventListener('change', () => {
-            storage.set('custom-api-url', customApiUrlInput.value);
-            state.customApiUrl = customApiUrlInput.value;
-            setPreferredApi(state.preferredApi, customApiUrlInput.value, {
-                customApiKey: state.customApiKey,
-                deeplApiKey: state.deeplApiKey,
-                openaiApiKey: state.openaiApiKey,
-                openaiModel: state.openaiModel,
-                geminiApiKey: state.geminiApiKey
-            });
-        });
-
-        customApiKeyInput?.addEventListener('change', () => {
-            storage.set('custom-api-key', customApiKeyInput.value);
-            state.customApiKey = customApiKeyInput.value;
-            setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
-        });
-
-        deeplApiKeyInput?.addEventListener('change', () => {
-            storage.set('deepl-api-key', deeplApiKeyInput.value);
-            state.deeplApiKey = deeplApiKeyInput.value;
-            setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplApiKeyInput.value });
-        });
-
-        openaiApiKeyInput?.addEventListener('change', () => {
-            storage.set('openai-api-key', openaiApiKeyInput.value);
-            state.openaiApiKey = openaiApiKeyInput.value;
-            setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiApiKeyInput.value });
-        });
-
-        openaiModelInput?.addEventListener('change', () => {
-            storage.set('openai-model', openaiModelInput.value);
-            state.openaiModel = openaiModelInput.value;
-            setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
-        });
-
-        geminiApiKeyInput?.addEventListener('change', () => {
-            storage.set('gemini-api-key', geminiApiKeyInput.value);
-            state.geminiApiKey = geminiApiKeyInput.value;
-            setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiApiKeyInput.value });
-        });
-        
-        autoTranslateCheckbox?.addEventListener('change', () => {
-            storage.set('auto-translate', String(autoTranslateCheckbox.checked));
-            state.autoTranslate = autoTranslateCheckbox.checked;
-        });
-        
-        showNotificationsCheckbox?.addEventListener('change', () => {
-            storage.set('show-notifications', String(showNotificationsCheckbox.checked));
-            state.showNotifications = showNotificationsCheckbox.checked;
-        });
-
-        showQualityIndicatorCheckbox?.addEventListener('change', () => {
-            storage.set('show-quality-indicator', String(showQualityIndicatorCheckbox.checked));
-            state.showQualityIndicator = showQualityIndicatorCheckbox.checked;
-            document.body.classList.toggle('slt-hide-quality-indicator', !showQualityIndicatorCheckbox.checked);
-        });
-
-        vocabularyModeCheckbox?.addEventListener('change', () => {
-            storage.set('vocabulary-mode', String(vocabularyModeCheckbox.checked));
-            state.vocabularyMode = vocabularyModeCheckbox.checked;
-            document.body.classList.toggle('slt-vocabulary-mode', vocabularyModeCheckbox.checked);
-            reapplyTranslations();
-        });
-
-        hideConnectionIndicatorCheckbox?.addEventListener('change', () => {
-            storage.set('hide-connection-indicator', String(hideConnectionIndicatorCheckbox.checked));
-            state.hideConnectionIndicator = hideConnectionIndicatorCheckbox.checked;
-            document.body.classList.toggle('slt-hide-connection-indicator', hideConnectionIndicatorCheckbox.checked);
-        });
 
         viewCacheButton?.addEventListener('click', () => {
             Spicetify.PopupModal?.hide();
@@ -1107,15 +825,18 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
 
     const content = document.createElement('div');
     content.className = 'slt-lyrics-viewer';
+    const copyLabel = 'Copy Lyrics';
+    const backToCacheLabel = '< Back to Cache';
     content.innerHTML = `
         <style>
             .slt-lyrics-viewer {
-                width: min(2640px, calc(96vw - 28px));
-                max-width: calc(96vw - 28px);
-                max-height: 76vh;
+                width: min(760px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
+                padding: 18px 22px 22px;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: hidden;
@@ -1129,17 +850,20 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 display: flex;
                 justify-content: flex-end;
                 gap: 8px;
+                flex-wrap: wrap;
             }
             .slt-lyrics-copy {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-button);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
                 transition: opacity 0.2s, background 0.2s;
+                white-space: nowrap;
             }
             .slt-lyrics-copy:hover {
                 opacity: 0.85;
@@ -1148,14 +872,16 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 background: #1db954;
             }
             .slt-lyrics-back {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-main-elevated);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
+                white-space: nowrap;
             }
             .slt-lyrics-back:hover {
                 opacity: 0.85;
@@ -1168,7 +894,13 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 border-radius: 8px;
                 overflow-y: auto;
                 overflow-x: hidden;
-                max-height: 66vh;
+                max-height: min(54vh, 560px);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            #slt-lyrics-rows {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
             }
             .slt-lyrics-row {
                 display: grid;
@@ -1184,18 +916,30 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 white-space: pre-wrap;
                 word-break: break-word;
                 overflow-wrap: anywhere;
+                min-width: 0;
             }
             .slt-lyrics-head {
                 font-size: 11px;
                 text-transform: uppercase;
-                letter-spacing: 0.04em;
                 color: var(--spice-subtext);
-                font-weight: 600;
+                font-weight: 700;
+            }
+            @media (max-width: 620px) {
+                .slt-lyrics-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-lyrics-toolbar {
+                    justify-content: flex-start;
+                }
+                .slt-lyrics-row {
+                    grid-template-columns: 1fr;
+                }
             }
         </style>
         <div class="slt-lyrics-toolbar">
-            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">📋 Copy Lyrics</button>
-            <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">← Back to Cache</button>
+            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">Copy Lyrics</button>
+            <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">&lt; Back to Cache</button>
         </div>
         <div class="slt-lyrics-header">Track ID: ${escapeHtml(getTrackIdFromUri(trackUri))}</div>
         <div class="slt-lyrics-grid">
@@ -1208,6 +952,11 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             </div>
         </div>
     `;
+
+    const copyAllButton = content.querySelector('#slt-lyrics-copy-all') as HTMLButtonElement | null;
+    const backToCacheButton = content.querySelector('#slt-lyrics-back-to-cache') as HTMLButtonElement | null;
+    if (copyAllButton) copyAllButton.textContent = copyLabel;
+    if (backToCacheButton) backToCacheButton.textContent = backToCacheLabel;
 
     if (Spicetify.PopupModal) {
         Spicetify.PopupModal.display({
@@ -1229,35 +978,35 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
         const lines: string[] = [];
         const trackTitle = trackCache.trackName || getTrackIdFromUri(trackUri);
         const trackArtist = trackCache.artistName || '';
-        lines.push(`${trackTitle}${trackArtist ? ' — ' + trackArtist : ''}`);
-        lines.push(`${sourceLang.toUpperCase()} → ${targetLang.toUpperCase()}`);
-        lines.push('─'.repeat(40));
+        lines.push(`${trackTitle}${trackArtist ? ' - ' + trackArtist : ''}`);
+        lines.push(`${sourceLang.toUpperCase()} -> ${targetLang.toUpperCase()}`);
+        lines.push('-'.repeat(40));
         rows.forEach(row => {
             const cols = row.querySelectorAll('.slt-lyrics-col');
             if (cols.length >= 2) {
                 const src = (cols[0].textContent || '').trim();
                 const tgt = (cols[1].textContent || '').trim();
                 if (src || tgt) {
-                    lines.push(src || '♪');
-                    if (tgt && tgt !== src) lines.push(`  → ${tgt}`);
+                    lines.push(src || '');
+                    if (tgt && tgt !== src) lines.push(`  -> ${tgt}`);
                     lines.push('');
                 }
             }
         });
-        lines.push('─'.repeat(40));
+        lines.push('-'.repeat(40));
         lines.push('Exported from Spicy Lyric Translator');
         const text = lines.join('\n');
         try {
             await navigator.clipboard.writeText(text);
-            copyBtn.textContent = '✓ Copied!';
+            copyBtn.textContent = 'Copied!';
             copyBtn.classList.add('slt-copied');
             setTimeout(() => {
-                copyBtn.textContent = '📋 Copy Lyrics';
+                copyBtn.textContent = copyLabel;
                 copyBtn.classList.remove('slt-copied');
             }, 2000);
         } catch (e) {
-            copyBtn.textContent = '✗ Failed';
-            setTimeout(() => { copyBtn.textContent = '📋 Copy Lyrics'; }, 2000);
+            copyBtn.textContent = 'Failed';
+            setTimeout(() => { copyBtn.textContent = copyLabel; }, 2000);
         }
     });
 
@@ -1303,19 +1052,24 @@ function createCacheViewerUI(): HTMLElement {
     container.innerHTML = `
         <style>
             .slt-cache-viewer {
-                padding: 16px;
+                padding: 18px 22px 22px;
                 display: flex;
                 flex-direction: column;
-                gap: 16px;
-                max-height: 60vh;
+                gap: 12px;
+                width: min(680px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
+                box-sizing: border-box;
+                overflow: hidden;
             }
             .slt-cache-stats {
                 display: grid;
                 grid-template-columns: repeat(2, 1fr);
                 gap: 12px;
-                padding: 12px;
+                padding: 14px;
                 background: var(--spice-card);
                 border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-stat {
                 display: flex;
@@ -1326,28 +1080,33 @@ function createCacheViewerUI(): HTMLElement {
                 font-size: 11px;
                 color: var(--spice-subtext);
                 text-transform: uppercase;
+                line-height: 1.35;
             }
             .slt-stat-value {
                 font-size: 18px;
-                font-weight: 600;
+                font-weight: 700;
                 color: var(--spice-text);
+                line-height: 1.25;
             }
             .slt-cache-list {
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
                 overflow-y: auto;
-                max-height: 300px;
+                min-height: 160px;
+                max-height: min(42vh, 420px);
                 padding-right: 8px;
             }
             .slt-cache-item {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
-                justify-content: space-between;
-                padding: 10px 12px;
+                padding: 12px 14px;
                 background: var(--spice-card);
-                border-radius: 6px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
                 gap: 12px;
+                min-width: 0;
             }
             .slt-cache-item-info {
                 display: flex;
@@ -1357,35 +1116,42 @@ function createCacheViewerUI(): HTMLElement {
                 min-width: 0;
             }
             .slt-cache-item-title {
-                font-size: 13px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
                 color: var(--spice-text);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                line-height: 1.35;
             }
             .slt-cache-item-artist {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--spice-subtext);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                line-height: 1.35;
             }
             .slt-cache-item-meta {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--spice-subtext);
-                opacity: 0.7;
+                opacity: 0.78;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
             }
             .slt-cache-delete {
-                padding: 6px 10px;
+                min-height: 36px;
+                padding: 8px 14px;
                 border-radius: 4px;
                 border: none;
                 background: rgba(255, 80, 80, 0.2);
                 color: #ff5050;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
-                transition: background 0.2s;
+                transition: opacity 0.2s, background 0.2s;
                 flex-shrink: 0;
+                white-space: nowrap;
             }
             .slt-cache-delete:hover {
                 background: rgba(255, 80, 80, 0.4);
@@ -1393,32 +1159,38 @@ function createCacheViewerUI(): HTMLElement {
             .slt-cache-item-actions {
                 display: flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
                 flex-shrink: 0;
             }
             .slt-cache-action {
-                padding: 6px 10px;
+                min-height: 36px;
+                padding: 8px 14px;
                 border-radius: 4px;
                 border: none;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
-                transition: opacity 0.2s;
+                transition: opacity 0.2s, background 0.2s;
                 color: var(--spice-text);
                 background: var(--spice-main-elevated);
+                white-space: nowrap;
             }
             .slt-cache-action:hover {
                 opacity: 0.85;
             }
             .slt-cache-delete-all {
-                padding: 10px 20px;
+                min-height: 40px;
+                padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
                 background: rgba(255, 80, 80, 0.2);
                 color: #ff5050;
-                font-size: 14px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
                 transition: background 0.2s;
+                white-space: normal;
+                text-align: center;
             }
             .slt-cache-delete-all:hover {
                 background: rgba(255, 80, 80, 0.4);
@@ -1428,6 +1200,8 @@ function createCacheViewerUI(): HTMLElement {
                 padding: 24px;
                 color: var(--spice-subtext);
                 font-size: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
             }
             .slt-cache-actions {
                 display: flex;
@@ -1439,21 +1213,40 @@ function createCacheViewerUI(): HTMLElement {
                 justify-content: flex-end;
             }
             .slt-cache-back {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-main-elevated);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
+                white-space: nowrap;
             }
             .slt-cache-back:hover {
                 opacity: 0.85;
             }
+            @media (max-width: 620px) {
+                .slt-cache-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-cache-stats {
+                    grid-template-columns: 1fr;
+                }
+                .slt-cache-item {
+                    grid-template-columns: 1fr;
+                    align-items: stretch;
+                }
+                .slt-cache-item-actions {
+                    justify-content: flex-start;
+                    flex-wrap: wrap;
+                }
+            }
         </style>
         <div class="slt-cache-toolbar">
-            <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">← Back to Settings</button>
+            <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
         
         <div class="slt-cache-stats">
@@ -1489,7 +1282,7 @@ function createCacheViewerUI(): HTMLElement {
                             <div class="slt-cache-item-info">
                                 <span class="slt-cache-item-title">${escapeHtml(displayTitle)}</span>
                                 ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml(displayArtist)}</span>` : ''}
-                                <span class="slt-cache-item-meta">${track.sourceLang} → ${track.targetLang} · ${track.lineCount} lines · ${formatDate(track.timestamp)}</span>
+                                <span class="slt-cache-item-meta">${track.sourceLang} -> ${track.targetLang} - ${track.lineCount} lines - ${formatDate(track.timestamp)}</span>
                             </div>
                             <div class="slt-cache-item-actions">
                                 <button class="slt-cache-action slt-cache-play" data-index="${index}">Play</button>

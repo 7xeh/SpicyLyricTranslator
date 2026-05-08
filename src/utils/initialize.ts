@@ -2,6 +2,7 @@ import { state } from './state';
 import { storage } from './storage';
 import { setPreferredApi, clearTranslationCache, getCacheStats, getCachedTranslations, deleteCachedTranslation } from './translator';
 import { clearLyricsCache } from './lyricsFetcher';
+import { getCurrentTrackUri } from './trackCache';
 import { injectStyles } from '../styles/main';
 import { registerSettings } from './settings';
 import { initConnectionIndicator, getConnectionState, refreshConnection } from './connectivity';
@@ -29,6 +30,8 @@ export async function initialize(): Promise<void> {
     
     setPreferredApi(state.preferredApi, state.customApiUrl, {
         customApiKey: state.customApiKey,
+        customApiFormat: state.customApiFormat,
+        customApiModel: state.customApiModel,
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
         openaiModel: state.openaiModel,
@@ -62,10 +65,13 @@ export async function initialize(): Promise<void> {
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     
     setupViewModeObserver();
+    let lastPlayerTrackUri = getCurrentTrackUri();
     
     if (Spicetify.Player?.addEventListener) {
         Spicetify.Player.addEventListener('songchange', () => {
             const previousFirstLine = getLyricsFirstLineText();
+            const previousTrackUri = lastPlayerTrackUri;
+            lastPlayerTrackUri = getCurrentTrackUri();
             state.isTranslating = false;
             state.translatedLyrics.clear();
             state._translationsByIndex = undefined;
@@ -80,7 +86,7 @@ export async function initialize(): Promise<void> {
                     storage.set('translation-enabled', 'true');
                     updateButtonState();
                 }
-                waitForLyricsAndTranslate(20, 800, previousFirstLine);
+                waitForLyricsAndTranslate(20, 800, previousFirstLine, previousTrackUri);
             }
         });
     }

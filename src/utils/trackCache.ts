@@ -63,6 +63,104 @@ function getCacheKey(trackUri: string, targetLang: string): string {
     return `${CACHE_KEY_PREFIX}${normalizeTrackUri(trackUri)}:${targetLang}`;
 }
 
+function parseFullKey(fullKey: string): { trackUri: string; targetLang: string } | null {
+    const lastColonIdx = fullKey.lastIndexOf(':');
+    if (lastColonIdx <= 0 || lastColonIdx === fullKey.length - 1) return null;
+    return {
+        trackUri: fullKey.substring(0, lastColonIdx),
+        targetLang: fullKey.substring(lastColonIdx + 1)
+    };
+}
+
+function parseCacheKey(cacheKey: string): { trackUri: string; targetLang: string } | null {
+    if (!cacheKey.startsWith(CACHE_KEY_PREFIX)) return null;
+    return parseFullKey(cacheKey.substring(CACHE_KEY_PREFIX.length));
+}
+
+function removeFullKey(storage: typeof localStorage, fullKey: string): boolean {
+    const parsed = parseFullKey(fullKey);
+    if (!parsed) return false;
+    storage.removeItem(getCacheKey(parsed.trackUri, parsed.targetLang));
+    return true;
+}
+
+function collectNativeCacheKeys(storage: typeof localStorage): string[] {
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        if (key && key.startsWith(CACHE_KEY_PREFIX)) {
+            keys.push(key);
+        }
+    }
+    return keys;
+}
+
+function parseTrackCacheEntry(entryStr: string): TrackCacheEntry | null {
+    const entry: TrackCacheEntry = JSON.parse(entryStr);
+    if (!entry || typeof entry.timestamp !== 'number' || !Array.isArray(entry.lines)) {
+        return null;
+    }
+    return entry;
+}
+
+function pruneTrackCache(maxTracks = CACHE_MAX_TRACKS): void {
+    const storage = getStorage();
+    if (!storage) return;
+
+    const now = Date.now();
+    const seen = new Set<string>();
+    const entries: Array<{ fullKey: string; cacheKey: string; timestamp: number }> = [];
+    const index = getCacheIndex();
+
+    const addEntry = (fullKey: string, cacheKey: string): void => {
+        if (seen.has(fullKey)) return;
+
+        try {
+            const entryStr = storage.getItem(cacheKey);
+            if (!entryStr) return;
+
+            const entry = parseTrackCacheEntry(entryStr);
+            if (!entry || now - entry.timestamp > CACHE_EXPIRY_MS) {
+                storage.removeItem(cacheKey);
+                return;
+            }
+
+            seen.add(fullKey);
+            entries.push({ fullKey, cacheKey, timestamp: entry.timestamp });
+        } catch (e) {
+            storage.removeItem(cacheKey);
+        }
+    };
+
+    index.trackUris.forEach(fullKey => {
+        const parsed = parseFullKey(fullKey);
+        if (!parsed) return;
+        addEntry(fullKey, getCacheKey(parsed.trackUri, parsed.targetLang));
+    });
+
+    collectNativeCacheKeys(storage).forEach(cacheKey => {
+        const parsed = parseCacheKey(cacheKey);
+        if (!parsed) {
+            storage.removeItem(cacheKey);
+            return;
+        }
+        addEntry(`${parsed.trackUri}:${parsed.targetLang}`, cacheKey);
+    });
+
+    entries.sort((a, b) => a.timestamp - b.timestamp);
+
+    const removeCount = Math.max(0, entries.length - maxTracks);
+    if (removeCount > 0) {
+        entries.slice(0, removeCount).forEach(entry => {
+            storage.removeItem(entry.cacheKey);
+        });
+    }
+
+    saveCacheIndex({
+        trackUris: entries.slice(removeCount).map(entry => entry.fullKey)
+    });
+}
+
 export function getTrackCache(trackUri: string, targetLang: string): TrackCacheEntry | null {
     const storage = getStorage();
     if (!storage || !trackUri) return null;
@@ -73,10 +171,16 @@ export function getTrackCache(trackUri: string, targetLang: string): TrackCacheE
         const entryStr = storage.getItem(cacheKey);
         if (!entryStr) return null;
         
-        const entry: TrackCacheEntry = JSON.parse(entryStr);
+        const entry = parseTrackCacheEntry(entryStr);
+        if (!entry) {
+            storage.removeItem(cacheKey);
+            pruneTrackCache();
+            return null;
+        }
         
         if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
             storage.removeItem(cacheKey);
+            pruneTrackCache();
             return null;
         }
         
@@ -100,6 +204,8 @@ export function setTrackCache(
 ): void {
     const storage = getStorage();
     if (!storage || !trackUri || !lines.length) return;
+
+    pruneTrackCache();
     
     const cacheKey = getCacheKey(trackUri, targetLang);
     
@@ -121,21 +227,10 @@ export function setTrackCache(
         storage.setItem(cacheKey, JSON.stringify(entry));
         const index = getCacheIndex();
         const fullKey = `${trackUri}:${targetLang}`;
-        
-        if (!index.trackUris.includes(fullKey)) {
-            index.trackUris.push(fullKey);
-            
-            if (index.trackUris.length > CACHE_MAX_TRACKS) {
-                const oldestKey = index.trackUris.shift();
-                if (oldestKey) {
-                    const [oldUri, oldLang] = oldestKey.split(':').slice(0, -1).join(':').split(':');
-                    const oldCacheKey = getCacheKey(oldUri || oldestKey, oldLang || targetLang);
-                    storage.removeItem(oldCacheKey);
-                }
-            }
-            
-            saveCacheIndex(index);
-        }
+        index.trackUris = index.trackUris.filter(k => k !== fullKey);
+        index.trackUris.push(fullKey);
+        saveCacheIndex(index);
+        pruneTrackCache();
     } catch (e) {
         warn('Failed to set track cache:', e);
         
@@ -143,6 +238,12 @@ export function setTrackCache(
             pruneOldestEntries(10);
             try {
                 storage.setItem(cacheKey, JSON.stringify(entry));
+                const index = getCacheIndex();
+                const fullKey = `${trackUri}:${targetLang}`;
+                index.trackUris = index.trackUris.filter(k => k !== fullKey);
+                index.trackUris.push(fullKey);
+                saveCacheIndex(index);
+                pruneTrackCache();
             } catch (retryError) {
                 warn('Still failed after pruning:', retryError);
             }
@@ -169,9 +270,13 @@ export function deleteTrackCache(trackUri: string, targetLang?: string): void {
     } else {
         const keysToRemove = index.trackUris.filter(k => k.startsWith(trackUri + ':'));
         keysToRemove.forEach(k => {
-            const [uri, lang] = [k.substring(0, k.lastIndexOf(':')), k.substring(k.lastIndexOf(':') + 1)];
-            const cacheKey = getCacheKey(uri, lang);
-            storage.removeItem(cacheKey);
+            removeFullKey(storage, k);
+        });
+        const nativePrefix = `${CACHE_KEY_PREFIX}${normalizeTrackUri(trackUri)}:`;
+        collectNativeCacheKeys(storage).forEach(key => {
+            if (key.startsWith(nativePrefix)) {
+                storage.removeItem(key);
+            }
         });
         index.trackUris = index.trackUris.filter(k => !k.startsWith(trackUri + ':'));
     }
@@ -187,11 +292,7 @@ function pruneOldestEntries(count: number): void {
     const toRemove = index.trackUris.splice(0, count);
     
     toRemove.forEach(fullKey => {
-        const lastColonIdx = fullKey.lastIndexOf(':');
-        const uri = fullKey.substring(0, lastColonIdx);
-        const lang = fullKey.substring(lastColonIdx + 1);
-        const cacheKey = getCacheKey(uri, lang);
-        storage.removeItem(cacheKey);
+        removeFullKey(storage, fullKey);
     });
     
     saveCacheIndex(index);
@@ -204,12 +305,9 @@ export function clearAllTrackCache(): void {
     const index = getCacheIndex();
     
     index.trackUris.forEach(fullKey => {
-        const lastColonIdx = fullKey.lastIndexOf(':');
-        const uri = fullKey.substring(0, lastColonIdx);
-        const lang = fullKey.substring(lastColonIdx + 1);
-        const cacheKey = getCacheKey(uri, lang);
-        storage.removeItem(cacheKey);
+        removeFullKey(storage, fullKey);
     });
+    collectNativeCacheKeys(storage).forEach(key => storage.removeItem(key));
     
     storage.removeItem(CACHE_INDEX_KEY);
 }
@@ -222,6 +320,7 @@ export function getTrackCacheStats(): {
 } {
     const storage = getStorage();
     if (!storage) return { trackCount: 0, totalLines: 0, oldestTimestamp: null, sizeBytes: 0 };
+    pruneTrackCache();
     
     let trackCount = 0;
     let totalLines = 0;
@@ -247,7 +346,8 @@ export function getTrackCacheStats(): {
                     const entryStr = nativeStorage.getItem(key);
                     if (entryStr) {
                         sizeBytes += entryStr.length * 2;
-                        const entry: TrackCacheEntry = JSON.parse(entryStr);
+                        const entry = parseTrackCacheEntry(entryStr);
+                        if (!entry) return;
                         totalLines += entry.lines.length;
                         
                         if (oldestTimestamp === null || entry.timestamp < oldestTimestamp) {
@@ -279,7 +379,8 @@ export function getTrackCacheStats(): {
             if (entryStr) {
                 trackCount++;
                 sizeBytes += entryStr.length * 2;
-                const entry: TrackCacheEntry = JSON.parse(entryStr);
+                const entry = parseTrackCacheEntry(entryStr);
+                if (!entry) return;
                 totalLines += entry.lines.length;
                 
                 if (oldestTimestamp === null || entry.timestamp < oldestTimestamp) {
@@ -311,6 +412,7 @@ export function getAllCachedTracks(): Array<{
 }> {
     const storage = getStorage();
     if (!storage) return [];
+    pruneTrackCache();
     
     const tracks: Array<{
         trackUri: string;
@@ -333,22 +435,20 @@ export function getAllCachedTracks(): Array<{
                     try {
                         const entryStr = nativeStorage.getItem(key);
                         if (entryStr) {
-                            const entry: TrackCacheEntry = JSON.parse(entryStr);
-                            const keyParts = key.substring(CACHE_KEY_PREFIX.length);
-                            const lastColonIdx = keyParts.lastIndexOf(':');
-                            const uri = keyParts.substring(0, lastColonIdx).replace(/_/g, ':');
-                            const lang = keyParts.substring(lastColonIdx + 1);
-                            
-                            tracks.push({
-                                trackUri: uri,
-                                targetLang: lang,
-                                sourceLang: entry.lang,
-                                lineCount: entry.lines.length,
-                                timestamp: entry.timestamp,
-                                api: entry.api,
-                                trackName: entry.trackName,
-                                artistName: entry.artistName
-                            });
+                            const entry = parseTrackCacheEntry(entryStr);
+                            const parsed = parseCacheKey(key);
+                            if (entry && parsed) {
+                                tracks.push({
+                                    trackUri: parsed.trackUri,
+                                    targetLang: parsed.targetLang,
+                                    sourceLang: entry.lang,
+                                    lineCount: entry.lines.length,
+                                    timestamp: entry.timestamp,
+                                    api: entry.api,
+                                    trackName: entry.trackName,
+                                    artistName: entry.artistName
+                                });
+                            }
                         }
                     } catch (e) {
 
@@ -374,7 +474,8 @@ export function getAllCachedTracks(): Array<{
         try {
             const entryStr = storage.getItem(cacheKey);
             if (entryStr) {
-                const entry: TrackCacheEntry = JSON.parse(entryStr);
+                const entry = parseTrackCacheEntry(entryStr);
+                if (!entry) return;
                 tracks.push({
                     trackUri: uri,
                     targetLang: lang,

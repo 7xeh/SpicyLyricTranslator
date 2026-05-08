@@ -36,6 +36,43 @@ const LATIN_LANGUAGE_WORD_SETS: { code: string; words: Set<string> }[] = LATIN_L
     words: new Set(lang.words)
 }));
 
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+    english: 'en',
+    spanish: 'es',
+    french: 'fr',
+    german: 'de',
+    italian: 'it',
+    portuguese: 'pt',
+    dutch: 'nl',
+    polish: 'pl',
+    turkish: 'tr',
+    japanese: 'ja',
+    chinese: 'zh',
+    korean: 'ko',
+    arabic: 'ar',
+    hebrew: 'he',
+    russian: 'ru',
+    thai: 'th',
+    hindi: 'hi',
+    greek: 'el'
+};
+
+export function normalizeLanguageCode(code?: string | null): string {
+    if (!code) return 'unknown';
+    const value = code.trim().toLowerCase();
+    if (!value || value === 'unknown' || value === 'auto') return value || 'unknown';
+
+    const nameKey = value
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (LANGUAGE_NAME_TO_CODE[nameKey]) return LANGUAGE_NAME_TO_CODE[nameKey];
+    if (LANGUAGE_NAME_TO_CODE[value]) return LANGUAGE_NAME_TO_CODE[value];
+    return value.replace(/_/g, '-').split('-')[0];
+}
+
 function getSampleIndices(length: number): number[] {
     if (length <= 0) return [];
 
@@ -348,12 +385,8 @@ export async function detectLyricsLanguage(
 
 export function isSameLanguage(source: string, target: string): boolean {
     if (!source || source === 'unknown') return false;
-    
-    const normalizeCode = (code: string): string => {
-        return code.toLowerCase().split('-')[0].split('_')[0];
-    };
-    
-    return normalizeCode(source) === normalizeCode(target);
+
+    return normalizeLanguageCode(source) === normalizeLanguageCode(target);
 }
 
 export function assessMixedLanguageContent(
@@ -361,10 +394,11 @@ export function assessMixedLanguageContent(
     targetLanguage: string
 ): { hasMixedContent: boolean; nonTargetCount: number; uncertainCount: number } {
     let nonTargetCount = 0;
+    let nonLatinNonTargetCount = 0;
     let uncertainCount = 0;
     let targetCount = 0;
     const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
-    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'el'].includes(targetBase);
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
     
     for (const line of lines) {
         const trimmed = (line || '').trim();
@@ -376,6 +410,7 @@ export function assessMixedLanguageContent(
 
         if (targetIsLatin && hasNonLatin) {
             nonTargetCount++;
+            nonLatinNonTargetCount++;
             continue;
         }
 
@@ -408,8 +443,13 @@ export function assessMixedLanguageContent(
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0) return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
 
-    const hasMixedContent = nonTargetCount >= 1 ||
-        (uncertainCount > 0 && uncertainCount / totalChecked > 0.3);
+    const nonTargetRatio = nonTargetCount / totalChecked;
+    const uncertainRatio = uncertainCount / totalChecked;
+    const hasMixedContent = nonLatinNonTargetCount > 0 ||
+        (targetIsLatin
+            ? nonTargetCount >= 2 && nonTargetRatio >= 0.18
+            : nonTargetCount >= 1) ||
+        (uncertainCount > 0 && uncertainRatio > 0.35 && nonTargetCount > 0);
 
     return { hasMixedContent, nonTargetCount, uncertainCount };
 }
@@ -450,7 +490,7 @@ export async function shouldSkipTranslation(
         }
     }
 
-    if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
+    if (quickHeuristic && quickHeuristic.confidence >= (isSameLanguage(quickHeuristic.code, targetLanguage) ? 0.65 : 0.8)) {
         if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
             const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
             if (mixedCheck.hasMixedContent) {

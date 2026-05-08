@@ -183,6 +183,8 @@ var SpicyLyricTranslater = (() => {
     preferredApi: storage.get("preferred-api") || "google",
     customApiUrl: storage.get("custom-api-url") || "",
     customApiKey: storage.getSecret("custom-api-key") || "",
+    customApiFormat: storage.get("custom-api-format") || "generic",
+    customApiModel: storage.get("custom-api-model") || "",
     deeplApiKey: storage.getSecret("deepl-api-key") || "",
     openaiApiKey: storage.getSecret("openai-api-key") || "",
     openaiModel: storage.get("openai-model") || "gpt-4o-mini",
@@ -253,6 +255,95 @@ var SpicyLyricTranslater = (() => {
   function getCacheKey(trackUri, targetLang) {
     return `${CACHE_KEY_PREFIX}${normalizeTrackUri(trackUri)}:${targetLang}`;
   }
+  function parseFullKey(fullKey) {
+    const lastColonIdx = fullKey.lastIndexOf(":");
+    if (lastColonIdx <= 0 || lastColonIdx === fullKey.length - 1)
+      return null;
+    return {
+      trackUri: fullKey.substring(0, lastColonIdx),
+      targetLang: fullKey.substring(lastColonIdx + 1)
+    };
+  }
+  function parseCacheKey(cacheKey) {
+    if (!cacheKey.startsWith(CACHE_KEY_PREFIX))
+      return null;
+    return parseFullKey(cacheKey.substring(CACHE_KEY_PREFIX.length));
+  }
+  function removeFullKey(storage2, fullKey) {
+    const parsed = parseFullKey(fullKey);
+    if (!parsed)
+      return false;
+    storage2.removeItem(getCacheKey(parsed.trackUri, parsed.targetLang));
+    return true;
+  }
+  function collectNativeCacheKeys(storage2) {
+    const keys = [];
+    for (let i = 0; i < storage2.length; i++) {
+      const key = storage2.key(i);
+      if (key && key.startsWith(CACHE_KEY_PREFIX)) {
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+  function parseTrackCacheEntry(entryStr) {
+    const entry = JSON.parse(entryStr);
+    if (!entry || typeof entry.timestamp !== "number" || !Array.isArray(entry.lines)) {
+      return null;
+    }
+    return entry;
+  }
+  function pruneTrackCache(maxTracks = CACHE_MAX_TRACKS) {
+    const storage2 = getStorage();
+    if (!storage2)
+      return;
+    const now = Date.now();
+    const seen = /* @__PURE__ */ new Set();
+    const entries = [];
+    const index = getCacheIndex();
+    const addEntry = (fullKey, cacheKey) => {
+      if (seen.has(fullKey))
+        return;
+      try {
+        const entryStr = storage2.getItem(cacheKey);
+        if (!entryStr)
+          return;
+        const entry = parseTrackCacheEntry(entryStr);
+        if (!entry || now - entry.timestamp > CACHE_EXPIRY_MS) {
+          storage2.removeItem(cacheKey);
+          return;
+        }
+        seen.add(fullKey);
+        entries.push({ fullKey, cacheKey, timestamp: entry.timestamp });
+      } catch (e) {
+        storage2.removeItem(cacheKey);
+      }
+    };
+    index.trackUris.forEach((fullKey) => {
+      const parsed = parseFullKey(fullKey);
+      if (!parsed)
+        return;
+      addEntry(fullKey, getCacheKey(parsed.trackUri, parsed.targetLang));
+    });
+    collectNativeCacheKeys(storage2).forEach((cacheKey) => {
+      const parsed = parseCacheKey(cacheKey);
+      if (!parsed) {
+        storage2.removeItem(cacheKey);
+        return;
+      }
+      addEntry(`${parsed.trackUri}:${parsed.targetLang}`, cacheKey);
+    });
+    entries.sort((a, b) => a.timestamp - b.timestamp);
+    const removeCount = Math.max(0, entries.length - maxTracks);
+    if (removeCount > 0) {
+      entries.slice(0, removeCount).forEach((entry) => {
+        storage2.removeItem(entry.cacheKey);
+      });
+    }
+    saveCacheIndex({
+      trackUris: entries.slice(removeCount).map((entry) => entry.fullKey)
+    });
+  }
   function getTrackCache(trackUri, targetLang) {
     const storage2 = getStorage();
     if (!storage2 || !trackUri)
@@ -262,9 +353,15 @@ var SpicyLyricTranslater = (() => {
       const entryStr = storage2.getItem(cacheKey);
       if (!entryStr)
         return null;
-      const entry = JSON.parse(entryStr);
+      const entry = parseTrackCacheEntry(entryStr);
+      if (!entry) {
+        storage2.removeItem(cacheKey);
+        pruneTrackCache();
+        return null;
+      }
       if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
         storage2.removeItem(cacheKey);
+        pruneTrackCache();
         return null;
       }
       return entry;
@@ -277,6 +374,7 @@ var SpicyLyricTranslater = (() => {
     const storage2 = getStorage();
     if (!storage2 || !trackUri || !lines.length)
       return;
+    pruneTrackCache();
     const cacheKey = getCacheKey(trackUri, targetLang);
     const meta = trackName ? { trackName, artistName } : getCurrentTrackMeta();
     const entry = {
@@ -294,24 +392,22 @@ var SpicyLyricTranslater = (() => {
       storage2.setItem(cacheKey, JSON.stringify(entry));
       const index = getCacheIndex();
       const fullKey = `${trackUri}:${targetLang}`;
-      if (!index.trackUris.includes(fullKey)) {
-        index.trackUris.push(fullKey);
-        if (index.trackUris.length > CACHE_MAX_TRACKS) {
-          const oldestKey = index.trackUris.shift();
-          if (oldestKey) {
-            const [oldUri, oldLang] = oldestKey.split(":").slice(0, -1).join(":").split(":");
-            const oldCacheKey = getCacheKey(oldUri || oldestKey, oldLang || targetLang);
-            storage2.removeItem(oldCacheKey);
-          }
-        }
-        saveCacheIndex(index);
-      }
+      index.trackUris = index.trackUris.filter((k) => k !== fullKey);
+      index.trackUris.push(fullKey);
+      saveCacheIndex(index);
+      pruneTrackCache();
     } catch (e) {
       warn("Failed to set track cache:", e);
       if (e instanceof Error && e.name === "QuotaExceededError") {
         pruneOldestEntries(10);
         try {
           storage2.setItem(cacheKey, JSON.stringify(entry));
+          const index = getCacheIndex();
+          const fullKey = `${trackUri}:${targetLang}`;
+          index.trackUris = index.trackUris.filter((k) => k !== fullKey);
+          index.trackUris.push(fullKey);
+          saveCacheIndex(index);
+          pruneTrackCache();
         } catch (retryError) {
           warn("Still failed after pruning:", retryError);
         }
@@ -331,9 +427,13 @@ var SpicyLyricTranslater = (() => {
     } else {
       const keysToRemove = index.trackUris.filter((k) => k.startsWith(trackUri + ":"));
       keysToRemove.forEach((k) => {
-        const [uri, lang] = [k.substring(0, k.lastIndexOf(":")), k.substring(k.lastIndexOf(":") + 1)];
-        const cacheKey = getCacheKey(uri, lang);
-        storage2.removeItem(cacheKey);
+        removeFullKey(storage2, k);
+      });
+      const nativePrefix = `${CACHE_KEY_PREFIX}${normalizeTrackUri(trackUri)}:`;
+      collectNativeCacheKeys(storage2).forEach((key) => {
+        if (key.startsWith(nativePrefix)) {
+          storage2.removeItem(key);
+        }
       });
       index.trackUris = index.trackUris.filter((k) => !k.startsWith(trackUri + ":"));
     }
@@ -346,11 +446,7 @@ var SpicyLyricTranslater = (() => {
     const index = getCacheIndex();
     const toRemove = index.trackUris.splice(0, count);
     toRemove.forEach((fullKey) => {
-      const lastColonIdx = fullKey.lastIndexOf(":");
-      const uri = fullKey.substring(0, lastColonIdx);
-      const lang = fullKey.substring(lastColonIdx + 1);
-      const cacheKey = getCacheKey(uri, lang);
-      storage2.removeItem(cacheKey);
+      removeFullKey(storage2, fullKey);
     });
     saveCacheIndex(index);
   }
@@ -360,18 +456,16 @@ var SpicyLyricTranslater = (() => {
       return;
     const index = getCacheIndex();
     index.trackUris.forEach((fullKey) => {
-      const lastColonIdx = fullKey.lastIndexOf(":");
-      const uri = fullKey.substring(0, lastColonIdx);
-      const lang = fullKey.substring(lastColonIdx + 1);
-      const cacheKey = getCacheKey(uri, lang);
-      storage2.removeItem(cacheKey);
+      removeFullKey(storage2, fullKey);
     });
+    collectNativeCacheKeys(storage2).forEach((key) => storage2.removeItem(key));
     storage2.removeItem(CACHE_INDEX_KEY);
   }
   function getTrackCacheStats() {
     const storage2 = getStorage();
     if (!storage2)
       return { trackCount: 0, totalLines: 0, oldestTimestamp: null, sizeBytes: 0 };
+    pruneTrackCache();
     let trackCount = 0;
     let totalLines = 0;
     let oldestTimestamp = null;
@@ -392,7 +486,9 @@ var SpicyLyricTranslater = (() => {
             const entryStr = nativeStorage.getItem(key);
             if (entryStr) {
               sizeBytes += entryStr.length * 2;
-              const entry = JSON.parse(entryStr);
+              const entry = parseTrackCacheEntry(entryStr);
+              if (!entry)
+                return;
               totalLines += entry.lines.length;
               if (oldestTimestamp === null || entry.timestamp < oldestTimestamp) {
                 oldestTimestamp = entry.timestamp;
@@ -419,7 +515,9 @@ var SpicyLyricTranslater = (() => {
         if (entryStr) {
           trackCount++;
           sizeBytes += entryStr.length * 2;
-          const entry = JSON.parse(entryStr);
+          const entry = parseTrackCacheEntry(entryStr);
+          if (!entry)
+            return;
           totalLines += entry.lines.length;
           if (oldestTimestamp === null || entry.timestamp < oldestTimestamp) {
             oldestTimestamp = entry.timestamp;
@@ -439,6 +537,7 @@ var SpicyLyricTranslater = (() => {
     const storage2 = getStorage();
     if (!storage2)
       return [];
+    pruneTrackCache();
     const tracks = [];
     const nativeStorage = typeof localStorage !== "undefined" ? localStorage : null;
     if (nativeStorage) {
@@ -449,21 +548,20 @@ var SpicyLyricTranslater = (() => {
             try {
               const entryStr = nativeStorage.getItem(key);
               if (entryStr) {
-                const entry = JSON.parse(entryStr);
-                const keyParts = key.substring(CACHE_KEY_PREFIX.length);
-                const lastColonIdx = keyParts.lastIndexOf(":");
-                const uri = keyParts.substring(0, lastColonIdx).replace(/_/g, ":");
-                const lang = keyParts.substring(lastColonIdx + 1);
-                tracks.push({
-                  trackUri: uri,
-                  targetLang: lang,
-                  sourceLang: entry.lang,
-                  lineCount: entry.lines.length,
-                  timestamp: entry.timestamp,
-                  api: entry.api,
-                  trackName: entry.trackName,
-                  artistName: entry.artistName
-                });
+                const entry = parseTrackCacheEntry(entryStr);
+                const parsed = parseCacheKey(key);
+                if (entry && parsed) {
+                  tracks.push({
+                    trackUri: parsed.trackUri,
+                    targetLang: parsed.targetLang,
+                    sourceLang: entry.lang,
+                    lineCount: entry.lines.length,
+                    timestamp: entry.timestamp,
+                    api: entry.api,
+                    trackName: entry.trackName,
+                    artistName: entry.artistName
+                  });
+                }
               }
             } catch (e) {
             }
@@ -485,7 +583,9 @@ var SpicyLyricTranslater = (() => {
       try {
         const entryStr = storage2.getItem(cacheKey);
         if (entryStr) {
-          const entry = JSON.parse(entryStr);
+          const entry = parseTrackCacheEntry(entryStr);
+          if (!entry)
+            return;
           tracks.push({
             trackUri: uri,
             targetLang: lang,
@@ -556,6 +656,39 @@ var SpicyLyricTranslater = (() => {
     code: lang.code,
     words: new Set(lang.words)
   }));
+  var LANGUAGE_NAME_TO_CODE = {
+    english: "en",
+    spanish: "es",
+    french: "fr",
+    german: "de",
+    italian: "it",
+    portuguese: "pt",
+    dutch: "nl",
+    polish: "pl",
+    turkish: "tr",
+    japanese: "ja",
+    chinese: "zh",
+    korean: "ko",
+    arabic: "ar",
+    hebrew: "he",
+    russian: "ru",
+    thai: "th",
+    hindi: "hi",
+    greek: "el"
+  };
+  function normalizeLanguageCode(code) {
+    if (!code)
+      return "unknown";
+    const value = code.trim().toLowerCase();
+    if (!value || value === "unknown" || value === "auto")
+      return value || "unknown";
+    const nameKey = value.replace(/\([^)]*\)/g, " ").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (LANGUAGE_NAME_TO_CODE[nameKey])
+      return LANGUAGE_NAME_TO_CODE[nameKey];
+    if (LANGUAGE_NAME_TO_CODE[value])
+      return LANGUAGE_NAME_TO_CODE[value];
+    return value.replace(/_/g, "-").split("-")[0];
+  }
   function getSampleIndices(length) {
     if (length <= 0)
       return [];
@@ -879,17 +1012,15 @@ var SpicyLyricTranslater = (() => {
   function isSameLanguage(source, target) {
     if (!source || source === "unknown")
       return false;
-    const normalizeCode = (code) => {
-      return code.toLowerCase().split("-")[0].split("_")[0];
-    };
-    return normalizeCode(source) === normalizeCode(target);
+    return normalizeLanguageCode(source) === normalizeLanguageCode(target);
   }
   function assessMixedLanguageContent(lines, targetLanguage) {
     let nonTargetCount = 0;
+    let nonLatinNonTargetCount = 0;
     let uncertainCount = 0;
     let targetCount = 0;
     const targetBase = targetLanguage.toLowerCase().split("-")[0].split("_")[0];
-    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "el"].includes(targetBase);
+    const targetIsLatin = !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el"].includes(targetBase);
     for (const line of lines) {
       const trimmed = (line || "").trim();
       if (!trimmed || /^[•♪♫\s\-–—]+$/.test(trimmed))
@@ -899,6 +1030,7 @@ var SpicyLyricTranslater = (() => {
         continue;
       if (targetIsLatin && hasNonLatin) {
         nonTargetCount++;
+        nonLatinNonTargetCount++;
         continue;
       }
       if (targetIsLatin && !hasNonLatin && targetBase !== "ja") {
@@ -926,7 +1058,9 @@ var SpicyLyricTranslater = (() => {
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0)
       return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
-    const hasMixedContent = nonTargetCount >= 1 || uncertainCount > 0 && uncertainCount / totalChecked > 0.3;
+    const nonTargetRatio = nonTargetCount / totalChecked;
+    const uncertainRatio = uncertainCount / totalChecked;
+    const hasMixedContent = nonLatinNonTargetCount > 0 || (targetIsLatin ? nonTargetCount >= 2 && nonTargetRatio >= 0.18 : nonTargetCount >= 1) || uncertainCount > 0 && uncertainRatio > 0.35 && nonTargetCount > 0;
     return { hasMixedContent, nonTargetCount, uncertainCount };
   }
   async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
@@ -957,7 +1091,7 @@ var SpicyLyricTranslater = (() => {
         quickHeuristic = { code: "ja", confidence: romaji.confidence };
       }
     }
-    if (quickHeuristic && quickHeuristic.confidence >= 0.8) {
+    if (quickHeuristic && quickHeuristic.confidence >= (isSameLanguage(quickHeuristic.code, targetLanguage) ? 0.65 : 0.8)) {
       if (isSameLanguage(quickHeuristic.code, targetLanguage)) {
         const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
         if (mixedCheck.hasMixedContent) {
@@ -996,6 +1130,8 @@ var SpicyLyricTranslater = (() => {
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
+  var customApiFormat = "generic";
+  var customApiModel = "";
   var deeplApiKey = "";
   var openaiApiKey = "";
   var openaiModel = "gpt-4o-mini";
@@ -1177,6 +1313,10 @@ var SpicyLyricTranslater = (() => {
     if (apiKeys) {
       if (apiKeys.customApiKey !== void 0)
         customApiKey = apiKeys.customApiKey;
+      if (apiKeys.customApiFormat !== void 0)
+        customApiFormat = apiKeys.customApiFormat;
+      if (apiKeys.customApiModel !== void 0)
+        customApiModel = apiKeys.customApiModel;
       if (apiKeys.deeplApiKey !== void 0)
         deeplApiKey = apiKeys.deeplApiKey;
       if (apiKeys.openaiApiKey !== void 0)
@@ -1189,6 +1329,24 @@ var SpicyLyricTranslater = (() => {
   }
   var CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1e3;
   var MAX_CACHE_ENTRIES = 500;
+  function pruneTranslationCache(cache, now = Date.now()) {
+    let changed = false;
+    Object.keys(cache).forEach((key) => {
+      const entry = cache[key];
+      if (!entry || typeof entry.timestamp !== "number" || now - entry.timestamp > CACHE_EXPIRY) {
+        delete cache[key];
+        changed = true;
+      }
+    });
+    const keys = Object.keys(cache);
+    if (keys.length > MAX_CACHE_ENTRIES) {
+      keys.map((key) => ({ key, timestamp: cache[key].timestamp })).sort((a, b) => a.timestamp - b.timestamp).slice(0, keys.length - MAX_CACHE_ENTRIES).forEach((item) => {
+        delete cache[item.key];
+        changed = true;
+      });
+    }
+    return changed;
+  }
   var SUPPORTED_LANGUAGES = [
     { code: "af", name: "Afrikaans" },
     { code: "sq", name: "Albanian" },
@@ -1303,7 +1461,7 @@ var SpicyLyricTranslater = (() => {
     const key = `${targetLang}:${text}`;
     const cached = cache[key];
     if (cached) {
-      if (Date.now() - cached.timestamp < CACHE_EXPIRY) {
+      if (typeof cached.timestamp === "number" && Date.now() - cached.timestamp < CACHE_EXPIRY) {
         const normalized = normalizeTranslatedLine(cached.translation || "");
         if (normalized !== cached.translation) {
           cache[key] = {
@@ -1332,6 +1490,9 @@ var SpicyLyricTranslater = (() => {
         }
         return normalized;
       }
+      delete cache[key];
+      pruneTranslationCache(cache);
+      storage_default.setJSON("translation-cache", cache);
     }
     return null;
   }
@@ -1344,32 +1505,16 @@ var SpicyLyricTranslater = (() => {
       timestamp: Date.now(),
       api
     };
-    const keys = Object.keys(cache);
-    if (keys.length > MAX_CACHE_ENTRIES) {
-      const now = Date.now();
-      const sorted = keys.map((k) => ({ key: k, entry: cache[k] })).sort((a, b) => a.entry.timestamp - b.entry.timestamp);
-      const toRemove = sorted.filter(
-        (item) => now - item.entry.timestamp > CACHE_EXPIRY
-      ).map((item) => item.key);
-      const remaining = keys.length - toRemove.length;
-      if (remaining > MAX_CACHE_ENTRIES) {
-        const validSorted = sorted.filter(
-          (item) => now - item.entry.timestamp <= CACHE_EXPIRY
-        );
-        const additionalRemove = validSorted.slice(0, remaining - MAX_CACHE_ENTRIES).map((item) => item.key);
-        toRemove.push(...additionalRemove);
-      }
-      toRemove.forEach((k) => delete cache[k]);
-    }
+    pruneTranslationCache(cache);
     storage_default.setJSON("translation-cache", cache);
   }
   function normalizeSourceLangHint(raw) {
     if (!raw)
       return "auto";
-    const value = raw.toLowerCase().trim();
+    const value = normalizeLanguageCode(raw);
     if (!value || value === "unknown" || value === "auto")
       return "auto";
-    return value.split(/[-_]/)[0] || "auto";
+    return value || "auto";
   }
   async function translateWithGoogle(text, targetLang, sourceLang) {
     const encodedText = encodeURIComponent(text);
@@ -1534,7 +1679,7 @@ ${text}`
     }
     throw new Error("Invalid response from Gemini API");
   }
-  async function translateWithCustomApi(text, targetLang) {
+  function validateCustomApiUrl() {
     if (!customApiUrl) {
       throw new Error("Custom API URL not configured");
     }
@@ -1543,45 +1688,167 @@ ${text}`
       if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
         throw new Error("Custom API URL must use http or https protocol");
       }
-      if (parsedUrl.hostname === "localhost" || parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "0.0.0.0" || parsedUrl.hostname === "::1" || parsedUrl.hostname.endsWith(".local")) {
-        throw new Error("Custom API URL cannot point to local addresses");
-      }
     } catch (e) {
       if (e instanceof TypeError) {
         throw new Error("Invalid Custom API URL format");
       }
       throw e;
     }
-    try {
-      const headers = {
-        "Content-Type": "application/json"
+    return customApiUrl.trim();
+  }
+  function getDeepLTargetLanguage(targetLang) {
+    const deeplLangMap = {
+      "en": "EN-US",
+      "pt": "PT-BR",
+      "zh": "ZH-HANS",
+      "zh-TW": "ZH-HANT"
+    };
+    return deeplLangMap[targetLang] || targetLang.toUpperCase();
+  }
+  function getTranslationLanguageName(targetLang) {
+    return SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
+  }
+  function getCustomApiHeaders(format) {
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (!customApiKey) {
+      return headers;
+    }
+    if (format === "gemini") {
+      headers["x-goog-api-key"] = customApiKey;
+    } else if (format === "deepl") {
+      headers["Authorization"] = `DeepL-Auth-Key ${customApiKey}`;
+    } else {
+      headers["Authorization"] = `Bearer ${customApiKey}`;
+      headers["X-API-Key"] = customApiKey;
+    }
+    return headers;
+  }
+  function getOpenAiCompatibleUrl(url) {
+    const parsedUrl = new URL(url);
+    const normalizedPath = parsedUrl.pathname.replace(/\/+$/, "");
+    if (normalizedPath.endsWith("/v1")) {
+      parsedUrl.pathname = `${normalizedPath}/chat/completions`;
+      return parsedUrl.toString();
+    }
+    return url;
+  }
+  function buildCustomSingleBody(text, targetLang, format) {
+    const langName = getTranslationLanguageName(targetLang);
+    if (format === "openai") {
+      return {
+        model: customApiModel || openaiModel || "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
+          },
+          {
+            role: "user",
+            content: text
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: Math.max(text.length * 3, 500)
       };
-      if (customApiKey) {
-        headers["Authorization"] = `Bearer ${customApiKey}`;
-        headers["X-API-Key"] = customApiKey;
+    }
+    if (format === "gemini") {
+      return {
+        contents: [
+          {
+            parts: [
+              {
+                text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.
+
+${text}`
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: Math.max(text.length * 3, 500)
+        }
+      };
+    }
+    if (format === "deepl") {
+      return {
+        text: [text],
+        target_lang: getDeepLTargetLanguage(targetLang)
+      };
+    }
+    return {
+      text,
+      q: text,
+      source: "auto",
+      target: targetLang,
+      target_lang: targetLang,
+      format: "text"
+    };
+  }
+  function stringifyTranslation(value) {
+    if (value === void 0 || value === null)
+      return null;
+    if (typeof value === "string")
+      return value;
+    if (typeof value === "number" || typeof value === "boolean")
+      return String(value);
+    return null;
+  }
+  function extractTranslation(data) {
+    const candidates = [
+      data?.translatedText,
+      data?.translated_text,
+      data?.translation,
+      data?.result,
+      data?.text,
+      data?.data?.translatedText,
+      data?.data?.translated_text,
+      data?.data?.translation,
+      data?.data?.result,
+      data?.data?.text,
+      data?.translations?.[0]?.text,
+      data?.translations?.[0]?.translatedText,
+      data?.translations?.[0]?.translated_text,
+      data?.choices?.[0]?.message?.content,
+      data?.choices?.[0]?.text,
+      data?.output_text,
+      data?.output?.[0]?.content?.[0]?.text,
+      data?.content?.[0]?.text,
+      data?.candidates?.[0]?.content?.parts?.[0]?.text,
+      Array.isArray(data) ? data[0]?.translatedText : void 0,
+      Array.isArray(data) ? data[0]?.translated_text : void 0,
+      Array.isArray(data) ? data[0]?.translation : void 0,
+      Array.isArray(data) ? data[0]?.text : void 0
+    ];
+    for (const candidate of candidates) {
+      const translation = stringifyTranslation(candidate);
+      if (translation) {
+        return translation;
       }
-      const response = await fetch(customApiUrl, {
+    }
+    return null;
+  }
+  async function translateWithCustomApi(text, targetLang) {
+    const format = customApiFormat || "generic";
+    const url = format === "openai" ? getOpenAiCompatibleUrl(validateCustomApiUrl()) : validateCustomApiUrl();
+    try {
+      const response = await fetch(url, {
         method: "POST",
-        headers,
-        body: JSON.stringify({
-          text,
-          q: text,
-          source: "auto",
-          target: targetLang,
-          target_lang: targetLang,
-          format: "text"
-        })
+        headers: getCustomApiHeaders(format),
+        body: JSON.stringify(buildCustomSingleBody(text, targetLang, format))
       });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => "");
         throw new Error(`Custom API error: ${response.status}`);
       }
       const data = await response.json();
-      const translation = data.translatedText || data.translated_text || data.translation || data.result || data.text || data.translations && data.translations[0]?.text || data.data && data.data.translatedText || data.choices && data.choices[0]?.message?.content || Array.isArray(data) && data[0]?.translatedText;
+      const translation = extractTranslation(data);
       if (translation) {
         return {
-          translation: typeof translation === "string" ? translation : String(translation),
-          detectedLang: data.detectedLanguage || data.detected_language || data.sourceLang || data.src || data.detected_source_language
+          translation,
+          detectedLang: extractDetectedLanguage(data)
         };
       }
       throw new Error(`Could not parse translation from API response: ${JSON.stringify(data).slice(0, 200)}`);
@@ -1591,7 +1858,7 @@ ${text}`
     }
   }
   function extractDetectedLanguage(data) {
-    return data?.detectedLanguage || data?.detected_language || data?.sourceLang || data?.src;
+    return data?.detectedLanguage || data?.detected_language || data?.sourceLang || data?.src || data?.detected_source_language || data?.translations?.[0]?.detected_source_language?.toLowerCase();
   }
   function normalizeBatchTranslations(data) {
     const candidates = [
@@ -1601,6 +1868,8 @@ ${text}`
       data?.result,
       data?.text,
       data?.data?.translatedText,
+      data?.data?.translated_text,
+      data?.data?.translations,
       data?.translations,
       data
     ];
@@ -1626,29 +1895,27 @@ ${text}`
     }
     return null;
   }
+  function customApiSupportsBatchArray() {
+    return customApiFormat === "generic" || customApiFormat === "libretranslate" || customApiFormat === "deepl";
+  }
   async function translateBatchArray(texts, targetLang) {
     if (texts.length === 0) {
       return { translations: [], detectedLang: void 0 };
     }
-    if (preferredApi === "deepl" && deeplApiKey) {
+    if (preferredApi === "deepl" && deeplApiKey || preferredApi === "custom" && customApiFormat === "deepl") {
       const isFreePlan = deeplApiKey.endsWith(":fx");
       const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
-      const deeplLangMap = {
-        "en": "EN-US",
-        "pt": "PT-BR",
-        "zh": "ZH-HANS",
-        "zh-TW": "ZH-HANT"
+      const url2 = preferredApi === "custom" ? validateCustomApiUrl() : `${baseUrl}/v2/translate`;
+      const headers2 = preferredApi === "custom" ? getCustomApiHeaders("deepl") : {
+        "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
+        "Content-Type": "application/json"
       };
-      const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
-      const response2 = await fetch(`${baseUrl}/v2/translate`, {
+      const response2 = await fetch(url2, {
         method: "POST",
-        headers: {
-          "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
-          "Content-Type": "application/json"
-        },
+        headers: headers2,
         body: JSON.stringify({
           text: texts,
-          target_lang: deeplTarget
+          target_lang: getDeepLTargetLanguage(targetLang)
         })
       });
       if (!response2.ok) {
@@ -1663,17 +1930,16 @@ ${text}`
       }
       throw new Error("DeepL batch returned unexpected format");
     }
-    const url = preferredApi === "libretranslate" ? "https://libretranslate.de/translate" : customApiUrl;
+    if (preferredApi === "custom" && !customApiSupportsBatchArray()) {
+      throw new Error("Custom API format does not support array batch payloads");
+    }
+    const url = preferredApi === "libretranslate" ? "https://libretranslate.de/translate" : validateCustomApiUrl();
     if (!url) {
       throw new Error("Custom API URL not configured");
     }
-    const headers = {
+    const headers = preferredApi === "custom" ? getCustomApiHeaders(customApiFormat || "generic") : {
       "Content-Type": "application/json"
     };
-    if (preferredApi === "custom" && customApiKey) {
-      headers["Authorization"] = `Bearer ${customApiKey}`;
-      headers["X-API-Key"] = customApiKey;
-    }
     const response = await fetch(url, {
       method: "POST",
       headers,
@@ -1692,10 +1958,18 @@ ${text}`
     }
     const data = await response.json();
     const normalized = normalizeBatchTranslations(data);
-    if (!normalized) {
+    if (normalized) {
+      return normalized;
+    }
+    const singleTranslation = extractTranslation(data);
+    const parsed = singleTranslation ? parseBatchTextFallbacks(singleTranslation, texts.length) : null;
+    if (!parsed) {
       throw new Error("Batch API returned non-array payload");
     }
-    return normalized;
+    return {
+      translations: parsed,
+      detectedLang: extractDetectedLanguage(data)
+    };
   }
   function buildMarkedBatchPayload(lines) {
     const markerNonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1956,7 +2230,7 @@ ${text}`
     let detectedLang = detectedSourceLang || "auto";
     try {
       let translatedLines = null;
-      if ((preferredApi === "custom" || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
+      if ((preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
         try {
           const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map((l) => l.text), targetLang));
           translatedLines = batchResult.translations;
@@ -2077,6 +2351,9 @@ ${text}`
   }
   function getCacheStats() {
     const lineCache = storage_default.getJSON("translation-cache", {});
+    if (pruneTranslationCache(lineCache)) {
+      storage_default.setJSON("translation-cache", lineCache);
+    }
     const lineKeys = Object.keys(lineCache);
     const trackStats = getTrackCacheStats();
     let lineSizeBytes = 0;
@@ -2097,6 +2374,9 @@ ${text}`
   }
   function getCachedTranslations() {
     const cache = storage_default.getJSON("translation-cache", {});
+    if (pruneTranslationCache(cache)) {
+      storage_default.setJSON("translation-cache", cache);
+    }
     const entries = [];
     for (const key of Object.keys(cache)) {
       const [lang, ...textParts] = key.split(":");
@@ -2360,6 +2640,15 @@ ${text}`
   var cachedTrackId = null;
   var cachedLineData = null;
   var cachedLanguage = null;
+  function getLyricsLanguage(lyrics) {
+    const iso = normalizeLanguageCode(lyrics.LanguageISO2);
+    if (iso !== "unknown" && iso !== "auto")
+      return iso;
+    const language = normalizeLanguageCode(lyrics.Language);
+    if (language !== "unknown" && language !== "auto")
+      return language;
+    return void 0;
+  }
   async function fetchLyricsFromAPI() {
     const trackId = getCurrentTrackId();
     if (!trackId) {
@@ -2383,9 +2672,9 @@ ${text}`
       }
       cachedTrackId = trackId;
       cachedLineData = lineData;
-      cachedLanguage = lyrics.Language || null;
+      cachedLanguage = getLyricsLanguage(lyrics) || null;
       const lines = lineData.map((l) => l.text);
-      return { lines, lineData, language: lyrics.Language || void 0 };
+      return { lines, lineData, language: cachedLanguage || void 0 };
     } catch (err) {
       warn("Failed to capture lyrics from Spicy Lyrics fetch:", err);
       return null;
@@ -2414,11 +2703,11 @@ ${text}`
       }
       cachedTrackId = trackId;
       cachedLineData = lineData;
-      cachedLanguage = lyrics.Language || null;
+      cachedLanguage = getLyricsLanguage(lyrics) || null;
       return {
         lines: lineData.map((l) => l.text),
         lineData,
-        language: lyrics.Language || void 0
+        language: cachedLanguage || void 0
       };
     } catch (err) {
       warn("Failed to capture lyrics for track URI:", trackUri, err);
@@ -4983,7 +5272,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.1" : "0.0.0";
+    return true ? "2.0.2" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6288,6 +6577,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     });
   }
+  function setTranslateButtonsLoading(isLoading) {
+    const buttons = [
+      document.querySelector("#TranslateToggle"),
+      getPIPWindow2()?.document.querySelector("#TranslateToggle")
+    ];
+    buttons.forEach((button) => {
+      if (!button)
+        return;
+      button.classList.toggle("loading", isLoading);
+      button.innerHTML = isLoading ? Icons.Loading : state.isEnabled ? Icons.Translate : Icons.TranslateOff;
+    });
+  }
   function setButtonErrorState(hasError) {
     const buttons = [
       document.querySelector("#TranslateToggle"),
@@ -6452,7 +6753,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return null;
   }
-  async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine) {
+  async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine, previousTrackUri) {
+    const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
     for (let i = 0; i < retries; i++) {
       if (!isSpicyLyricsOpen() || state.isTranslating)
         return;
@@ -6460,7 +6762,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (lines.length > 0) {
         const firstLineText = lines[0].textContent?.trim();
         if (firstLineText && firstLineText.length > 0) {
-          if (previousFirstLine && firstLineText === previousFirstLine) {
+          const currentTrackUri = getCurrentTrackUri();
+          if (previousFirstLine && firstLineText === previousFirstLine && (i < staleLineRetryLimit || Boolean(previousTrackUri && currentTrackUri === previousTrackUri))) {
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
@@ -6512,34 +6815,34 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (lines.length === 0)
       return;
     state.isTranslating = true;
-    const buttons = [
-      document.querySelector("#TranslateToggle"),
-      getPIPWindow2()?.document.querySelector("#TranslateToggle")
-    ];
-    buttons.forEach((b) => {
-      if (b) {
-        b.classList.add("loading");
-        b.innerHTML = Icons.Loading;
-      }
-    });
+    let buttonsLoading = false;
     try {
       let domLineTexts = [];
       lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
       const nonEmptyDomTexts = domLineTexts.filter((t) => t.trim().length > 0);
       if (nonEmptyDomTexts.length === 0) {
-        state.isTranslating = false;
-        restoreButtonState();
         return;
       }
       const currentTrackUri2 = getCurrentTrackUri();
       const romanizationOn = isRomanizationActive();
-      if (romanizationOn) {
-      } else {
-        const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri2 || void 0);
+      let preApiSkipCheck = null;
+      if (!romanizationOn) {
+        preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri2 || void 0);
         if (preApiSkipCheck.detectedLanguage) {
           state.detectedLanguage = preApiSkipCheck.detectedLanguage;
         }
+        if (preApiSkipCheck.skip && getConfidentNonTargetLineIndexes(domLineTexts, state.targetLanguage).length === 0) {
+          removeTranslations();
+          state.lastTranslatedSongUri = currentTrackUri2;
+          lastTranslatedRomanizationState = romanizationOn;
+          if (state.showNotifications && Spicetify.showNotification) {
+            Spicetify.showNotification(preApiSkipCheck.reason || "Lyrics already in target language");
+          }
+          return;
+        }
       }
+      setTranslateButtonsLoading(true);
+      buttonsLoading = true;
       let apiLineTexts = null;
       let apiLanguage;
       let apiLineData = null;
@@ -6653,8 +6956,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
       const nonEmptyTexts = lineTexts.filter((t) => t.trim().length > 0);
       if (nonEmptyTexts.length === 0) {
-        state.isTranslating = false;
-        restoreButtonState();
         return;
       }
       const detectedLang = apiLanguage || state.detectedLanguage || void 0;
@@ -6673,7 +6974,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           skipCheck = { skip: false, detectedLanguage: apiLanguage };
         }
       } else {
-        skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
+        skipCheck = preApiSkipCheck || await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
       }
       if (skipCheck.detectedLanguage)
         state.detectedLanguage = skipCheck.detectedLanguage;
@@ -6890,7 +7191,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       setTimeout(() => setButtonErrorState(false), 3e3);
     } finally {
       state.isTranslating = false;
-      restoreButtonState();
+      if (buttonsLoading) {
+        restoreButtonState();
+      }
     }
   }
   function normalizeForComparison(text) {
@@ -7165,6 +7468,271 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     });
   }
 
+  // src/utils/settingsModel.ts
+  var API_OPTIONS = [
+    { value: "google", text: "Google Translate" },
+    { value: "libretranslate", text: "LibreTranslate" },
+    { value: "deepl", text: "DeepL" },
+    { value: "openai", text: "OpenAI" },
+    { value: "gemini", text: "Gemini" },
+    { value: "custom", text: "Custom API" }
+  ];
+  var CUSTOM_API_FORMAT_OPTIONS = [
+    { value: "generic", text: "Generic JSON" },
+    { value: "libretranslate", text: "LibreTranslate Compatible" },
+    { value: "openai", text: "OpenAI Compatible" },
+    { value: "gemini", text: "Gemini Compatible" },
+    { value: "deepl", text: "DeepL Compatible" }
+  ];
+  var OVERLAY_MODE_OPTIONS = [
+    { value: "replace", text: "Replace (default)" },
+    { value: "interleaved", text: "Below each line" }
+  ];
+  var SETTINGS_SCHEMA = [
+    {
+      id: "target-language",
+      label: "Target Language",
+      type: "select",
+      storageKey: "target-language",
+      defaultValue: "en",
+      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name }))
+    },
+    {
+      id: "overlay-mode",
+      label: "Translation Display",
+      type: "select",
+      storageKey: "overlay-mode",
+      defaultValue: "replace",
+      options: OVERLAY_MODE_OPTIONS,
+      description: "How translated lyrics are displayed",
+      effects: ["reapplyTranslations"]
+    },
+    {
+      id: "preferred-api",
+      label: "Translation API",
+      type: "select",
+      storageKey: "preferred-api",
+      defaultValue: "google",
+      options: API_OPTIONS,
+      effects: ["providerVisibility"]
+    },
+    {
+      id: "custom-api-url",
+      label: "Custom API URL",
+      type: "text",
+      storageKey: "custom-api-url",
+      defaultValue: "",
+      placeholder: "https://your-api.com/translate",
+      description: "Translation endpoint or compatible API base URL",
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-format",
+      label: "Custom API Format",
+      type: "select",
+      storageKey: "custom-api-format",
+      defaultValue: "generic",
+      options: CUSTOM_API_FORMAT_OPTIONS,
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-key",
+      label: "Custom API Key (optional)",
+      type: "password",
+      storageKey: "custom-api-key",
+      defaultValue: "",
+      placeholder: "API key",
+      secret: true,
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-model",
+      label: "Custom API Model (optional)",
+      type: "text",
+      storageKey: "custom-api-model",
+      defaultValue: "",
+      placeholder: "gpt-4o-mini, llama3.1, gemini-2.0-flash",
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "deepl-api-key",
+      label: "DeepL API Key",
+      type: "password",
+      storageKey: "deepl-api-key",
+      defaultValue: "",
+      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx:fx",
+      description: "Get a free key at deepl.com/pro-api",
+      secret: true,
+      visibleForApis: ["deepl"]
+    },
+    {
+      id: "openai-api-key",
+      label: "OpenAI API Key",
+      type: "password",
+      storageKey: "openai-api-key",
+      defaultValue: "",
+      placeholder: "sk-...",
+      secret: true,
+      visibleForApis: ["openai"]
+    },
+    {
+      id: "openai-model",
+      label: "OpenAI Model",
+      type: "text",
+      storageKey: "openai-model",
+      defaultValue: "gpt-4o-mini",
+      placeholder: "gpt-4o-mini",
+      description: "e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo",
+      visibleForApis: ["openai"]
+    },
+    {
+      id: "gemini-api-key",
+      label: "Gemini API Key",
+      type: "password",
+      storageKey: "gemini-api-key",
+      defaultValue: "",
+      placeholder: "AIza...",
+      description: "Get a key at aistudio.google.com/apikey",
+      secret: true,
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "auto-translate",
+      label: "Auto-Translate on Song Change",
+      type: "toggle",
+      storageKey: "auto-translate",
+      defaultValue: false
+    },
+    {
+      id: "show-notifications",
+      label: "Show Notifications",
+      type: "toggle",
+      storageKey: "show-notifications",
+      defaultValue: true
+    },
+    {
+      id: "show-quality-indicator",
+      label: "Show Translation Quality Indicator",
+      type: "toggle",
+      storageKey: "show-quality-indicator",
+      defaultValue: true,
+      effects: ["qualityIndicatorClass"]
+    },
+    {
+      id: "vocabulary-mode",
+      label: "Vocabulary / Learning Mode",
+      type: "toggle",
+      storageKey: "vocabulary-mode",
+      defaultValue: false,
+      effects: ["vocabularyModeClass", "reapplyTranslations"]
+    },
+    {
+      id: "hide-connection-indicator",
+      label: "Hide Connection Status",
+      type: "toggle",
+      storageKey: "hide-connection-indicator",
+      defaultValue: false,
+      effects: ["connectionIndicatorClass"]
+    }
+  ];
+  function getCurrentApiPreference() {
+    return storage.get("preferred-api") || state.preferredApi || "google";
+  }
+  function isSettingFieldVisible(field, api = getCurrentApiPreference()) {
+    return !field.visibleForApis || field.visibleForApis.includes(api);
+  }
+  function readSettingValue(field) {
+    if (field.type === "toggle") {
+      const stored2 = storage.get(field.storageKey);
+      if (typeof field.defaultValue === "boolean" && field.defaultValue) {
+        return stored2 !== "false";
+      }
+      return stored2 === "true";
+    }
+    const stored = field.secret ? storage.getSecret(field.storageKey) : storage.get(field.storageKey);
+    return stored ?? String(field.defaultValue);
+  }
+  function configureTranslationApi() {
+    setPreferredApi(state.preferredApi, state.customApiUrl, {
+      customApiKey: state.customApiKey,
+      customApiFormat: state.customApiFormat,
+      customApiModel: state.customApiModel,
+      deeplApiKey: state.deeplApiKey,
+      openaiApiKey: state.openaiApiKey,
+      openaiModel: state.openaiModel,
+      geminiApiKey: state.geminiApiKey
+    });
+  }
+  function writeSettingValue(field, value) {
+    if (field.type === "toggle") {
+      storage.set(field.storageKey, String(Boolean(value)));
+    } else if (field.secret) {
+      storage.setSecret(field.storageKey, String(value));
+    } else {
+      storage.set(field.storageKey, String(value));
+    }
+    switch (field.id) {
+      case "target-language":
+        state.targetLanguage = String(value);
+        break;
+      case "overlay-mode":
+        state.overlayMode = String(value);
+        break;
+      case "preferred-api":
+        state.preferredApi = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-url":
+        state.customApiUrl = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-format":
+        state.customApiFormat = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-key":
+        state.customApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-model":
+        state.customApiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "deepl-api-key":
+        state.deeplApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "openai-api-key":
+        state.openaiApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "openai-model":
+        state.openaiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-api-key":
+        state.geminiApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "auto-translate":
+        state.autoTranslate = Boolean(value);
+        break;
+      case "show-notifications":
+        state.showNotifications = Boolean(value);
+        break;
+      case "show-quality-indicator":
+        state.showQualityIndicator = Boolean(value);
+        break;
+      case "vocabulary-mode":
+        state.vocabularyMode = Boolean(value);
+        break;
+      case "hide-connection-indicator":
+        state.hideConnectionIndicator = Boolean(value);
+        break;
+    }
+    return field.effects || [];
+  }
+
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
   function createNativeToggle(id, label, checked, onChange) {
@@ -7221,6 +7789,79 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     button?.addEventListener("click", onClick);
     return row;
   }
+  function createNativeInput(id, label, type, currentValue, placeholder, onChange) {
+    const row = document.createElement("div");
+    row.className = "x-settings-row";
+    row.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml2(placeholder)}">
+        </div>
+    `;
+    const input = row.querySelector("input");
+    if (input)
+      input.value = currentValue;
+    input?.addEventListener("change", () => onChange(input.value));
+    return row;
+  }
+  function runSettingEffects(effects, value) {
+    if (effects.includes("qualityIndicatorClass")) {
+      document.body.classList.toggle("slt-hide-quality-indicator", !Boolean(value));
+    }
+    if (effects.includes("vocabularyModeClass")) {
+      document.body.classList.toggle("slt-vocabulary-mode", Boolean(value));
+    }
+    if (effects.includes("connectionIndicatorClass")) {
+      document.body.classList.toggle("slt-hide-connection-indicator", Boolean(value));
+    }
+    if (effects.includes("reapplyTranslations")) {
+      reapplyTranslations();
+    }
+  }
+  function updateSettingFieldVisibility(root, visibleDisplay) {
+    const api = getCurrentApiPreference();
+    SETTINGS_SCHEMA.forEach((field) => {
+      const row = root.querySelector(`[data-slt-setting-field="${field.id}"]`);
+      if (row) {
+        row.style.display = isSettingFieldVisible(field, api) ? visibleDisplay : "none";
+      }
+    });
+  }
+  function handleSettingChange(field, value, root, visibleDisplay = "") {
+    const effects = writeSettingValue(field, value);
+    runSettingEffects(effects, value);
+    if (effects.includes("providerVisibility") && root) {
+      updateSettingFieldVisibility(root, visibleDisplay);
+    }
+  }
+  function getNativeSettingInputId(field) {
+    return `slt-settings.${field.id}`;
+  }
+  function getModalSettingInputId(field) {
+    return `slt-${field.id}`;
+  }
+  function createNativeFieldRow(field, root) {
+    const id = getNativeSettingInputId(field);
+    const value = readSettingValue(field);
+    let row;
+    if (field.type === "toggle") {
+      row = createNativeToggle(id, field.label, Boolean(value), (checked) => handleSettingChange(field, checked, root));
+    } else if (field.type === "select") {
+      row = createNativeDropdown(id, field.label, field.options || [], String(value), (selected) => handleSettingChange(field, selected, root));
+    } else {
+      row = createNativeInput(id, field.label, field.type === "password" ? "password" : "text", String(value), field.placeholder || "", (inputValue) => handleSettingChange(field, inputValue, root));
+    }
+    row.dataset.sltSettingField = field.id;
+    row.style.display = isSettingFieldVisible(field) ? "" : "none";
+    return row;
+  }
+  function renderNativeSettingsFields(container) {
+    SETTINGS_SCHEMA.forEach((field) => {
+      container.appendChild(createNativeFieldRow(field, container));
+    });
+  }
   function createNativeSettingsSection() {
     const section = document.createElement("div");
     section.id = SETTINGS_ID;
@@ -7230,256 +7871,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         </div>
     `;
     const sectionContent = section.querySelector(".x-settings-section.fNaaQ0Cp8Yzy19j8");
-    const languageOptions = SUPPORTED_LANGUAGES.map((l) => ({ value: l.code, text: l.name }));
-    sectionContent.appendChild(createNativeDropdown(
-      "slt-settings.target-language",
-      "Target Language",
-      languageOptions,
-      storage.get("target-language") || "en",
-      (value) => {
-        storage.set("target-language", value);
-        state.targetLanguage = value;
-      }
-    ));
-    sectionContent.appendChild(createNativeDropdown(
-      "slt-settings.overlay-mode",
-      "Translation Display",
-      [
-        { value: "replace", text: "Replace (default)" },
-        { value: "interleaved", text: "Below each line" }
-      ],
-      storage.get("overlay-mode") || "replace",
-      (value) => {
-        const mode = value;
-        storage.set("overlay-mode", mode);
-        state.overlayMode = mode;
-        reapplyTranslations();
-      }
-    ));
-    sectionContent.appendChild(createNativeDropdown(
-      "slt-settings.preferred-api",
-      "Translation API",
-      [
-        { value: "google", text: "Google Translate" },
-        { value: "libretranslate", text: "LibreTranslate" },
-        { value: "deepl", text: "DeepL" },
-        { value: "openai", text: "OpenAI" },
-        { value: "gemini", text: "Gemini" },
-        { value: "custom", text: "Custom API" }
-      ],
-      storage.get("preferred-api") || "google",
-      (value) => {
-        const api = value;
-        storage.set("preferred-api", api);
-        state.preferredApi = api;
-        setPreferredApi(api, storage.get("custom-api-url") || "", {
-          customApiKey: state.customApiKey,
-          deeplApiKey: state.deeplApiKey,
-          openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel,
-          geminiApiKey: state.geminiApiKey
-        });
-        const customRow = document.getElementById("slt-settings-custom-api-row");
-        const customKeyRow = document.getElementById("slt-settings-custom-api-key-row");
-        const deeplRow = document.getElementById("slt-settings-deepl-key-row");
-        const openaiRow = document.getElementById("slt-settings-openai-key-row");
-        const openaiModelRow2 = document.getElementById("slt-settings-openai-model-row");
-        const geminiRow = document.getElementById("slt-settings-gemini-key-row");
-        if (customRow)
-          customRow.style.display = api === "custom" ? "" : "none";
-        if (customKeyRow)
-          customKeyRow.style.display = api === "custom" ? "" : "none";
-        if (deeplRow)
-          deeplRow.style.display = api === "deepl" ? "" : "none";
-        if (openaiRow)
-          openaiRow.style.display = api === "openai" ? "" : "none";
-        if (openaiModelRow2)
-          openaiModelRow2.style.display = api === "openai" ? "" : "none";
-        if (geminiRow)
-          geminiRow.style.display = api === "gemini" ? "" : "none";
-      }
-    ));
-    const customApiRow = document.createElement("div");
-    customApiRow.id = "slt-settings-custom-api-row";
-    customApiRow.className = "x-settings-row";
-    customApiRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
-    customApiRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-url">Custom API URL</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.custom-api-url" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="https://your-api.com/translate">
-        </div>
-    `;
-    const customApiInput = customApiRow.querySelector("input");
-    if (customApiInput)
-      customApiInput.value = storage.get("custom-api-url") || "";
-    customApiInput?.addEventListener("change", () => {
-      storage.set("custom-api-url", customApiInput.value);
-      state.customApiUrl = customApiInput.value;
-      setPreferredApi(state.preferredApi, customApiInput.value, {
-        customApiKey: state.customApiKey,
-        deeplApiKey: state.deeplApiKey,
-        openaiApiKey: state.openaiApiKey,
-        openaiModel: state.openaiModel,
-        geminiApiKey: state.geminiApiKey
-      });
-    });
-    sectionContent.appendChild(customApiRow);
-    const customApiKeyRow = document.createElement("div");
-    customApiKeyRow.id = "slt-settings-custom-api-key-row";
-    customApiKeyRow.className = "x-settings-row";
-    customApiKeyRow.style.display = storage.get("preferred-api") === "custom" ? "" : "none";
-    customApiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.custom-api-key">Custom API Key (optional)</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.custom-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="API key">
-        </div>
-    `;
-    const customApiKeyInput = customApiKeyRow.querySelector("input");
-    if (customApiKeyInput)
-      customApiKeyInput.value = storage.getSecret("custom-api-key") || "";
-    customApiKeyInput?.addEventListener("change", () => {
-      storage.setSecret("custom-api-key", customApiKeyInput.value);
-      state.customApiKey = customApiKeyInput.value;
-      setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
-    });
-    sectionContent.appendChild(customApiKeyRow);
-    const deeplKeyRow = document.createElement("div");
-    deeplKeyRow.id = "slt-settings-deepl-key-row";
-    deeplKeyRow.className = "x-settings-row";
-    deeplKeyRow.style.display = storage.get("preferred-api") === "deepl" ? "" : "none";
-    deeplKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.deepl-api-key">DeepL API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.deepl-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
-        </div>
-    `;
-    const deeplKeyInput = deeplKeyRow.querySelector("input");
-    if (deeplKeyInput)
-      deeplKeyInput.value = storage.getSecret("deepl-api-key") || "";
-    deeplKeyInput?.addEventListener("change", () => {
-      storage.setSecret("deepl-api-key", deeplKeyInput.value);
-      state.deeplApiKey = deeplKeyInput.value;
-      setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplKeyInput.value });
-    });
-    sectionContent.appendChild(deeplKeyRow);
-    const openaiKeyRow = document.createElement("div");
-    openaiKeyRow.id = "slt-settings-openai-key-row";
-    openaiKeyRow.className = "x-settings-row";
-    openaiKeyRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
-    openaiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-api-key">OpenAI API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.openai-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="sk-...">
-        </div>
-    `;
-    const openaiKeyInput = openaiKeyRow.querySelector("input");
-    if (openaiKeyInput)
-      openaiKeyInput.value = storage.getSecret("openai-api-key") || "";
-    openaiKeyInput?.addEventListener("change", () => {
-      storage.setSecret("openai-api-key", openaiKeyInput.value);
-      state.openaiApiKey = openaiKeyInput.value;
-      setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiKeyInput.value });
-    });
-    sectionContent.appendChild(openaiKeyRow);
-    const openaiModelRow = document.createElement("div");
-    openaiModelRow.id = "slt-settings-openai-model-row";
-    openaiModelRow.className = "x-settings-row";
-    openaiModelRow.style.display = storage.get("preferred-api") === "openai" ? "" : "none";
-    openaiModelRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.openai-model">OpenAI Model</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="text" id="slt-settings.openai-model" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="gpt-4o-mini">
-        </div>
-    `;
-    const openaiModelInput = openaiModelRow.querySelector("input");
-    if (openaiModelInput)
-      openaiModelInput.value = storage.get("openai-model") || "gpt-4o-mini";
-    openaiModelInput?.addEventListener("change", () => {
-      storage.set("openai-model", openaiModelInput.value);
-      state.openaiModel = openaiModelInput.value;
-      setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
-    });
-    sectionContent.appendChild(openaiModelRow);
-    const geminiKeyRow = document.createElement("div");
-    geminiKeyRow.id = "slt-settings-gemini-key-row";
-    geminiKeyRow.className = "x-settings-row";
-    geminiKeyRow.style.display = storage.get("preferred-api") === "gemini" ? "" : "none";
-    geminiKeyRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="slt-settings.gemini-api-key">Gemini API Key</label>
-        </div>
-        <div class="x-settings-secondColumn">
-            <input type="password" id="slt-settings.gemini-api-key" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="AIza...">
-        </div>
-    `;
-    const geminiKeyInput = geminiKeyRow.querySelector("input");
-    if (geminiKeyInput)
-      geminiKeyInput.value = storage.getSecret("gemini-api-key") || "";
-    geminiKeyInput?.addEventListener("change", () => {
-      storage.setSecret("gemini-api-key", geminiKeyInput.value);
-      state.geminiApiKey = geminiKeyInput.value;
-      setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiKeyInput.value });
-    });
-    sectionContent.appendChild(geminiKeyRow);
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.auto-translate",
-      "Auto-Translate on Song Change",
-      storage.get("auto-translate") === "true",
-      (checked) => {
-        storage.set("auto-translate", String(checked));
-        state.autoTranslate = checked;
-      }
-    ));
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.show-notifications",
-      "Show Notifications",
-      storage.get("show-notifications") !== "false",
-      (checked) => {
-        storage.set("show-notifications", String(checked));
-        state.showNotifications = checked;
-      }
-    ));
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.show-quality-indicator",
-      "Show Translation Quality Indicator",
-      storage.get("show-quality-indicator") !== "false",
-      (checked) => {
-        storage.set("show-quality-indicator", String(checked));
-        state.showQualityIndicator = checked;
-        document.body.classList.toggle("slt-hide-quality-indicator", !checked);
-      }
-    ));
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.vocabulary-mode",
-      "Vocabulary / Learning Mode",
-      storage.get("vocabulary-mode") === "true",
-      (checked) => {
-        storage.set("vocabulary-mode", String(checked));
-        state.vocabularyMode = checked;
-        document.body.classList.toggle("slt-vocabulary-mode", checked);
-        reapplyTranslations();
-      }
-    ));
-    sectionContent.appendChild(createNativeToggle(
-      "slt-settings.hide-connection-indicator",
-      "Hide Connection Status",
-      storage.get("hide-connection-indicator") === "true",
-      (checked) => {
-        storage.set("hide-connection-indicator", String(checked));
-        state.hideConnectionIndicator = checked;
-        document.body.classList.toggle("slt-hide-connection-indicator", checked);
-      }
-    ));
+    renderNativeSettingsFields(sectionContent);
     sectionContent.appendChild(createNativeButton(
       "slt-settings.view-cache",
       "View Translation Cache",
@@ -7663,62 +8055,121 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       subtree: true
     });
   }
+  function renderModalSettingsMarkup() {
+    return SETTINGS_SCHEMA.map((field) => {
+      const id = getModalSettingInputId(field);
+      const value = readSettingValue(field);
+      const display = isSettingFieldVisible(field) ? "grid" : "none";
+      const description = field.description ? `<span class="slt-description">${escapeHtml2(field.description)}</span>` : "";
+      if (field.type === "toggle") {
+        return `
+        <div class="slt-modal-field slt-modal-toggle-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml2(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <label class="slt-toggle">
+                    <input type="checkbox" id="${id}" ${value === true ? "checked" : ""}>
+                    <span class="slt-toggle-slider"></span>
+                </label>
+            </div>
+        </div>`;
+      }
+      if (field.type === "select") {
+        return `
+        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml2(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <select id="${id}">
+                    ${(field.options || []).map((option) => `<option value="${escapeHtml2(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml2(option.text)}</option>`).join("")}
+                </select>
+            </div>
+        </div>`;
+      }
+      return `
+        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
+            <div class="slt-modal-field-copy">
+                <label for="${id}">${escapeHtml2(field.label)}</label>
+                ${description}
+            </div>
+            <div class="slt-modal-field-control">
+                <input type="${field.type}" id="${id}" value="${escapeHtml2(String(value))}" placeholder="${escapeHtml2(field.placeholder || "")}">
+            </div>
+        </div>`;
+    }).join("");
+  }
+  function bindModalSettingsFields(container) {
+    SETTINGS_SCHEMA.forEach((field) => {
+      const control = container.querySelector(`#${getModalSettingInputId(field)}`);
+      if (!control)
+        return;
+      const eventName = field.type === "toggle" ? "change" : "change";
+      control.addEventListener(eventName, () => {
+        const value = field.type === "toggle" ? control.checked : control.value;
+        handleSettingChange(field, value, container, "grid");
+      });
+    });
+  }
   function createSettingsUI() {
     const container = document.createElement("div");
     container.className = "slt-settings-container";
     container.innerHTML = `
         <style>
             .slt-settings-container {
-                padding: 20px;
+                padding: 18px 22px 22px;
                 display: flex;
                 flex-direction: column;
-                gap: 18px;
-                width: min(760px, 92vw);
+                gap: 10px;
+                width: min(680px, 90vw);
                 max-width: 100%;
-                max-height: 78vh;
+                max-height: 72vh;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: auto;
             }
-            .slt-setting-row {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
+            .slt-modal-field {
+                grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
+                align-items: center;
+                gap: 18px;
+                padding: 9px 0;
             }
-            .slt-setting-row label {
-                font-size: 15px;
+            .slt-modal-field-copy {
+                min-width: 0;
+            }
+            .slt-modal-field-copy label {
+                display: block;
+                font-size: 14px;
                 font-weight: 500;
                 color: var(--spice-text);
+                line-height: 1.35;
             }
-            .slt-setting-row select,
-            .slt-setting-row input[type="text"] {
-                padding: 10px 14px;
+            .slt-modal-field-control {
+                display: flex;
+                justify-content: flex-end;
+                min-width: 0;
+            }
+            .slt-modal-field select,
+            .slt-modal-field input[type="text"],
+            .slt-modal-field input[type="password"] {
+                width: 100%;
+                min-height: 40px;
+                padding: 8px 12px;
                 border-radius: 4px;
                 border: 1px solid var(--spice-button-disabled);
                 background: var(--spice-card);
                 color: var(--spice-text);
-                font-size: 15px;
+                font-size: 14px;
+                box-sizing: border-box;
             }
-            .slt-setting-row select:focus,
-            .slt-setting-row input[type="text"]:focus {
+            .slt-modal-field select:focus,
+            .slt-modal-field input[type="text"]:focus,
+            .slt-modal-field input[type="password"]:focus {
                 outline: none;
                 border-color: var(--spice-button);
-            }
-            .slt-toggle-row {
-                flex-direction: row;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-            }
-            .slt-toggle-row > label:first-child {
-                margin: 0;
-                line-height: 1.35;
-                flex: 1;
-            }
-            .slt-toggle-row .slt-toggle {
-                margin-left: auto;
-                flex-shrink: 0;
             }
             .slt-toggle {
                 position: relative;
@@ -7759,15 +8210,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 transform: translateX(20px);
             }
             .slt-button {
-                padding: 11px 22px;
+                padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
                 background: var(--spice-button);
                 color: var(--spice-text);
-                font-size: 15px;
+                font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
                 transition: transform 0.1s, background 0.2s;
+                white-space: nowrap;
             }
             .slt-button:hover {
                 transform: scale(1.02);
@@ -7776,123 +8228,70 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             .slt-button:active {
                 transform: scale(0.98);
             }
+            .slt-button.secondary {
+                background: var(--spice-card);
+                border: 1px solid var(--spice-button-disabled);
+            }
             .slt-description {
-                font-size: 13px;
+                display: block;
+                font-size: 12px;
                 color: var(--spice-subtext);
-                margin-top: 0;
+                margin-top: 3px;
                 line-height: 1.35;
+            }
+            .slt-modal-actions,
+            .slt-modal-footer {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                flex-wrap: wrap;
+                padding-top: 12px;
+            }
+            .slt-modal-actions {
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                margin-top: 4px;
+            }
+            .slt-modal-footer {
+                color: var(--spice-subtext);
+                font-size: 13px;
+                padding-bottom: 2px;
+            }
+            .slt-modal-footer-buttons {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .slt-modal-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .slt-modal-shortcut {
+                color: var(--spice-subtext);
+                font-size: 12px;
+                opacity: 0.7;
+                padding-top: 2px;
+            }
+            @media (max-width: 620px) {
+                .slt-modal-field {
+                    grid-template-columns: 1fr;
+                    gap: 8px;
+                }
+                .slt-modal-field-control {
+                    justify-content: stretch;
+                }
             }
         </style>
         
-        <div class="slt-setting-row">
-            <label for="slt-target-language">Target Language</label>
-            <select id="slt-target-language">
-                ${SUPPORTED_LANGUAGES.map(
-      (l) => `<option value="${l.code}" ${l.code === (storage.get("target-language") || "en") ? "selected" : ""}>${l.name}</option>`
-    ).join("")}
-            </select>
+        ${renderModalSettingsMarkup()}
+
+        <div class="slt-modal-actions">
+            <button class="slt-button secondary" id="slt-view-cache">View Translation Cache</button>
         </div>
         
-        <div class="slt-setting-row">
-            <label for="slt-overlay-mode">Translation Display</label>
-            <select id="slt-overlay-mode">
-                <option value="replace" ${(storage.get("overlay-mode") || "replace") === "replace" ? "selected" : ""}>Replace (default)</option>
-                <option value="interleaved" ${storage.get("overlay-mode") === "interleaved" ? "selected" : ""}>Below each line</option>
-            </select>
-            <span class="slt-description">How translated lyrics are displayed</span>
-        </div>
-        
-        <div class="slt-setting-row">
-            <label for="slt-preferred-api">Translation API</label>
-            <select id="slt-preferred-api">
-                <option value="google" ${(storage.get("preferred-api") || "google") === "google" ? "selected" : ""}>Google Translate</option>
-                <option value="libretranslate" ${storage.get("preferred-api") === "libretranslate" ? "selected" : ""}>LibreTranslate</option>
-                <option value="deepl" ${storage.get("preferred-api") === "deepl" ? "selected" : ""}>DeepL</option>
-                <option value="openai" ${storage.get("preferred-api") === "openai" ? "selected" : ""}>OpenAI</option>
-                <option value="gemini" ${storage.get("preferred-api") === "gemini" ? "selected" : ""}>Gemini</option>
-                <option value="custom" ${storage.get("preferred-api") === "custom" ? "selected" : ""}>Custom API</option>
-            </select>
-        </div>
-        
-        <div class="slt-setting-row" id="slt-custom-api-row" style="display: ${storage.get("preferred-api") === "custom" ? "flex" : "none"}">
-            <label for="slt-custom-api-url">Custom API URL</label>
-            <input type="text" id="slt-custom-api-url" value="${storage.get("custom-api-url") || ""}" placeholder="https://your-api.com/translate">
-            <span class="slt-description">LibreTranslate-compatible API endpoint</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-custom-api-key-row" style="display: ${storage.get("preferred-api") === "custom" ? "flex" : "none"}">
-            <label for="slt-custom-api-key">Custom API Key (optional)</label>
-            <input type="password" id="slt-custom-api-key" value="${storage.get("custom-api-key") || ""}" placeholder="API key">
-        </div>
-
-        <div class="slt-setting-row" id="slt-deepl-key-row" style="display: ${storage.get("preferred-api") === "deepl" ? "flex" : "none"}">
-            <label for="slt-deepl-api-key">DeepL API Key</label>
-            <input type="password" id="slt-deepl-api-key" value="${storage.get("deepl-api-key") || ""}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx:fx">
-            <span class="slt-description">Get a free key at deepl.com/pro-api</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-openai-key-row" style="display: ${storage.get("preferred-api") === "openai" ? "flex" : "none"}">
-            <label for="slt-openai-api-key">OpenAI API Key</label>
-            <input type="password" id="slt-openai-api-key" value="${storage.get("openai-api-key") || ""}" placeholder="sk-...">
-        </div>
-
-        <div class="slt-setting-row" id="slt-openai-model-row" style="display: ${storage.get("preferred-api") === "openai" ? "flex" : "none"}">
-            <label for="slt-openai-model">OpenAI Model</label>
-            <input type="text" id="slt-openai-model" value="${storage.get("openai-model") || "gpt-4o-mini"}" placeholder="gpt-4o-mini">
-            <span class="slt-description">e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo</span>
-        </div>
-
-        <div class="slt-setting-row" id="slt-gemini-key-row" style="display: ${storage.get("preferred-api") === "gemini" ? "flex" : "none"}">
-            <label for="slt-gemini-api-key">Gemini API Key</label>
-            <input type="password" id="slt-gemini-api-key" value="${storage.get("gemini-api-key") || ""}" placeholder="AIza...">
-            <span class="slt-description">Get a key at aistudio.google.com/apikey</span>
-        </div>
-        
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-auto-translate">Auto-Translate on Song Change</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-auto-translate" ${storage.get("auto-translate") === "true" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-        
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-show-notifications">Show Notifications</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-show-notifications" ${storage.get("show-notifications") !== "false" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-show-quality-indicator">Show Translation Quality Indicator</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-show-quality-indicator" ${storage.get("show-quality-indicator") !== "false" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-vocabulary-mode">Vocabulary / Learning Mode</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-vocabulary-mode" ${storage.get("vocabulary-mode") === "true" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row slt-toggle-row">
-            <label for="slt-hide-connection-indicator">Hide Connection Status</label>
-            <label class="slt-toggle">
-                <input type="checkbox" id="slt-hide-connection-indicator" ${storage.get("hide-connection-indicator") === "true" ? "checked" : ""}>
-                <span class="slt-toggle-slider"></span>
-            </label>
-        </div>
-
-        <div class="slt-setting-row">
-            <button class="slt-button" id="slt-view-cache">View Translation Cache</button>
-        </div>
-        
-        <div class="slt-setting-row" style="flex-direction: row; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div class="slt-modal-footer">
             <div>
                 <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
                 ${(() => {
@@ -7902,134 +8301,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 <span style="margin: 0 8px; color: var(--spice-subtext);">\u2022</span>
                 <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
             </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button class="slt-button" id="slt-view-changelog-popup" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">View Changelog</button>
-                <button class="slt-button" id="slt-check-updates" style="padding: 9px 18px; font-size: 13px; white-space: nowrap;">Check for Updates</button>
+            <div class="slt-modal-footer-buttons">
+                <button class="slt-button secondary" id="slt-view-changelog-popup">View Changelog</button>
+                <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
             </div>
         </div>
         
-        <div class="slt-setting-row" style="padding-top: 0; opacity: 0.6;">
-            <span class="slt-description">Keyboard shortcut: Alt+T to toggle translation</span>
-        </div>
+        <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
     setTimeout(() => {
-      const targetLangSelect = container.querySelector("#slt-target-language");
-      const overlayModeSelect = container.querySelector("#slt-overlay-mode");
-      const preferredApiSelect = container.querySelector("#slt-preferred-api");
-      const customApiUrlInput = container.querySelector("#slt-custom-api-url");
-      const customApiRow = container.querySelector("#slt-custom-api-row");
-      const customApiKeyInput = container.querySelector("#slt-custom-api-key");
-      const customApiKeyRow = container.querySelector("#slt-custom-api-key-row");
-      const deeplApiKeyInput = container.querySelector("#slt-deepl-api-key");
-      const deeplKeyRow = container.querySelector("#slt-deepl-key-row");
-      const openaiApiKeyInput = container.querySelector("#slt-openai-api-key");
-      const openaiKeyRow = container.querySelector("#slt-openai-key-row");
-      const openaiModelInput = container.querySelector("#slt-openai-model");
-      const openaiModelRow = container.querySelector("#slt-openai-model-row");
-      const geminiApiKeyInput = container.querySelector("#slt-gemini-api-key");
-      const geminiKeyRow = container.querySelector("#slt-gemini-key-row");
-      const autoTranslateCheckbox = container.querySelector("#slt-auto-translate");
-      const showNotificationsCheckbox = container.querySelector("#slt-show-notifications");
-      const showQualityIndicatorCheckbox = container.querySelector("#slt-show-quality-indicator");
-      const vocabularyModeCheckbox = container.querySelector("#slt-vocabulary-mode");
-      const hideConnectionIndicatorCheckbox = container.querySelector("#slt-hide-connection-indicator");
+      bindModalSettingsFields(container);
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
       const checkUpdatesButton = container.querySelector("#slt-check-updates");
-      targetLangSelect?.addEventListener("change", () => {
-        storage.set("target-language", targetLangSelect.value);
-        state.targetLanguage = targetLangSelect.value;
-      });
-      overlayModeSelect?.addEventListener("change", () => {
-        const mode = overlayModeSelect.value;
-        storage.set("overlay-mode", mode);
-        state.overlayMode = mode;
-        reapplyTranslations();
-      });
-      preferredApiSelect?.addEventListener("change", () => {
-        const api = preferredApiSelect.value;
-        storage.set("preferred-api", api);
-        state.preferredApi = api;
-        setPreferredApi(api, customApiUrlInput?.value || "", {
-          customApiKey: state.customApiKey,
-          deeplApiKey: state.deeplApiKey,
-          openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel,
-          geminiApiKey: state.geminiApiKey
-        });
-        if (customApiRow)
-          customApiRow.style.display = api === "custom" ? "flex" : "none";
-        if (customApiKeyRow)
-          customApiKeyRow.style.display = api === "custom" ? "flex" : "none";
-        if (deeplKeyRow)
-          deeplKeyRow.style.display = api === "deepl" ? "flex" : "none";
-        if (openaiKeyRow)
-          openaiKeyRow.style.display = api === "openai" ? "flex" : "none";
-        if (openaiModelRow)
-          openaiModelRow.style.display = api === "openai" ? "flex" : "none";
-        if (geminiKeyRow)
-          geminiKeyRow.style.display = api === "gemini" ? "flex" : "none";
-      });
-      customApiUrlInput?.addEventListener("change", () => {
-        storage.set("custom-api-url", customApiUrlInput.value);
-        state.customApiUrl = customApiUrlInput.value;
-        setPreferredApi(state.preferredApi, customApiUrlInput.value, {
-          customApiKey: state.customApiKey,
-          deeplApiKey: state.deeplApiKey,
-          openaiApiKey: state.openaiApiKey,
-          openaiModel: state.openaiModel,
-          geminiApiKey: state.geminiApiKey
-        });
-      });
-      customApiKeyInput?.addEventListener("change", () => {
-        storage.set("custom-api-key", customApiKeyInput.value);
-        state.customApiKey = customApiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { customApiKey: customApiKeyInput.value });
-      });
-      deeplApiKeyInput?.addEventListener("change", () => {
-        storage.set("deepl-api-key", deeplApiKeyInput.value);
-        state.deeplApiKey = deeplApiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { deeplApiKey: deeplApiKeyInput.value });
-      });
-      openaiApiKeyInput?.addEventListener("change", () => {
-        storage.set("openai-api-key", openaiApiKeyInput.value);
-        state.openaiApiKey = openaiApiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiApiKey: openaiApiKeyInput.value });
-      });
-      openaiModelInput?.addEventListener("change", () => {
-        storage.set("openai-model", openaiModelInput.value);
-        state.openaiModel = openaiModelInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { openaiModel: openaiModelInput.value });
-      });
-      geminiApiKeyInput?.addEventListener("change", () => {
-        storage.set("gemini-api-key", geminiApiKeyInput.value);
-        state.geminiApiKey = geminiApiKeyInput.value;
-        setPreferredApi(state.preferredApi, state.customApiUrl, { geminiApiKey: geminiApiKeyInput.value });
-      });
-      autoTranslateCheckbox?.addEventListener("change", () => {
-        storage.set("auto-translate", String(autoTranslateCheckbox.checked));
-        state.autoTranslate = autoTranslateCheckbox.checked;
-      });
-      showNotificationsCheckbox?.addEventListener("change", () => {
-        storage.set("show-notifications", String(showNotificationsCheckbox.checked));
-        state.showNotifications = showNotificationsCheckbox.checked;
-      });
-      showQualityIndicatorCheckbox?.addEventListener("change", () => {
-        storage.set("show-quality-indicator", String(showQualityIndicatorCheckbox.checked));
-        state.showQualityIndicator = showQualityIndicatorCheckbox.checked;
-        document.body.classList.toggle("slt-hide-quality-indicator", !showQualityIndicatorCheckbox.checked);
-      });
-      vocabularyModeCheckbox?.addEventListener("change", () => {
-        storage.set("vocabulary-mode", String(vocabularyModeCheckbox.checked));
-        state.vocabularyMode = vocabularyModeCheckbox.checked;
-        document.body.classList.toggle("slt-vocabulary-mode", vocabularyModeCheckbox.checked);
-        reapplyTranslations();
-      });
-      hideConnectionIndicatorCheckbox?.addEventListener("change", () => {
-        storage.set("hide-connection-indicator", String(hideConnectionIndicatorCheckbox.checked));
-        state.hideConnectionIndicator = hideConnectionIndicatorCheckbox.checked;
-        document.body.classList.toggle("slt-hide-connection-indicator", hideConnectionIndicatorCheckbox.checked);
-      });
       viewCacheButton?.addEventListener("click", () => {
         Spicetify.PopupModal?.hide();
         setTimeout(() => openCacheViewer(), 150);
@@ -8189,15 +8473,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     };
     const content = document.createElement("div");
     content.className = "slt-lyrics-viewer";
+    const copyLabel = "Copy Lyrics";
+    const backToCacheLabel = "< Back to Cache";
     content.innerHTML = `
         <style>
             .slt-lyrics-viewer {
-                width: min(2640px, calc(96vw - 28px));
-                max-width: calc(96vw - 28px);
-                max-height: 76vh;
+                width: min(760px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
+                padding: 18px 22px 22px;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: hidden;
@@ -8211,17 +8498,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 display: flex;
                 justify-content: flex-end;
                 gap: 8px;
+                flex-wrap: wrap;
             }
             .slt-lyrics-copy {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-button);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
                 transition: opacity 0.2s, background 0.2s;
+                white-space: nowrap;
             }
             .slt-lyrics-copy:hover {
                 opacity: 0.85;
@@ -8230,14 +8520,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 background: #1db954;
             }
             .slt-lyrics-back {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-main-elevated);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
+                white-space: nowrap;
             }
             .slt-lyrics-back:hover {
                 opacity: 0.85;
@@ -8250,7 +8542,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 border-radius: 8px;
                 overflow-y: auto;
                 overflow-x: hidden;
-                max-height: 66vh;
+                max-height: min(54vh, 560px);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            #slt-lyrics-rows {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
             }
             .slt-lyrics-row {
                 display: grid;
@@ -8266,18 +8564,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 white-space: pre-wrap;
                 word-break: break-word;
                 overflow-wrap: anywhere;
+                min-width: 0;
             }
             .slt-lyrics-head {
                 font-size: 11px;
                 text-transform: uppercase;
-                letter-spacing: 0.04em;
                 color: var(--spice-subtext);
-                font-weight: 600;
+                font-weight: 700;
+            }
+            @media (max-width: 620px) {
+                .slt-lyrics-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-lyrics-toolbar {
+                    justify-content: flex-start;
+                }
+                .slt-lyrics-row {
+                    grid-template-columns: 1fr;
+                }
             }
         </style>
         <div class="slt-lyrics-toolbar">
-            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">\u{1F4CB} Copy Lyrics</button>
-            <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">\u2190 Back to Cache</button>
+            <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">Copy Lyrics</button>
+            <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">&lt; Back to Cache</button>
         </div>
         <div class="slt-lyrics-header">Track ID: ${escapeHtml2(getTrackIdFromUri2(trackUri))}</div>
         <div class="slt-lyrics-grid">
@@ -8290,6 +8600,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             </div>
         </div>
     `;
+    const copyAllButton = content.querySelector("#slt-lyrics-copy-all");
+    const backToCacheButton = content.querySelector("#slt-lyrics-back-to-cache");
+    if (copyAllButton)
+      copyAllButton.textContent = copyLabel;
+    if (backToCacheButton)
+      backToCacheButton.textContent = backToCacheLabel;
     if (Spicetify.PopupModal) {
       Spicetify.PopupModal.display({
         title: "Cached Lyrics Viewer",
@@ -8308,37 +8624,37 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const lines = [];
       const trackTitle = trackCache.trackName || getTrackIdFromUri2(trackUri);
       const trackArtist = trackCache.artistName || "";
-      lines.push(`${trackTitle}${trackArtist ? " \u2014 " + trackArtist : ""}`);
-      lines.push(`${sourceLang.toUpperCase()} \u2192 ${targetLang.toUpperCase()}`);
-      lines.push("\u2500".repeat(40));
+      lines.push(`${trackTitle}${trackArtist ? " - " + trackArtist : ""}`);
+      lines.push(`${sourceLang.toUpperCase()} -> ${targetLang.toUpperCase()}`);
+      lines.push("-".repeat(40));
       rows.forEach((row) => {
         const cols = row.querySelectorAll(".slt-lyrics-col");
         if (cols.length >= 2) {
           const src = (cols[0].textContent || "").trim();
           const tgt = (cols[1].textContent || "").trim();
           if (src || tgt) {
-            lines.push(src || "\u266A");
+            lines.push(src || "");
             if (tgt && tgt !== src)
-              lines.push(`  \u2192 ${tgt}`);
+              lines.push(`  -> ${tgt}`);
             lines.push("");
           }
         }
       });
-      lines.push("\u2500".repeat(40));
+      lines.push("-".repeat(40));
       lines.push("Exported from Spicy Lyric Translator");
       const text = lines.join("\n");
       try {
         await navigator.clipboard.writeText(text);
-        copyBtn.textContent = "\u2713 Copied!";
+        copyBtn.textContent = "Copied!";
         copyBtn.classList.add("slt-copied");
         setTimeout(() => {
-          copyBtn.textContent = "\u{1F4CB} Copy Lyrics";
+          copyBtn.textContent = copyLabel;
           copyBtn.classList.remove("slt-copied");
         }, 2e3);
       } catch (e) {
-        copyBtn.textContent = "\u2717 Failed";
+        copyBtn.textContent = "Failed";
         setTimeout(() => {
-          copyBtn.textContent = "\u{1F4CB} Copy Lyrics";
+          copyBtn.textContent = copyLabel;
         }, 2e3);
       }
     });
@@ -8379,19 +8695,24 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     container.innerHTML = `
         <style>
             .slt-cache-viewer {
-                padding: 16px;
+                padding: 18px 22px 22px;
                 display: flex;
                 flex-direction: column;
-                gap: 16px;
-                max-height: 60vh;
+                gap: 12px;
+                width: min(680px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
+                box-sizing: border-box;
+                overflow: hidden;
             }
             .slt-cache-stats {
                 display: grid;
                 grid-template-columns: repeat(2, 1fr);
                 gap: 12px;
-                padding: 12px;
+                padding: 14px;
                 background: var(--spice-card);
                 border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
             }
             .slt-stat {
                 display: flex;
@@ -8402,28 +8723,33 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 font-size: 11px;
                 color: var(--spice-subtext);
                 text-transform: uppercase;
+                line-height: 1.35;
             }
             .slt-stat-value {
                 font-size: 18px;
-                font-weight: 600;
+                font-weight: 700;
                 color: var(--spice-text);
+                line-height: 1.25;
             }
             .slt-cache-list {
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
                 overflow-y: auto;
-                max-height: 300px;
+                min-height: 160px;
+                max-height: min(42vh, 420px);
                 padding-right: 8px;
             }
             .slt-cache-item {
-                display: flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
-                justify-content: space-between;
-                padding: 10px 12px;
+                padding: 12px 14px;
                 background: var(--spice-card);
-                border-radius: 6px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
                 gap: 12px;
+                min-width: 0;
             }
             .slt-cache-item-info {
                 display: flex;
@@ -8433,35 +8759,42 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 min-width: 0;
             }
             .slt-cache-item-title {
-                font-size: 13px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
                 color: var(--spice-text);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                line-height: 1.35;
             }
             .slt-cache-item-artist {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--spice-subtext);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                line-height: 1.35;
             }
             .slt-cache-item-meta {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--spice-subtext);
-                opacity: 0.7;
+                opacity: 0.78;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
             }
             .slt-cache-delete {
-                padding: 6px 10px;
+                min-height: 36px;
+                padding: 8px 14px;
                 border-radius: 4px;
                 border: none;
                 background: rgba(255, 80, 80, 0.2);
                 color: #ff5050;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
-                transition: background 0.2s;
+                transition: opacity 0.2s, background 0.2s;
                 flex-shrink: 0;
+                white-space: nowrap;
             }
             .slt-cache-delete:hover {
                 background: rgba(255, 80, 80, 0.4);
@@ -8469,32 +8802,38 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             .slt-cache-item-actions {
                 display: flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
                 flex-shrink: 0;
             }
             .slt-cache-action {
-                padding: 6px 10px;
+                min-height: 36px;
+                padding: 8px 14px;
                 border-radius: 4px;
                 border: none;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
-                transition: opacity 0.2s;
+                transition: opacity 0.2s, background 0.2s;
                 color: var(--spice-text);
                 background: var(--spice-main-elevated);
+                white-space: nowrap;
             }
             .slt-cache-action:hover {
                 opacity: 0.85;
             }
             .slt-cache-delete-all {
-                padding: 10px 20px;
+                min-height: 40px;
+                padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
                 background: rgba(255, 80, 80, 0.2);
                 color: #ff5050;
-                font-size: 14px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
                 transition: background 0.2s;
+                white-space: normal;
+                text-align: center;
             }
             .slt-cache-delete-all:hover {
                 background: rgba(255, 80, 80, 0.4);
@@ -8504,6 +8843,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 padding: 24px;
                 color: var(--spice-subtext);
                 font-size: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
             }
             .slt-cache-actions {
                 display: flex;
@@ -8515,21 +8856,40 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 justify-content: flex-end;
             }
             .slt-cache-back {
+                min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 999px;
+                border-radius: 500px;
                 border: none;
                 background: var(--spice-main-elevated);
                 color: var(--spice-text);
-                font-size: 12px;
-                font-weight: 600;
+                font-size: 13px;
+                font-weight: 700;
                 cursor: pointer;
+                white-space: nowrap;
             }
             .slt-cache-back:hover {
                 opacity: 0.85;
             }
+            @media (max-width: 620px) {
+                .slt-cache-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-cache-stats {
+                    grid-template-columns: 1fr;
+                }
+                .slt-cache-item {
+                    grid-template-columns: 1fr;
+                    align-items: stretch;
+                }
+                .slt-cache-item-actions {
+                    justify-content: flex-start;
+                    flex-wrap: wrap;
+                }
+            }
         </style>
         <div class="slt-cache-toolbar">
-            <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">\u2190 Back to Settings</button>
+            <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
         
         <div class="slt-cache-stats">
@@ -8561,7 +8921,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                             <div class="slt-cache-item-info">
                                 <span class="slt-cache-item-title">${escapeHtml2(displayTitle)}</span>
                                 ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml2(displayArtist)}</span>` : ""}
-                                <span class="slt-cache-item-meta">${track.sourceLang} \u2192 ${track.targetLang} \xB7 ${track.lineCount} lines \xB7 ${formatDate(track.timestamp)}</span>
+                                <span class="slt-cache-item-meta">${track.sourceLang} -> ${track.targetLang} - ${track.lineCount} lines - ${formatDate(track.timestamp)}</span>
                             </div>
                             <div class="slt-cache-item-actions">
                                 <button class="slt-cache-action slt-cache-play" data-index="${index}">Play</button>
@@ -9136,6 +9496,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     setPreferredApi(state.preferredApi, state.customApiUrl, {
       customApiKey: state.customApiKey,
+      customApiFormat: state.customApiFormat,
+      customApiModel: state.customApiModel,
       deeplApiKey: state.deeplApiKey,
       openaiApiKey: state.openaiApiKey,
       openaiModel: state.openaiModel,
@@ -9164,9 +9526,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     setupViewModeObserver();
+    let lastPlayerTrackUri = getCurrentTrackUri();
     if (Spicetify.Player?.addEventListener) {
       Spicetify.Player.addEventListener("songchange", () => {
         const previousFirstLine = getLyricsFirstLineText();
+        const previousTrackUri = lastPlayerTrackUri;
+        lastPlayerTrackUri = getCurrentTrackUri();
         state.isTranslating = false;
         state.translatedLyrics.clear();
         state._translationsByIndex = void 0;
@@ -9180,7 +9545,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             storage.set("translation-enabled", "true");
             updateButtonState();
           }
-          waitForLyricsAndTranslate(20, 800, previousFirstLine);
+          waitForLyricsAndTranslate(20, 800, previousFirstLine, previousTrackUri);
         }
       });
     }

@@ -201,6 +201,19 @@ export function restoreButtonState(): void {
     });
 }
 
+function setTranslateButtonsLoading(isLoading: boolean): void {
+    const buttons = [
+        document.querySelector('#TranslateToggle'),
+        getPIPWindow()?.document.querySelector('#TranslateToggle')
+    ];
+
+    buttons.forEach(button => {
+        if (!button) return;
+        button.classList.toggle('loading', isLoading);
+        button.innerHTML = isLoading ? Icons.Loading : (state.isEnabled ? Icons.Translate : Icons.TranslateOff);
+    });
+}
+
 export function setButtonErrorState(hasError: boolean): void {
     const buttons = [
         document.querySelector('#TranslateToggle'),
@@ -401,7 +414,9 @@ export function getLyricsFirstLineText(): string | null {
     return null;
 }
 
-export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null): Promise<void> {
+export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null, previousTrackUri?: string | null): Promise<void> {
+    const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
+
     for (let i = 0; i < retries; i++) {
         if (!isSpicyLyricsOpen() || state.isTranslating) return;
 
@@ -409,7 +424,8 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
         if (lines.length > 0) {
             const firstLineText = lines[0].textContent?.trim();
             if (firstLineText && firstLineText.length > 0) {
-                if (previousFirstLine && firstLineText === previousFirstLine) {
+                const currentTrackUri = getCurrentTrackUri();
+                if (previousFirstLine && firstLineText === previousFirstLine && (i < staleLineRetryLimit || Boolean(previousTrackUri && currentTrackUri === previousTrackUri))) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
@@ -466,17 +482,7 @@ export async function translateCurrentLyrics(): Promise<void> {
     if (lines.length === 0) return;
     
     state.isTranslating = true;
-    
-    const buttons = [
-        document.querySelector('#TranslateToggle'),
-        getPIPWindow()?.document.querySelector('#TranslateToggle')
-    ];
-    buttons.forEach(b => {
-        if(b) {
-            b.classList.add('loading');
-            b.innerHTML = Icons.Loading;
-        }
-    });
+    let buttonsLoading = false;
     
     try {
         let domLineTexts: string[] = [];
@@ -484,21 +490,32 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         const nonEmptyDomTexts = domLineTexts.filter(t => t.trim().length > 0);
         if (nonEmptyDomTexts.length === 0) {
-            state.isTranslating = false;
-            restoreButtonState();
             return;
         }
 
         const currentTrackUri = getCurrentTrackUri();
         const romanizationOn = isRomanizationActive();
+        let preApiSkipCheck: { skip: boolean; reason?: string; detectedLanguage?: string } | null = null;
 
-        if (romanizationOn) {
-        } else {
-            const preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
+        if (!romanizationOn) {
+            preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
             if (preApiSkipCheck.detectedLanguage) {
                 state.detectedLanguage = preApiSkipCheck.detectedLanguage;
             }
+
+            if (preApiSkipCheck.skip && getConfidentNonTargetLineIndexes(domLineTexts, state.targetLanguage).length === 0) {
+                removeTranslations();
+                state.lastTranslatedSongUri = currentTrackUri;
+                lastTranslatedRomanizationState = romanizationOn;
+                if (state.showNotifications && Spicetify.showNotification) {
+                    Spicetify.showNotification(preApiSkipCheck.reason || 'Lyrics already in target language');
+                }
+                return;
+            }
         }
+
+        setTranslateButtonsLoading(true);
+        buttonsLoading = true;
 
         let apiLineTexts: string[] | null = null;
         let apiLanguage: string | undefined;
@@ -629,8 +646,6 @@ export async function translateCurrentLyrics(): Promise<void> {
         
         const nonEmptyTexts = lineTexts.filter(t => t.trim().length > 0);
         if (nonEmptyTexts.length === 0) {
-            state.isTranslating = false;
-            restoreButtonState();
             return;
         }
         
@@ -655,7 +670,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                 skipCheck = { skip: false, detectedLanguage: apiLanguage };
             }
         } else {
-            skipCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
+            skipCheck = preApiSkipCheck || await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
         }
         
         if (skipCheck.detectedLanguage) state.detectedLanguage = skipCheck.detectedLanguage;
@@ -881,7 +896,9 @@ export async function translateCurrentLyrics(): Promise<void> {
         setTimeout(() => setButtonErrorState(false), 3000);
     } finally {
         state.isTranslating = false;
-        restoreButtonState();
+        if (buttonsLoading) {
+            restoreButtonState();
+        }
     }
 }
 
