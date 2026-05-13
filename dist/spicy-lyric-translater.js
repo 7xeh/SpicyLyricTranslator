@@ -293,6 +293,24 @@ var SpicyLyricTranslater = (() => {
     }
     return entry;
   }
+  function normalizeLanguageBase(lang) {
+    return (lang || "").trim().toLowerCase().replace(/_/g, "-").split("-")[0];
+  }
+  function isSameCacheLanguage(sourceLang, targetLang) {
+    const source = normalizeLanguageBase(sourceLang);
+    const target = normalizeLanguageBase(targetLang);
+    return Boolean(source && target && source === target);
+  }
+  function hasNonLatinScript(text) {
+    return /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(text || "");
+  }
+  function isSameLanguageNoopCache(entry, targetLang) {
+    if (!isSameCacheLanguage(entry.lang, targetLang))
+      return false;
+    if (!entry.sourceLines || entry.sourceLines.length !== entry.lines.length)
+      return false;
+    return !entry.sourceLines.some((line, index) => hasNonLatinScript(line) && (entry.lines[index] || "").trim() !== line.trim());
+  }
   function pruneTrackCache(maxTracks = CACHE_MAX_TRACKS) {
     const storage2 = getStorage();
     if (!storage2)
@@ -310,6 +328,11 @@ var SpicyLyricTranslater = (() => {
           return;
         const entry = parseTrackCacheEntry(entryStr);
         if (!entry || now - entry.timestamp > CACHE_EXPIRY_MS) {
+          storage2.removeItem(cacheKey);
+          return;
+        }
+        const parsed = parseFullKey(fullKey);
+        if (!parsed || isSameLanguageNoopCache(entry, parsed.targetLang)) {
           storage2.removeItem(cacheKey);
           return;
         }
@@ -360,6 +383,11 @@ var SpicyLyricTranslater = (() => {
         return null;
       }
       if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
+        storage2.removeItem(cacheKey);
+        pruneTrackCache();
+        return null;
+      }
+      if (isSameLanguageNoopCache(entry, targetLang)) {
         storage2.removeItem(cacheKey);
         pruneTrackCache();
         return null;
@@ -648,7 +676,8 @@ var SpicyLyricTranslater = (() => {
     { code: "pt", words: ["o", "a", "os", "as", "de", "que", "e", "em", "um", "uma", "\xE9", "n\xE3o", "eu", "tu", "ele", "ela", "n\xF3s", "voc\xEA", "com", "para", "meu", "seu", "muito", "bem", "sim", "aqui", "agora", "onde", "quando", "sempre", "tamb\xE9m", "porque", "mais", "nunca", "tudo", "nada", "sem"] },
     { code: "it", words: ["il", "la", "lo", "gli", "le", "di", "che", "e", "un", "una", "\xE8", "non", "io", "tu", "lui", "lei", "noi", "voi", "con", "per", "anche", "ancora", "molto", "bene", "quando", "dove", "sempre", "mai", "tutto", "mio", "mia", "tuo", "suo"] },
     { code: "nl", words: ["de", "het", "een", "en", "van", "is", "dat", "op", "te", "in", "voor", "niet", "met", "zijn", "maar", "ook", "als", "dit"] },
-    { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak"] },
+    { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak", "dalej", "sk\u0105d", "niby", "z\u0142o", "b\xF3l", "n\xF3\u017C", "da\u0107", "gar\u015B\u0107", "nigdy", "we", "nikt", "kolejny", "raz", "boli", "mnie", "wiesz", "dosi\u0119gnie", "moja", "psychika", "zabija", "ostry", "wezm\u0119", "lek\xF3w", "chcia\u0142abym", "nic", "czu\u0107", "b\u0119d\u0119", "pod", "go\u0142ym", "niebem", "gwiazd", "mie\u0107", "ju\u017C", "\u017Cadnych", "ran", "przy", "sko\u0144czysz", "ca\u0142a", "\u0142zach"] },
+    { code: "lt", words: ["\u012F", "n\u0117ra", "\u010Dia", "ta\u010Diau", "kod\u0117l", "tod\u0117l", "ka\u017Ekas", "sutrikimas", "\u017Emogus", "\u0161irdis", "meil\u0117", "\u017Emon\u0117s", "gyvenimas", "akys", "rankos", "namuose", "namas", "namai", "namie", "i\u0161", "rytoj", "ryt", "\u0161iandien", "niekada", "visada", "atrodo", "kalb\u0117ti", "nebegaliu", "li\u016Bdna", "li\u016Bdnas", "skausmas", "neb\u0117ra", "kai", "kaip", "bybis", "byb\u012F", "dabar", "\u017Eodis", "\u017Eod\u017Eiai", "noriu"] },
     { code: "hi", words: ["hai", "hain", "hoon", "tha", "thi", "nahi", "nahin", "kya", "kaise", "kaisa", "kaisi", "kahan", "kyun", "kab", "mera", "meri", "tera", "teri", "tere", "tumhara", "hamara", "apna", "apni", "apne", "tujhe", "mujhe", "mujhko", "tujhko", "tumhe", "hume", "unhe", "isko", "usko", "uski", "iski", "iske", "uske", "dil", "pyar", "ishq", "mohabbat", "zindagi", "duniya", "sapna", "sapne", "raat", "din", "aankh", "aankhein", "ankhiyo", "nazar", "waqt", "gham", "khushi", "dard", "rang", "dhoop", "chand", "sitara", "dekho", "dekh", "dekhna", "suno", "sun", "sunna", "bolo", "bol", "bolna", "chalo", "chal", "chalna", "jao", "jana", "aao", "aaja", "aana", "karo", "karna", "milna", "mila", "milo", "ruk", "ruko", "rukna", "jeena", "jee", "nach", "nachle", "gaana", "gana", "bajao", "baja", "dikha", "dikhao", "dikhaa", "parda", "nakhre", "mein", "pe", "par", "wala", "wali", "wale", "bhi", "aur", "lekin", "magar", "phir", "abhi", "kabhi", "hamesha", "humesha", "sirf", "bas", "bahut", "bohot", "zyada", "kuch", "sab", "koi", "kaun", "yahan", "wahan", "udhar", "idhar", "accha", "acha", "theek", "bilkul", "zaroor", "sach", "jhooth", "alag", "saath", "mann", "mehboob", "dilbar", "sanam", "jannat", "husn", "jaane", "jaana", "toh", "se", "ke", "ka", "ki", "ko", "ne", "tu", "hum", "tum", "main", "yeh", "woh", "ab", "jab", "tab", "agar", "mat", "ya"] },
     { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
   ];
@@ -665,6 +694,7 @@ var SpicyLyricTranslater = (() => {
     portuguese: "pt",
     dutch: "nl",
     polish: "pl",
+    lithuanian: "lt",
     turkish: "tr",
     japanese: "ja",
     chinese: "zh",
@@ -855,8 +885,8 @@ var SpicyLyricTranslater = (() => {
   function detectLanguageHeuristic(text) {
     if (!text)
       return null;
-    const hasNonLatinScript = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text);
-    const minLength = hasNonLatinScript ? 1 : 10;
+    const hasNonLatinScript2 = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text);
+    const minLength = hasNonLatinScript2 ? 1 : 10;
     if (text.length < minLength) {
       return null;
     }
@@ -1229,13 +1259,40 @@ var SpicyLyricTranslater = (() => {
     if (!source)
       return false;
     const detected = detectLanguageHeuristic(source);
-    if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+    if (detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang)) {
       return true;
     }
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
       return true;
     }
     return false;
+  }
+  function getConfidentLineLanguage(text) {
+    const detected = detectLanguageHeuristic(text);
+    return detected && detected.confidence >= 0.6 ? detected.code : void 0;
+  }
+  function getConfidentLineLanguages(lines) {
+    const languages = /* @__PURE__ */ new Set();
+    for (const line of lines) {
+      const lang = getConfidentLineLanguage(line);
+      if (lang) {
+        languages.add(normalizeLanguageCode(lang));
+      }
+    }
+    return languages;
+  }
+  function getLineSourceLangHint(text, targetLang, fallbackSourceLang, mixedSourceTrack = false) {
+    const lineLang = getConfidentLineLanguage(text);
+    if (lineLang) {
+      return lineLang;
+    }
+    if (mixedSourceTrack) {
+      return void 0;
+    }
+    if (fallbackSourceLang && fallbackSourceLang !== "auto" && fallbackSourceLang !== "unknown" && !isSameLanguage(fallbackSourceLang, targetLang)) {
+      return fallbackSourceLang;
+    }
+    return void 0;
   }
   function looksLikeMarkerDebris(text) {
     if (!text)
@@ -1274,6 +1331,24 @@ var SpicyLyricTranslater = (() => {
       }
     }
     return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
+  }
+  function hasMeaningfulTranslationDifference(source, translated, targetLang) {
+    const sourceNorm = normalizeComparisonText(source);
+    const translatedNorm = normalizeComparisonText(translated);
+    if (!sourceNorm || !translatedNorm || sourceNorm === translatedNorm) {
+      return false;
+    }
+    if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+      return true;
+    }
+    const detected = detectLanguageHeuristic(source);
+    return Boolean(detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang));
+  }
+  function shouldInvalidateSameLanguageTrackCache(sourceLang, targetLang, sourceLines, cachedTranslatedLines) {
+    if (!sourceLang || !isSameLanguage(sourceLang, targetLang)) {
+      return false;
+    }
+    return !sourceLines.some((line, index) => hasMeaningfulTranslationDifference(line, cachedTranslatedLines[index] || "", targetLang));
   }
   async function rateLimitedDelay() {
     const now = Date.now();
@@ -1500,6 +1575,11 @@ var SpicyLyricTranslater = (() => {
     const cache = storage_default.getJSON("translation-cache", {});
     const key = `${targetLang}:${text}`;
     const normalizedTranslation = normalizeTranslatedLine(translation || "");
+    if (normalizedTranslation === text && shouldInvalidateIdentityTranslation(text, targetLang)) {
+      delete cache[key];
+      storage_default.setJSON("translation-cache", cache);
+      return;
+    }
     cache[key] = {
       translation: normalizedTranslation,
       timestamp: Date.now(),
@@ -2039,6 +2119,84 @@ ${text}`
     }
     return { translations, detectedLang };
   }
+  async function translateSourceAlignedBatch(lines, targetLang, sourceLang) {
+    if (lines.length === 0) {
+      return { translations: [] };
+    }
+    if (sourceLang && sourceLang !== "auto" && isSameLanguage(sourceLang, targetLang)) {
+      return { translations: [...lines], detectedLang: sourceLang };
+    }
+    if (lines.length === 1) {
+      const result = await retryWithBackoff(() => translateText(lines[0], targetLang, sourceLang));
+      return { translations: [result.translatedText], detectedLang: result.detectedLanguage };
+    }
+    if (preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") {
+      try {
+        const batchResult = await retryWithBackoff(() => translateBatchArray(lines, targetLang));
+        if (batchResult.translations.length === lines.length) {
+          return batchResult;
+        }
+      } catch (batchArrayError) {
+        warn("Source-aligned batch-array translation unavailable, falling back to marker batching:", batchArrayError);
+      }
+    }
+    try {
+      const { combinedText, markerNonce } = buildMarkedBatchPayload(lines);
+      const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
+      const parsed = parseMarkedBatchResponse(result.translatedText, lines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, lines.length);
+      if (parsed && parsed.length === lines.length) {
+        return { translations: parsed, detectedLang: result.detectedLanguage };
+      }
+    } catch (markerBatchError) {
+      warn("Source-aligned marker batch failed, falling back to chunked batch:", markerBatchError);
+    }
+    try {
+      return await translateChunkedBatch(lines, targetLang, BATCH_CHUNK_SIZE, sourceLang);
+    } catch (chunkedError) {
+      warn("Source-aligned chunked batch failed, falling back to per-line translation:", chunkedError);
+    }
+    const translations = [];
+    let detectedLang;
+    for (const line of lines) {
+      const result = await retryWithBackoff(() => translateText(line, targetLang, sourceLang));
+      translations.push(result.translatedText);
+      if (!detectedLang && result.detectedLanguage) {
+        detectedLang = result.detectedLanguage;
+      }
+    }
+    return { translations, detectedLang };
+  }
+  async function translateMixedSourceChunks(items, targetLang, fallbackSourceLang) {
+    const translations = new Array(items.length);
+    const groups = /* @__PURE__ */ new Map();
+    let detectedLang;
+    items.forEach((item, localIndex) => {
+      const sourceLang = getLineSourceLangHint(item.text, targetLang, fallbackSourceLang, true) || "auto";
+      const normalizedSourceLang = normalizeSourceLangHint(sourceLang);
+      if (normalizedSourceLang !== "auto" && isSameLanguage(normalizedSourceLang, targetLang)) {
+        translations[localIndex] = item.text;
+        return;
+      }
+      const groupKey = normalizedSourceLang || "auto";
+      const group = groups.get(groupKey) || [];
+      group.push({ localIndex, text: item.text });
+      groups.set(groupKey, group);
+    });
+    for (const [sourceLang, group] of groups) {
+      const hint = sourceLang === "auto" ? void 0 : sourceLang;
+      const result = await translateSourceAlignedBatch(group.map((item) => item.text), targetLang, hint);
+      result.translations.forEach((translated, groupIndex) => {
+        translations[group[groupIndex].localIndex] = translated;
+      });
+      if (!detectedLang && result.detectedLang) {
+        detectedLang = result.detectedLang;
+      }
+    }
+    return {
+      translations: items.map((item, index) => translations[index] || item.text),
+      detectedLang
+    };
+  }
   async function translateText(text, targetLang, sourceLang) {
     const cached = getCachedTranslation(text, targetLang);
     if (cached) {
@@ -2162,6 +2320,8 @@ ${text}`
   async function translateLyrics(lines, targetLang, trackUri, detectedSourceLang) {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
+    const lineLanguages = getConfidentLineLanguages(lines);
+    const hasMixedSourceLanguages = lineLanguages.size > 1;
     if (!detectedSourceLang || detectedSourceLang === "auto" || detectedSourceLang === "unknown") {
       const inferred = inferDominantSourceLangFromLines(lines);
       if (inferred) {
@@ -2171,7 +2331,9 @@ ${text}`
     if (currentTrackUri) {
       const trackCache = getTrackCache(currentTrackUri, targetLang);
       if (trackCache && trackCache.lines.length === lines.length) {
-        if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
+        if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
+          deleteTrackCache(currentTrackUri, targetLang);
+        } else if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
           if (!shouldInvalidateTrackCacheForMixedContent(lines, trackCache.lines, targetLang)) {
             return lines.map((line, index) => ({
               originalText: line,
@@ -2221,7 +2383,8 @@ ${text}`
     });
     if (uncachedLines.length === 0) {
       const finalResults = lines.map((_, index) => cachedResults.get(index));
-      if (currentTrackUri) {
+      const someTranslated2 = finalResults.some((r) => r.wasTranslated);
+      if (currentTrackUri && someTranslated2) {
         const translatedLines = finalResults.map((r) => r.translatedText);
         setTrackCache(currentTrackUri, targetLang, detectedSourceLang || "auto", translatedLines, preferredApi, sourceFingerprint, void 0, void 0, lines);
       }
@@ -2230,7 +2393,7 @@ ${text}`
     let detectedLang = detectedSourceLang || "auto";
     try {
       let translatedLines = null;
-      if ((preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
+      if (!hasMixedSourceLanguages && (preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
         try {
           const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map((l) => l.text), targetLang));
           translatedLines = batchResult.translations;
@@ -2241,7 +2404,7 @@ ${text}`
           warn("Batch-array translation unavailable, falling back to marker batching:", batchArrayError);
         }
       }
-      if (!translatedLines) {
+      if (!translatedLines && !hasMixedSourceLanguages) {
         const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map((l) => l.text));
         const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
         translatedLines = parseMarkedBatchResponse(result.translatedText, uncachedLines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, uncachedLines.length);
@@ -2249,7 +2412,7 @@ ${text}`
           detectedLang = result.detectedLanguage;
         }
       }
-      if ((!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
+      if (!hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
         warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
         try {
           const chunked = await translateChunkedBatch(uncachedLines.map((l) => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
@@ -2262,14 +2425,20 @@ ${text}`
           translatedLines = null;
         }
       }
+      if (hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length)) {
+        const mixedResult = await translateMixedSourceChunks(uncachedLines, targetLang, detectedSourceLang);
+        translatedLines = mixedResult.translations;
+        detectedLang = mixedResult.detectedLang || "mixed";
+      }
       if (!translatedLines || translatedLines.length !== uncachedLines.length) {
         warn(`Batch parsing unreliable for target ${targetLang}, translating line-by-line (${uncachedLines.length} lines)`);
         const perLineResults = [];
         for (const item of uncachedLines) {
           try {
-            const single = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+            const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
+            const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
             perLineResults.push(single.translatedText);
-            if (single.detectedLanguage && detectedLang === (detectedSourceLang || "auto")) {
+            if (single.detectedLanguage && !hasMixedSourceLanguages && detectedLang === (detectedSourceLang || "auto")) {
               detectedLang = single.detectedLanguage;
             }
           } catch (singleError) {
@@ -2297,12 +2466,14 @@ ${text}`
         const initialTranslation = existing?.translatedText || item.text;
         let repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
         let finalTranslation = normalizeTranslatedLine(repairedTranslation || "") || item.text;
+        const sourceAndTargetMatch = isSameLanguage(detectedLang, targetLang);
         const sourceIsNonLatin = sourceHasNonLatinScript(item.text);
         const targetWantsLatin = targetLangIsLatinScript(targetLang);
         const suspiciousOutput = looksLikeMarkerDebris(finalTranslation) || sourceIsNonLatin && targetWantsLatin && finalTranslation === item.text;
         if (suspiciousOutput) {
           try {
-            const direct = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+            const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
+            const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
             const directNormalized = normalizeTranslatedLine(direct.translatedText || "");
             if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
               finalTranslation = directNormalized;
@@ -2313,7 +2484,12 @@ ${text}`
             warn("Direct re-translation failed for suspicious line:", item.index, directError);
           }
         }
-        cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+        if (sourceAndTargetMatch && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
+          finalTranslation = item.text;
+        }
+        if (finalTranslation !== item.text) {
+          cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+        }
         cachedResults.set(item.index, {
           originalText: item.text,
           translatedText: finalTranslation,
@@ -5272,7 +5448,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.2" : "0.0.0";
+    return true ? "2.0.3" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6753,7 +6929,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return null;
   }
-  async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine, previousTrackUri) {
+  async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine, _previousTrackUri) {
     const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
     for (let i = 0; i < retries; i++) {
       if (!isSpicyLyricsOpen() || state.isTranslating)
@@ -6762,11 +6938,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (lines.length > 0) {
         const firstLineText = lines[0].textContent?.trim();
         if (firstLineText && firstLineText.length > 0) {
-          const currentTrackUri = getCurrentTrackUri();
-          if (previousFirstLine && firstLineText === previousFirstLine && (i < staleLineRetryLimit || Boolean(previousTrackUri && currentTrackUri === previousTrackUri))) {
+          if (previousFirstLine && firstLineText === previousFirstLine && i < staleLineRetryLimit) {
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
+          setupLyricsObserver();
           await new Promise((resolve) => setTimeout(resolve, delay));
           await translateCurrentLyrics();
           return;
@@ -6968,8 +7144,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       } else if (apiLanguage && apiLanguage !== "unknown") {
         const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
         if (apiLangSame) {
-          const heuristicCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri2 || void 0);
-          skipCheck = heuristicCheck.skip ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage } : { skip: false, detectedLanguage: apiLanguage };
+          skipCheck = { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage };
         } else {
           skipCheck = { skip: false, detectedLanguage: apiLanguage };
         }
@@ -6997,7 +7172,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           partialLines,
           state.targetLanguage,
           void 0,
-          state.detectedLanguage || void 0
+          void 0
         );
         const translatedByIndex = /* @__PURE__ */ new Map();
         partialTranslations.forEach((result, idx) => {
@@ -7023,6 +7198,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         });
       } else {
         translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri2 || void 0, state.detectedLanguage || void 0);
+      }
+      if (currentTrackUri2 && getCurrentTrackUri() !== currentTrackUri2) {
+        return;
       }
       state.translatedLyrics.clear();
       const translationByContent = /* @__PURE__ */ new Map();
@@ -7166,6 +7344,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       };
       buildIndexMapsForLines(lines);
       const freshLines = getLyricsLines();
+      if (currentTrackUri2 && getCurrentTrackUri() !== currentTrackUri2) {
+        return;
+      }
       const useFresh = freshLines.length > 0;
       if (useFresh && freshLines !== lines) {
         buildIndexMapsForLines(freshLines);
@@ -7306,13 +7487,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return;
     observedLyricsContent = lyricsContent;
     try {
+      const hasLyricLineNode = (node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE)
+          return false;
+        const el = node;
+        return el.classList?.contains("line") || Boolean(el.querySelector?.(".line"));
+      };
       lyricsObserver = new MutationObserver((mutations) => {
         if (!state.isEnabled || state.isTranslating)
           return;
         const hasNewContent = mutations.some(
-          (m) => m.type === "childList" && m.addedNodes.length > 0 && Array.from(m.addedNodes).some(
-            (n) => n.nodeType === Node.ELEMENT_NODE && n.classList?.contains("line")
-          )
+          (m) => m.type === "childList" && m.addedNodes.length > 0 && Array.from(m.addedNodes).some(hasLyricLineNode)
         );
         if (hasNewContent && state.autoTranslate && !state.isTranslating) {
           if (translateDebounceTimer)
@@ -9532,10 +9717,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const previousFirstLine = getLyricsFirstLineText();
         const previousTrackUri = lastPlayerTrackUri;
         lastPlayerTrackUri = getCurrentTrackUri();
+        setTimeout(() => {
+          lastPlayerTrackUri = getCurrentTrackUri();
+        }, 1200);
         state.isTranslating = false;
         state.translatedLyrics.clear();
         state._translationsByIndex = void 0;
         state._qualityByIndex = void 0;
+        state.detectedLanguage = null;
         state.lastTranslatedSongUri = null;
         clearLyricsCache();
         removeTranslations();

@@ -161,13 +161,48 @@ function sourceHasNonLatinScript(text: string): boolean {
 function shouldInvalidateIdentityTranslation(source: string, targetLang: string): boolean {
     if (!source) return false;
     const detected = detectLanguageHeuristic(source);
-    if (detected && detected.confidence >= 0.8 && !isSameLanguage(detected.code, targetLang)) {
+    if (detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang)) {
         return true;
     }
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
         return true;
     }
     return false;
+}
+
+function getConfidentLineLanguage(text: string): string | undefined {
+    const detected = detectLanguageHeuristic(text);
+    return detected && detected.confidence >= 0.6 ? detected.code : undefined;
+}
+
+function getConfidentLineLanguages(lines: string[]): Set<string> {
+    const languages = new Set<string>();
+
+    for (const line of lines) {
+        const lang = getConfidentLineLanguage(line);
+        if (lang) {
+            languages.add(normalizeLanguageCode(lang));
+        }
+    }
+
+    return languages;
+}
+
+function getLineSourceLangHint(text: string, targetLang: string, fallbackSourceLang?: string, mixedSourceTrack: boolean = false): string | undefined {
+    const lineLang = getConfidentLineLanguage(text);
+    if (lineLang) {
+        return lineLang;
+    }
+
+    if (mixedSourceTrack) {
+        return undefined;
+    }
+
+    if (fallbackSourceLang && fallbackSourceLang !== 'auto' && fallbackSourceLang !== 'unknown' && !isSameLanguage(fallbackSourceLang, targetLang)) {
+        return fallbackSourceLang;
+    }
+
+    return undefined;
 }
 
 function looksLikeMarkerDebris(text: string): boolean {
@@ -214,6 +249,35 @@ function shouldInvalidateTrackCacheForMixedContent(
     }
 
     return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
+}
+
+function hasMeaningfulTranslationDifference(source: string, translated: string, targetLang: string): boolean {
+    const sourceNorm = normalizeComparisonText(source);
+    const translatedNorm = normalizeComparisonText(translated);
+
+    if (!sourceNorm || !translatedNorm || sourceNorm === translatedNorm) {
+        return false;
+    }
+
+    if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+        return true;
+    }
+
+    const detected = detectLanguageHeuristic(source);
+    return Boolean(detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang));
+}
+
+function shouldInvalidateSameLanguageTrackCache(
+    sourceLang: string | undefined,
+    targetLang: string,
+    sourceLines: string[],
+    cachedTranslatedLines: string[]
+): boolean {
+    if (!sourceLang || !isSameLanguage(sourceLang, targetLang)) {
+        return false;
+    }
+
+    return !sourceLines.some((line, index) => hasMeaningfulTranslationDifference(line, cachedTranslatedLines[index] || '', targetLang));
 }
 
 async function rateLimitedDelay(): Promise<void> {
@@ -467,6 +531,11 @@ function cacheTranslation(text: string, targetLang: string, translation: string,
     const cache = storage.getJSON<TranslationCache>('translation-cache', {});
     const key = `${targetLang}:${text}`;
     const normalizedTranslation = normalizeTranslatedLine(translation || '');
+    if (normalizedTranslation === text && shouldInvalidateIdentityTranslation(text, targetLang)) {
+        delete cache[key];
+        storage.setJSON('translation-cache', cache);
+        return;
+    }
     
     cache[key] = {
         translation: normalizedTranslation,
@@ -1127,6 +1196,107 @@ async function translateChunkedBatch(
     return { translations, detectedLang };
 }
 
+async function translateSourceAlignedBatch(lines: string[], targetLang: string, sourceLang?: string): Promise<{ translations: string[]; detectedLang?: string }> {
+    if (lines.length === 0) {
+        return { translations: [] };
+    }
+
+    if (sourceLang && sourceLang !== 'auto' && isSameLanguage(sourceLang, targetLang)) {
+        return { translations: [...lines], detectedLang: sourceLang };
+    }
+
+    if (lines.length === 1) {
+        const result = await retryWithBackoff(() => translateText(lines[0], targetLang, sourceLang));
+        return { translations: [result.translatedText], detectedLang: result.detectedLanguage };
+    }
+
+    if ((preferredApi === 'custom' && customApiSupportsBatchArray()) || preferredApi === 'libretranslate' || preferredApi === 'deepl') {
+        try {
+            const batchResult = await retryWithBackoff(() => translateBatchArray(lines, targetLang));
+            if (batchResult.translations.length === lines.length) {
+                return batchResult;
+            }
+        } catch (batchArrayError) {
+            warn('Source-aligned batch-array translation unavailable, falling back to marker batching:', batchArrayError);
+        }
+    }
+
+    try {
+        const { combinedText, markerNonce } = buildMarkedBatchPayload(lines);
+        const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
+        const parsed =
+            parseMarkedBatchResponse(result.translatedText, lines.length, markerNonce) ||
+            parseBatchTextFallbacks(result.translatedText, lines.length);
+
+        if (parsed && parsed.length === lines.length) {
+            return { translations: parsed, detectedLang: result.detectedLanguage };
+        }
+    } catch (markerBatchError) {
+        warn('Source-aligned marker batch failed, falling back to chunked batch:', markerBatchError);
+    }
+
+    try {
+        return await translateChunkedBatch(lines, targetLang, BATCH_CHUNK_SIZE, sourceLang);
+    } catch (chunkedError) {
+        warn('Source-aligned chunked batch failed, falling back to per-line translation:', chunkedError);
+    }
+
+    const translations: string[] = [];
+    let detectedLang: string | undefined;
+    for (const line of lines) {
+        const result = await retryWithBackoff(() => translateText(line, targetLang, sourceLang));
+        translations.push(result.translatedText);
+        if (!detectedLang && result.detectedLanguage) {
+            detectedLang = result.detectedLanguage;
+        }
+    }
+
+    return { translations, detectedLang };
+}
+
+async function translateMixedSourceChunks(
+    items: { index: number; text: string }[],
+    targetLang: string,
+    fallbackSourceLang?: string
+): Promise<{ translations: string[]; detectedLang?: string }> {
+    const translations = new Array<string>(items.length);
+    const groups = new Map<string, { localIndex: number; text: string }[]>();
+    let detectedLang: string | undefined;
+
+    items.forEach((item, localIndex) => {
+        const sourceLang = getLineSourceLangHint(item.text, targetLang, fallbackSourceLang, true) || 'auto';
+        const normalizedSourceLang = normalizeSourceLangHint(sourceLang);
+
+        if (normalizedSourceLang !== 'auto' && isSameLanguage(normalizedSourceLang, targetLang)) {
+            translations[localIndex] = item.text;
+            return;
+        }
+
+        const groupKey = normalizedSourceLang || 'auto';
+        const group = groups.get(groupKey) || [];
+        group.push({ localIndex, text: item.text });
+        groups.set(groupKey, group);
+    });
+
+    for (const [sourceLang, group] of groups) {
+        const hint = sourceLang === 'auto' ? undefined : sourceLang;
+        const result = await translateSourceAlignedBatch(group.map(item => item.text), targetLang, hint);
+
+        result.translations.forEach((translated, groupIndex) => {
+            translations[group[groupIndex].localIndex] = translated;
+        });
+
+        if (!detectedLang && result.detectedLang) {
+            detectedLang = result.detectedLang;
+        }
+    }
+
+    return {
+        translations: items.map((item, index) => translations[index] || item.text),
+        detectedLang
+    };
+}
+
 export async function translateText(text: string, targetLang: string, sourceLang?: string): Promise<TranslationResult> {
     const cached = getCachedTranslation(text, targetLang);
     if (cached) {
@@ -1257,6 +1427,8 @@ export async function translateLyrics(
 ): Promise<TranslationResult[]> {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
+    const lineLanguages = getConfidentLineLanguages(lines);
+    const hasMixedSourceLanguages = lineLanguages.size > 1;
 
     if (!detectedSourceLang || detectedSourceLang === 'auto' || detectedSourceLang === 'unknown') {
         const inferred = inferDominantSourceLangFromLines(lines);
@@ -1268,7 +1440,9 @@ export async function translateLyrics(
     if (currentTrackUri) {
         const trackCache = getTrackCache(currentTrackUri, targetLang);
         if (trackCache && trackCache.lines.length === lines.length) {
-            if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
+            if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
+                deleteTrackCache(currentTrackUri, targetLang);
+            } else if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
                 if (!shouldInvalidateTrackCacheForMixedContent(lines, trackCache.lines, targetLang)) {
                     return lines.map((line, index) => ({
                         originalText: line,
@@ -1322,8 +1496,9 @@ export async function translateLyrics(
     
     if (uncachedLines.length === 0) {
         const finalResults = lines.map((_, index) => cachedResults.get(index)!);
+        const someTranslated = finalResults.some(r => r.wasTranslated);
         
-        if (currentTrackUri) {
+        if (currentTrackUri && someTranslated) {
             const translatedLines = finalResults.map(r => r.translatedText);
             setTrackCache(currentTrackUri, targetLang, detectedSourceLang || 'auto', translatedLines, preferredApi, sourceFingerprint, undefined, undefined, lines);
         }
@@ -1336,7 +1511,7 @@ export async function translateLyrics(
     try {
         let translatedLines: string[] | null = null;
 
-        if (((preferredApi === 'custom' && customApiSupportsBatchArray()) || preferredApi === 'libretranslate' || preferredApi === 'deepl') && uncachedLines.length > 1) {
+        if (!hasMixedSourceLanguages && ((preferredApi === 'custom' && customApiSupportsBatchArray()) || preferredApi === 'libretranslate' || preferredApi === 'deepl') && uncachedLines.length > 1) {
             try {
                 const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map(l => l.text), targetLang));
                 translatedLines = batchResult.translations;
@@ -1348,7 +1523,7 @@ export async function translateLyrics(
             }
         }
 
-        if (!translatedLines) {
+        if (!translatedLines && !hasMixedSourceLanguages) {
             const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map(l => l.text));
             const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
             translatedLines =
@@ -1360,7 +1535,7 @@ export async function translateLyrics(
             }
         }
 
-        if ((!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
+        if (!hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
             warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
             try {
                 const chunked = await translateChunkedBatch(uncachedLines.map(l => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
@@ -1374,14 +1549,21 @@ export async function translateLyrics(
             }
         }
 
+        if (hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length)) {
+            const mixedResult = await translateMixedSourceChunks(uncachedLines, targetLang, detectedSourceLang);
+            translatedLines = mixedResult.translations;
+            detectedLang = mixedResult.detectedLang || 'mixed';
+        }
+
         if (!translatedLines || translatedLines.length !== uncachedLines.length) {
             warn(`Batch parsing unreliable for target ${targetLang}, translating line-by-line (${uncachedLines.length} lines)`);
             const perLineResults: string[] = [];
             for (const item of uncachedLines) {
                 try {
-                    const single = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+                    const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
+                    const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
                     perLineResults.push(single.translatedText);
-                    if (single.detectedLanguage && detectedLang === (detectedSourceLang || 'auto')) {
+                    if (single.detectedLanguage && !hasMixedSourceLanguages && detectedLang === (detectedSourceLang || 'auto')) {
                         detectedLang = single.detectedLanguage;
                     }
                 } catch (singleError) {
@@ -1412,6 +1594,7 @@ export async function translateLyrics(
             const initialTranslation = existing?.translatedText || item.text;
             let repairedTranslation = await repairMixedLineTranslation(item.text, initialTranslation, targetLang);
             let finalTranslation = normalizeTranslatedLine(repairedTranslation || '') || item.text;
+            const sourceAndTargetMatch = isSameLanguage(detectedLang, targetLang);
 
             const sourceIsNonLatin = sourceHasNonLatinScript(item.text);
             const targetWantsLatin = targetLangIsLatinScript(targetLang);
@@ -1421,7 +1604,8 @@ export async function translateLyrics(
 
             if (suspiciousOutput) {
                 try {
-                    const direct = await retryWithBackoff(() => translateText(item.text, targetLang, detectedSourceLang));
+                    const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
+                    const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
                     const directNormalized = normalizeTranslatedLine(direct.translatedText || '');
                     if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
                         finalTranslation = directNormalized;
@@ -1433,7 +1617,14 @@ export async function translateLyrics(
                 }
             }
 
-            cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+            if (sourceAndTargetMatch && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
+                finalTranslation = item.text;
+            }
+
+            if (finalTranslation !== item.text) {
+                cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+            }
+
             cachedResults.set(item.index, {
                 originalText: item.text,
                 translatedText: finalTranslation,

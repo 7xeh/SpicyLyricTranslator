@@ -72,10 +72,14 @@ export async function initialize(): Promise<void> {
             const previousFirstLine = getLyricsFirstLineText();
             const previousTrackUri = lastPlayerTrackUri;
             lastPlayerTrackUri = getCurrentTrackUri();
+            setTimeout(() => {
+                lastPlayerTrackUri = getCurrentTrackUri();
+            }, 1200);
             state.isTranslating = false;
             state.translatedLyrics.clear();
             state._translationsByIndex = undefined;
             state._qualityByIndex = undefined;
+            state.detectedLanguage = null;
             state.lastTranslatedSongUri = null;
             clearLyricsCache();
             removeTranslations();

@@ -103,6 +103,26 @@ function parseTrackCacheEntry(entryStr: string): TrackCacheEntry | null {
     return entry;
 }
 
+function normalizeLanguageBase(lang?: string): string {
+    return (lang || '').trim().toLowerCase().replace(/_/g, '-').split('-')[0];
+}
+
+function isSameCacheLanguage(sourceLang: string | undefined, targetLang: string): boolean {
+    const source = normalizeLanguageBase(sourceLang);
+    const target = normalizeLanguageBase(targetLang);
+    return Boolean(source && target && source === target);
+}
+
+function hasNonLatinScript(text: string): boolean {
+    return /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(text || '');
+}
+
+function isSameLanguageNoopCache(entry: TrackCacheEntry, targetLang: string): boolean {
+    if (!isSameCacheLanguage(entry.lang, targetLang)) return false;
+    if (!entry.sourceLines || entry.sourceLines.length !== entry.lines.length) return false;
+    return !entry.sourceLines.some((line, index) => hasNonLatinScript(line) && (entry.lines[index] || '').trim() !== line.trim());
+}
+
 function pruneTrackCache(maxTracks = CACHE_MAX_TRACKS): void {
     const storage = getStorage();
     if (!storage) return;
@@ -121,6 +141,12 @@ function pruneTrackCache(maxTracks = CACHE_MAX_TRACKS): void {
 
             const entry = parseTrackCacheEntry(entryStr);
             if (!entry || now - entry.timestamp > CACHE_EXPIRY_MS) {
+                storage.removeItem(cacheKey);
+                return;
+            }
+
+            const parsed = parseFullKey(fullKey);
+            if (!parsed || isSameLanguageNoopCache(entry, parsed.targetLang)) {
                 storage.removeItem(cacheKey);
                 return;
             }
@@ -179,6 +205,12 @@ export function getTrackCache(trackUri: string, targetLang: string): TrackCacheE
         }
         
         if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
+            storage.removeItem(cacheKey);
+            pruneTrackCache();
+            return null;
+        }
+
+        if (isSameLanguageNoopCache(entry, targetLang)) {
             storage.removeItem(cacheKey);
             pruneTrackCache();
             return null;

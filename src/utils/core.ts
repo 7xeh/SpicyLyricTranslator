@@ -414,7 +414,7 @@ export function getLyricsFirstLineText(): string | null {
     return null;
 }
 
-export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null, previousTrackUri?: string | null): Promise<void> {
+export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null, _previousTrackUri?: string | null): Promise<void> {
     const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
 
     for (let i = 0; i < retries; i++) {
@@ -424,11 +424,11 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
         if (lines.length > 0) {
             const firstLineText = lines[0].textContent?.trim();
             if (firstLineText && firstLineText.length > 0) {
-                const currentTrackUri = getCurrentTrackUri();
-                if (previousFirstLine && firstLineText === previousFirstLine && (i < staleLineRetryLimit || Boolean(previousTrackUri && currentTrackUri === previousTrackUri))) {
+                if (previousFirstLine && firstLineText === previousFirstLine && i < staleLineRetryLimit) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
+                setupLyricsObserver();
                  await new Promise(resolve => setTimeout(resolve, delay));
                  await translateCurrentLyrics();
                  return;
@@ -662,10 +662,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         } else if (apiLanguage && apiLanguage !== 'unknown') {
             const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
             if (apiLangSame) {
-                const heuristicCheck = await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
-                skipCheck = heuristicCheck.skip
-                    ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
-                    : { skip: false, detectedLanguage: apiLanguage };
+                skipCheck = { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage };
             } else {
                 skipCheck = { skip: false, detectedLanguage: apiLanguage };
             }
@@ -697,7 +694,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                 partialLines,
                 state.targetLanguage,
                 undefined,
-                state.detectedLanguage || undefined
+                undefined
             );
 
             const translatedByIndex = new Map<number, { translatedText: string; source?: 'cache' | 'api'; apiProvider?: string }>();
@@ -725,6 +722,10 @@ export async function translateCurrentLyrics(): Promise<void> {
             });
         } else {
             translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined);
+        }
+
+        if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri) {
+            return;
         }
         
         state.translatedLyrics.clear();
@@ -870,6 +871,9 @@ export async function translateCurrentLyrics(): Promise<void> {
         buildIndexMapsForLines(lines);
 
         const freshLines = getLyricsLines();
+        if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri) {
+            return;
+        }
         const useFresh = freshLines.length > 0;
         if (useFresh && freshLines !== lines) {
             buildIndexMapsForLines(freshLines);
@@ -1032,16 +1036,19 @@ export function setupLyricsObserver(): void {
     observedLyricsContent = lyricsContent;
     
     try {
+        const hasLyricLineNode = (node: Node): boolean => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return false;
+            const el = node as Element;
+            return el.classList?.contains('line') || Boolean(el.querySelector?.('.line'));
+        };
+
         lyricsObserver = new MutationObserver((mutations) => {
             if (!state.isEnabled || state.isTranslating) return;
             
             const hasNewContent = mutations.some(m => 
                 m.type === 'childList' && 
                 m.addedNodes.length > 0 &&
-                Array.from(m.addedNodes).some(n => 
-                    n.nodeType === Node.ELEMENT_NODE && 
-                    (n as Element).classList?.contains('line')
-                )
+                Array.from(m.addedNodes).some(hasLyricLineNode)
             );
             
             if (hasNewContent && state.autoTranslate && !state.isTranslating) {
