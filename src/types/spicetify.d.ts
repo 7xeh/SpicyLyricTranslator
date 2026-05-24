@@ -88,7 +88,7 @@ declare const Spicetify: {
     };
     CosmosAsync: {
         get: (url: string, body?: any) => Promise<any>;
-        post: (url: string, body?: any) => Promise<any>;
+        post: (url: string, body?: any, headers?: Record<string, string>) => Promise<any>;
         put: (url: string, body?: any) => Promise<any>;
         del: (url: string, body?: any) => Promise<any>;
     };

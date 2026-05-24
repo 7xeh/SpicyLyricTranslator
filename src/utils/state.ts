@@ -25,6 +25,8 @@ export interface ExtensionState {
     openaiApiKey: string;
     openaiModel: string;
     geminiApiKey: string;
+    geminiModel: string;
+    geminiTemperature: string;
     lastTranslatedSongUri: string | null;
     translatedLyrics: Map<string, string>;
     lastViewMode: string | null;
@@ -54,6 +56,8 @@ export const state: ExtensionState = {
     openaiApiKey: storage.getSecret('openai-api-key') || '',
     openaiModel: storage.get('openai-model') || 'gpt-4o-mini',
     geminiApiKey: storage.getSecret('gemini-api-key') || '',
+    geminiModel: storage.get('gemini-model') || 'gemini-2.0-flash',
+    geminiTemperature: storage.get('gemini-temperature') || '0.3',
     lastTranslatedSongUri: null,
     translatedLyrics: new Map(),
     lastViewMode: null,

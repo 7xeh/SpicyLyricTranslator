@@ -35,7 +35,9 @@ export async function initialize(): Promise<void> {
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
         openaiModel: state.openaiModel,
-        geminiApiKey: state.geminiApiKey
+        geminiApiKey: state.geminiApiKey,
+        geminiModel: state.geminiModel,
+        geminiTemperature: state.geminiTemperature
     });
     injectStyles();
     initConnectionIndicator();

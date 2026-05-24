@@ -41,6 +41,8 @@ let deeplApiKey: string = '';
 let openaiApiKey: string = '';
 let openaiModel: string = 'gpt-4o-mini';
 let geminiApiKey: string = '';
+let geminiModel: string = 'gemini-2.0-flash';
+let geminiTemperature: number = 0.3;
 
 const RATE_LIMIT = {
     minDelayMs: 100,
@@ -56,6 +58,7 @@ const BATCH_SEPARATOR_REGEX = /\s*\|\|\|\s*/g;
 const BATCH_MARKER_PREFIX = '[[SLT_BATCH_';
 const BATCH_CHUNK_SIZE = 6;
 const NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
+const SPICETIFY_CORS_PROXY_BASE = 'https://cors-proxy.spicetify.app/';
 
 function normalizeSourceLineForFingerprint(line: string): string {
     return (line || '')
@@ -289,6 +292,157 @@ async function rateLimitedDelay(): Promise<void> {
     lastApiCallTime = Date.now();
 }
 
+type ApiKeyConfig = {
+    customApiKey?: string;
+    customApiFormat?: CustomApiFormat;
+    customApiModel?: string;
+    deeplApiKey?: string;
+    openaiApiKey?: string;
+    openaiModel?: string;
+    geminiApiKey?: string;
+    geminiModel?: string;
+    geminiTemperature?: string | number;
+};
+
+type CosmosAsyncClient = {
+    post?: (url: string, body?: unknown, headers?: Record<string, string>) => Promise<unknown>;
+};
+
+function getCosmosAsync(): CosmosAsyncClient | null {
+    try {
+        return (globalThis as any).Spicetify?.CosmosAsync || null;
+    } catch {
+        return null;
+    }
+}
+
+function isLikelyCorsOrNetworkError(err: unknown): boolean {
+    if (err instanceof TypeError) return true;
+    const message = err instanceof Error ? err.message : String(err || '');
+    return /failed to fetch|networkerror|cors|load failed/i.test(message);
+}
+
+class NonRetryableProviderError extends Error {
+    constructor(message: string, readonly status?: number) {
+        super(message);
+        this.name = 'NonRetryableProviderError';
+    }
+}
+
+function isNonRetryableProviderError(err: unknown): boolean {
+    if (err instanceof NonRetryableProviderError) return true;
+    const message = err instanceof Error ? err.message : String(err || '');
+    const statusMatch = message.match(/\b(4\d\d)\b/);
+    if (!statusMatch) return false;
+    const status = Number(statusMatch[1]);
+    return status !== 408 && status !== 429;
+}
+
+function createProviderHttpError(providerName: string, status: number, errorText: string): Error {
+    const message = `${providerName} API error: ${status}${errorText ? ` ${errorText.slice(0, 160)}` : ''}`;
+    if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+        return new NonRetryableProviderError(message, status);
+    }
+    return new Error(message);
+}
+
+function getSpicetifyCorsProxyUrl(url: string): string {
+    return `${SPICETIFY_CORS_PROXY_BASE}${url}`;
+}
+
+async function postJsonProvider(
+    url: string,
+    body: unknown,
+    headers: Record<string, string>,
+    providerName: string,
+    options: { preferCosmos?: boolean } = {}
+): Promise<any> {
+    const cosmos = getCosmosAsync();
+
+    if (options.preferCosmos && cosmos?.post) {
+        return cosmos.post(url, body, headers);
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw createProviderHttpError(providerName, response.status, errorText);
+        }
+
+        return await response.json();
+    } catch (err) {
+        if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
+            return cosmos.post(url, body, headers);
+        }
+        throw err;
+    }
+}
+
+function buildLibreTranslateForm(text: string | string[], targetLang: string): URLSearchParams {
+    const params = new URLSearchParams();
+    const values = Array.isArray(text) ? text : [text];
+    values.forEach(value => params.append('q', value));
+    params.set('source', 'auto');
+    params.set('target', targetLang);
+    params.set('format', 'text');
+    return params;
+}
+
+function formToJsonObject(params: URLSearchParams): Record<string, string | string[]> {
+    const result: Record<string, string | string[]> = {};
+
+    params.forEach((value, key) => {
+        const existing = result[key];
+        if (existing === undefined) {
+            result[key] = value;
+        } else if (Array.isArray(existing)) {
+            existing.push(value);
+        } else {
+            result[key] = [existing, value];
+        }
+    });
+
+    return result;
+}
+
+async function postFormProvider(
+    url: string,
+    params: URLSearchParams,
+    providerName: string,
+    options: { preferCosmos?: boolean } = {}
+): Promise<any> {
+    const cosmos = getCosmosAsync();
+
+    if (options.preferCosmos && cosmos?.post) {
+        return cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' });
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            body: params
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw createProviderHttpError(providerName, response.status, errorText);
+        }
+
+        return await response.json();
+    } catch (err) {
+        if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
+            return cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' });
+        }
+        throw err;
+    }
+}
+
 async function retryWithBackoff<T>(
     fn: () => Promise<T>,
     maxRetries: number = RATE_LIMIT.maxRetries,
@@ -303,7 +457,7 @@ async function retryWithBackoff<T>(
         } catch (error) {
             lastError = error as Error;
             
-            if (error instanceof Error && error.message.includes('40')) {
+            if (isNonRetryableProviderError(error)) {
                 throw error;
             }
             
@@ -320,7 +474,7 @@ async function retryWithBackoff<T>(
     throw lastError || new Error('All retry attempts failed');
 }
 
-export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?: { customApiKey?: string; customApiFormat?: CustomApiFormat; customApiModel?: string; deeplApiKey?: string; openaiApiKey?: string; openaiModel?: string; geminiApiKey?: string }): void {
+export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?: ApiKeyConfig): void {
     preferredApi = api;
     if (customUrl !== undefined) {
         customApiUrl = customUrl;
@@ -333,6 +487,8 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         if (apiKeys.openaiApiKey !== undefined) openaiApiKey = apiKeys.openaiApiKey;
         if (apiKeys.openaiModel !== undefined) openaiModel = apiKeys.openaiModel;
         if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
+        if (apiKeys.geminiModel !== undefined) geminiModel = apiKeys.geminiModel;
+        if (apiKeys.geminiTemperature !== undefined) geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
     }
 }
 
@@ -584,25 +740,13 @@ async function translateWithGoogle(text: string, targetLang: string, sourceLang?
 
 async function translateWithLibreTranslate(text: string, targetLang: string): Promise<string> {
     const url = 'https://libretranslate.de/translate';
-    
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            q: text,
-            source: 'auto',
-            target: targetLang,
-            format: 'text'
-        })
-    });
-    
-    if (!response.ok) {
-        throw new Error(`LibreTranslate API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
+
+    const data = await postFormProvider(
+        url,
+        buildLibreTranslateForm(text, targetLang),
+        'LibreTranslate',
+        { preferCosmos: true }
+    );
     return data.translatedText;
 }
 
@@ -615,29 +759,12 @@ async function translateWithDeepL(text: string, targetLang: string): Promise<{ t
     const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
     const url = `${baseUrl}/v2/translate`;
     
-    const deeplLangMap: Record<string, string> = {
-        'en': 'EN-US', 'pt': 'PT-BR', 'zh': 'ZH-HANS', 'zh-TW': 'ZH-HANT'
-    };
-    const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
-    
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            text: [text],
-            target_lang: deeplTarget
-        })
-    });
-    
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`DeepL API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
+    const data = await postJsonProvider(
+        getSpicetifyCorsProxyUrl(url),
+        buildDeepLBody([text], targetLang),
+        getDeepLHeaders(deeplApiKey),
+        'DeepL'
+    );
     
     if (data.translations && data.translations.length > 0) {
         return {
@@ -696,6 +823,24 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
     throw new Error('Invalid response from OpenAI API');
 }
 
+function normalizeGeminiModelName(model: string | undefined): string {
+    const trimmed = (model || '').trim().replace(/^models\//, '');
+    return trimmed || 'gemini-2.0-flash';
+}
+
+function normalizeGeminiTemperature(value: string | number | undefined): number {
+    const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''));
+    if (!Number.isFinite(parsed)) {
+        return 0.3;
+    }
+    return Math.min(2, Math.max(0, parsed));
+}
+
+function getGeminiGenerateContentUrl(model: string | undefined): string {
+    const normalizedModel = normalizeGeminiModelName(model);
+    return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(normalizedModel)}:generateContent`;
+}
+
 async function translateWithGemini(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
     if (!geminiApiKey) {
         throw new Error('Gemini API key not configured. Set it in Settings.');
@@ -703,7 +848,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
 
     const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+    const response = await fetch(getGeminiGenerateContentUrl(geminiModel), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -720,7 +865,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
                 }
             ],
             generationConfig: {
-                temperature: 0.3,
+                temperature: geminiTemperature,
                 maxOutputTokens: Math.max(text.length * 3, 500)
             }
         })
@@ -768,6 +913,20 @@ function getDeepLTargetLanguage(targetLang: string): string {
         'en': 'EN-US', 'pt': 'PT-BR', 'zh': 'ZH-HANS', 'zh-TW': 'ZH-HANT'
     };
     return deeplLangMap[targetLang] || targetLang.toUpperCase();
+}
+
+function buildDeepLBody(texts: string[], targetLang: string): { text: string[]; target_lang: string } {
+    return {
+        text: texts,
+        target_lang: getDeepLTargetLanguage(targetLang)
+    };
+}
+
+function getDeepLHeaders(apiKey: string): Record<string, string> {
+    return {
+        'Authorization': `DeepL-Auth-Key ${apiKey}`,
+        'Content-Type': 'application/json'
+    };
 }
 
 function getTranslationLanguageName(targetLang: string): string {
@@ -838,7 +997,7 @@ function buildCustomSingleBody(text: string, targetLang: string, format: CustomA
                 }
             ],
             generationConfig: {
-                temperature: 0.3,
+                temperature: geminiTemperature,
                 maxOutputTokens: Math.max(text.length * 3, 500)
             }
         };
@@ -998,30 +1157,23 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
     }
 
     if ((preferredApi === 'deepl' && deeplApiKey) || (preferredApi === 'custom' && customApiFormat === 'deepl')) {
-        const isFreePlan = deeplApiKey.endsWith(':fx');
+        const selectedDeepLKey = preferredApi === 'custom' ? customApiKey : deeplApiKey;
+        const isFreePlan = selectedDeepLKey.endsWith(':fx');
         const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
         const url = preferredApi === 'custom' ? validateCustomApiUrl() : `${baseUrl}/v2/translate`;
-        const headers = preferredApi === 'custom'
-            ? getCustomApiHeaders('deepl')
-            : {
-                'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
-                'Content-Type': 'application/json'
-            };
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                text: texts,
-                target_lang: getDeepLTargetLanguage(targetLang)
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`DeepL batch API error: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = preferredApi === 'deepl'
+            ? await postJsonProvider(
+                getSpicetifyCorsProxyUrl(url),
+                buildDeepLBody(texts, targetLang),
+                getDeepLHeaders(selectedDeepLKey),
+                'DeepL batch'
+            )
+            : await postJsonProvider(
+                url,
+                buildDeepLBody(texts, targetLang),
+                getCustomApiHeaders('deepl'),
+                'DeepL batch'
+            );
         if (data.translations && Array.isArray(data.translations)) {
             return {
                 translations: data.translations.map((t: any) => t.text || ''),
@@ -1043,31 +1195,26 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
         throw new Error('Custom API URL not configured');
     }
 
-    const headers = preferredApi === 'custom'
-        ? getCustomApiHeaders(customApiFormat || 'generic')
-        : {
-            'Content-Type': 'application/json'
-        };
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-            q: texts,
-            text: texts,
-            source: 'auto',
-            target: targetLang,
-            target_lang: targetLang,
-            format: 'text'
-        })
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text().catch(() => '');
-        throw new Error(`Batch API error: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = preferredApi === 'libretranslate'
+        ? await postFormProvider(
+            url,
+            buildLibreTranslateForm(texts.join('\n'), targetLang),
+            'LibreTranslate batch',
+            { preferCosmos: true }
+        )
+        : await postJsonProvider(
+            url,
+            {
+                q: texts,
+                text: texts,
+                source: 'auto',
+                target: targetLang,
+                target_lang: targetLang,
+                format: 'text'
+            },
+            getCustomApiHeaders(customApiFormat || 'generic'),
+            'Batch API'
+        );
     const normalized = normalizeBatchTranslations(data);
     if (normalized) {
         return normalized;
@@ -1091,6 +1238,10 @@ function buildMarkedBatchPayload(lines: string[]): { combinedText: string; marke
         .map((line, index) => `${BATCH_MARKER_PREFIX}${markerNonce}_${index}]]${line}`)
         .join('\n');
     return { combinedText, markerNonce };
+}
+
+function hasInternalBatchMarkers(text: string): boolean {
+    return (text || '').includes(BATCH_MARKER_PREFIX) || /\[\[\s*SLT[\s_-]*BATCH/i.test(text || '');
 }
 
 function parseMarkedBatchResponse(translatedText: string, expectedCount: number, markerNonce: string): string[] | null {
@@ -1135,6 +1286,7 @@ function parseMarkedBatchResponse(translatedText: string, expectedCount: number,
 
 function normalizeTranslatedLine(text: string): string {
     return text
+        .replace(/```[a-z0-9_-]*/gi, '')
         .replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, '')
         .replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, '')
         .replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, '')
@@ -1145,15 +1297,39 @@ function normalizeTranslatedLine(text: string): string {
         .trim();
 }
 
+function foldWrapperLineForComparison(text: string): string {
+    return (text || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function isBatchWrapperLine(line: string): boolean {
+    const folded = foldWrapperLineForComparison(line);
+    if (!folded) return true;
+    if (/^```/.test(folded)) return true;
+    return /^(here('|')?s|here is|here are|sure[,!. ]|translation:?|translated lyrics:?|ban dich:?|duoi day|day la)/.test(folded);
+}
+
+function removeBatchWrapperLines(text: string): string {
+    return (text || '')
+        .split(/\r?\n/)
+        .filter(line => !isBatchWrapperLine(line))
+        .join('\n');
+}
+
 function parseBatchTextFallbacks(translatedText: string, expectedCount: number): string[] | null {
-    const separatorSplit = translatedText
+    const batchText = removeBatchWrapperLines(translatedText);
+
+    const separatorSplit = batchText
         .split(BATCH_SEPARATOR_REGEX)
         .map(s => normalizeTranslatedLine(s));
     if (separatorSplit.length === expectedCount) {
         return separatorSplit;
     }
 
-    const newlineSplit = translatedText
+    const newlineSplit = batchText
         .split(/\r?\n+/)
         .map(s => normalizeTranslatedLine(s))
         .filter(Boolean);
@@ -1217,6 +1393,9 @@ async function translateSourceAlignedBatch(lines: string[], targetLang: string, 
                 return batchResult;
             }
         } catch (batchArrayError) {
+            if (isNonRetryableProviderError(batchArrayError)) {
+                throw batchArrayError;
+            }
             warn('Source-aligned batch-array translation unavailable, falling back to marker batching:', batchArrayError);
         }
     }
@@ -1380,6 +1559,13 @@ export async function translateText(text: string, targetLang: string, sourceLang
             wasTranslated: true
         };
     } catch (primaryError) {
+        if (isNonRetryableProviderError(primaryError)) {
+            throw primaryError;
+        }
+        if (hasInternalBatchMarkers(text)) {
+            const message = primaryError instanceof Error ? primaryError.message : String(primaryError || 'Provider failed');
+            throw new NonRetryableProviderError(message);
+        }
         warn(`Primary API (${preferredApi}) failed, trying fallbacks:`, primaryError);
         
         for (const fallbackApi of fallbackApis) {
@@ -1519,6 +1705,9 @@ export async function translateLyrics(
                     detectedLang = batchResult.detectedLang;
                 }
             } catch (batchArrayError) {
+                if (isNonRetryableProviderError(batchArrayError)) {
+                    throw batchArrayError;
+                }
                 warn('Batch-array translation unavailable, falling back to marker batching:', batchArrayError);
             }
         }

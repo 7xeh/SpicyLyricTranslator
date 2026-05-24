@@ -1,13 +1,71 @@
 import { storage } from './storage';
 import { state } from './state';
 import { clearTranslationCache } from './translator';
-import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
+import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
 import { reapplyTranslations } from './core';
-import { fetchLyricsForTrackUri } from './lyricsFetcher';
+import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
+const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
+
+function showActionNotification(message: string, isError: boolean = false): void {
+    if (state.showNotifications && Spicetify.showNotification) {
+        Spicetify.showNotification(message, isError);
+    }
+}
+
+export function clearAllCachedTranslations(): void {
+    clearTranslationCache();
+    showActionNotification('All cached translations deleted!');
+}
+
+export async function clearSpicyLyricsCachedLyrics(): Promise<void> {
+    try {
+        clearLyricsCache();
+        if (typeof caches !== 'undefined' && typeof caches.delete === 'function') {
+            await caches.delete(SPICY_LYRICS_CACHE_NAME);
+        }
+        showActionNotification('Spicy Lyrics cached lyrics deleted!');
+    } catch (e) {
+        showActionNotification('Failed to clear Spicy Lyrics cached lyrics', true);
+    }
+}
+
+export function renderModalCacheActionsMarkup(): string {
+    return `
+            <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button">Clear Spicy Lyrics Cache</button>
+            <button class="slt-button danger" id="slt-clear-translation-cache" type="button">Clear All Cached Translations</button>`;
+}
+
+export function bindModalCacheActions(container: ParentNode): void {
+    const spicyLyricsCacheButton = container.querySelector('#slt-clear-spicy-lyrics-cache') as HTMLButtonElement | null;
+    const translationCacheButton = container.querySelector('#slt-clear-translation-cache') as HTMLButtonElement | null;
+
+    spicyLyricsCacheButton?.addEventListener('click', async () => {
+        const previousText = spicyLyricsCacheButton.textContent || 'Clear Spicy Lyrics Cache';
+        spicyLyricsCacheButton.disabled = true;
+        spicyLyricsCacheButton.textContent = 'Clearing...';
+        await clearSpicyLyricsCachedLyrics();
+        spicyLyricsCacheButton.textContent = 'Cleared';
+        setTimeout(() => {
+            spicyLyricsCacheButton.disabled = false;
+            spicyLyricsCacheButton.textContent = previousText;
+        }, 1200);
+    });
+
+    translationCacheButton?.addEventListener('click', () => {
+        const previousText = translationCacheButton.textContent || 'Clear All Cached Translations';
+        translationCacheButton.disabled = true;
+        clearAllCachedTranslations();
+        translationCacheButton.textContent = 'Cleared';
+        setTimeout(() => {
+            translationCacheButton.disabled = false;
+            translationCacheButton.textContent = previousText;
+        }, 1200);
+    });
+}
 
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
@@ -181,13 +239,7 @@ function createNativeSettingsSection(): HTMLElement {
         'slt-settings.clear-cache',
         'Clear All Cached Translations',
         'Clear Cache',
-        () => {
-            clearAllTrackCache();
-            clearTranslationCache();
-            if (state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('All cached translations deleted!');
-            }
-        }
+        clearAllCachedTranslations
     ));
     
     sectionContent.appendChild(createNativeButton(
@@ -566,6 +618,20 @@ function createSettingsUI(): HTMLElement {
                 background: var(--spice-card);
                 border: 1px solid var(--spice-button-disabled);
             }
+            .slt-button.danger {
+                background: rgba(255, 80, 80, 0.18);
+                border: 1px solid rgba(255, 80, 80, 0.35);
+                color: #ff7373;
+            }
+            .slt-button.danger:hover {
+                background: rgba(255, 80, 80, 0.3);
+                color: #fff;
+            }
+            .slt-button:disabled {
+                cursor: default;
+                opacity: 0.65;
+                transform: none;
+            }
             .slt-description {
                 display: block;
                 font-size: 12px;
@@ -585,6 +651,12 @@ function createSettingsUI(): HTMLElement {
             .slt-modal-actions {
                 border-top: 1px solid rgba(255, 255, 255, 0.08);
                 margin-top: 4px;
+            }
+            .slt-modal-cache-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
             }
             .slt-modal-footer {
                 color: var(--spice-subtext);
@@ -623,6 +695,9 @@ function createSettingsUI(): HTMLElement {
 
         <div class="slt-modal-actions">
             <button class="slt-button secondary" id="slt-view-cache">View Translation Cache</button>
+            <div class="slt-modal-cache-actions">
+                ${renderModalCacheActionsMarkup()}
+            </div>
         </div>
         
         <div class="slt-modal-footer">
@@ -643,6 +718,7 @@ function createSettingsUI(): HTMLElement {
     
     setTimeout(() => {
         bindModalSettingsFields(container);
+        bindModalCacheActions(container);
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
@@ -1390,8 +1466,7 @@ function createCacheViewerUI(): HTMLElement {
         
         const deleteAllBtn = container.querySelector('#slt-delete-all-cache');
         deleteAllBtn?.addEventListener('click', () => {
-            clearAllTrackCache();
-            clearTranslationCache();
+            clearAllCachedTranslations();
             
             const tracksEl = container.querySelector('#slt-stat-tracks');
             const linesEl = container.querySelector('#slt-stat-lines');
@@ -1405,10 +1480,6 @@ function createCacheViewerUI(): HTMLElement {
             
             const actionsDiv = container.querySelector('.slt-cache-actions');
             if (actionsDiv) actionsDiv.remove();
-            
-            if (state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('All cached translations deleted!');
-            }
         });
     }, 0);
     
@@ -1446,11 +1517,28 @@ export async function registerSettings(): Promise<void> {
         const registerMenuItem = () => {
             if ((Spicetify as any).Menu) {
                 try {
-                    new (Spicetify as any).Menu.Item(
-                        'Spicy Lyric Translator',
-                        false,
-                        openSettingsModal
-                    ).register();
+                    [
+                        {
+                            label: 'Spicy Lyric Translator Settings',
+                            callback: openSettingsModal
+                        },
+                        {
+                            label: 'Clear Spicy Lyrics Cache',
+                            callback: () => {
+                                void clearSpicyLyricsCachedLyrics();
+                            }
+                        },
+                        {
+                            label: 'Clear SLT Translation Cache',
+                            callback: clearAllCachedTranslations
+                        }
+                    ].forEach(item => {
+                        new (Spicetify as any).Menu.Item(
+                            item.label,
+                            false,
+                            item.callback
+                        ).register();
+                    });
                     return true;
                 } catch (e) {
                 }

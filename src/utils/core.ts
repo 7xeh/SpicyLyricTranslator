@@ -2,7 +2,7 @@ import { state, TranslationQualityMeta } from './state';
 import { Icons } from './icons';
 import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats } from './translator';
-import { getCurrentTrackUri } from './trackCache';
+import { getCurrentTrackUri, getTrackCache } from './trackCache';
 import {
     enableOverlay,
     disableOverlay,
@@ -88,17 +88,25 @@ export function isRomanizationActive(): boolean {
         if (btn.classList.contains('active')) return true;
     }
 
+    const keys = [
+        'SpicyLyrics-romanization',
+        'SpicyLyrics:romanization',
+        'romanization'
+    ];
+
     try {
         const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
         if (spicetifyStorage?.get) {
-            const val = spicetifyStorage.get('SpicyLyrics:romanization');
-            if (val === 'true') return true;
-            if (val === 'false') return false;
+            for (const key of keys) {
+                const val = spicetifyStorage.get(key);
+                if (val === 'true') return true;
+                if (val === 'false') return false;
+            }
         }
     } catch (e) {}
 
     try {
-        for (const key of ['SpicyLyrics:romanization', 'romanization']) {
+        for (const key of keys) {
             const val = localStorage.getItem(key);
             if (val === 'true') return true;
             if (val === 'false') return false;
@@ -406,6 +414,93 @@ function getLyricsLines(): NodeListOf<Element> {
     return document.querySelectorAll('.non-existent-selector');
 }
 
+type MissingOriginalReason = 'missing-original-lyrics';
+
+interface TranslationSourceSelectionInput {
+    domLineTexts: string[];
+    romanizationOn: boolean;
+    apiVocalTexts: string[] | null;
+    apiVocalLineData: LyricLineData[] | null;
+    cachedSourceLines?: string[] | null;
+}
+
+interface TranslationSourceSelection {
+    canTranslate: boolean;
+    reason?: MissingOriginalReason;
+    lineTexts: string[];
+    useApiLines: boolean;
+    apiVocalTexts: string[] | null;
+    apiVocalLineData: LyricLineData[] | null;
+}
+
+function emptyLineData(): LyricLineData {
+    return {
+        text: '',
+        startTime: 0,
+        endTime: 0,
+        isInstrumental: false,
+    };
+}
+
+function hasOriginalScript(lines: string[] | null | undefined): boolean {
+    return Boolean(lines?.some(line => /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line || '')));
+}
+
+export function resolveTranslationSourceLines(input: TranslationSourceSelectionInput): TranslationSourceSelection {
+    const domLineTexts = [...input.domLineTexts];
+    const cachedOriginalLines = hasOriginalScript(input.cachedSourceLines) ? [...input.cachedSourceLines!] : null;
+    let apiVocalTexts = input.apiVocalTexts ? [...input.apiVocalTexts] : cachedOriginalLines;
+    let apiVocalLineData = input.apiVocalLineData
+        ? [...input.apiVocalLineData]
+        : cachedOriginalLines?.map(line => ({ ...emptyLineData(), text: line })) || null;
+
+    if (input.romanizationOn) {
+        if (!apiVocalTexts || apiVocalTexts.length === 0) {
+            return {
+                canTranslate: false,
+                reason: 'missing-original-lyrics',
+                lineTexts: [],
+                useApiLines: false,
+                apiVocalTexts,
+                apiVocalLineData
+            };
+        }
+
+        const domCount = domLineTexts.length;
+        if (domCount > 0 && apiVocalTexts.length > domCount) {
+            apiVocalTexts = apiVocalTexts.slice(0, domCount);
+            if (apiVocalLineData) apiVocalLineData = apiVocalLineData.slice(0, domCount);
+        } else if (domCount > 0 && apiVocalTexts.length < domCount) {
+            for (let i = apiVocalTexts.length; i < domCount; i++) {
+                apiVocalTexts.push('');
+                if (apiVocalLineData) {
+                    apiVocalLineData.push(emptyLineData());
+                }
+            }
+        }
+
+        const hasOriginalText = apiVocalTexts.some(text => text.trim().length > 0);
+        return {
+            canTranslate: hasOriginalText,
+            reason: hasOriginalText ? undefined : 'missing-original-lyrics',
+            lineTexts: hasOriginalText ? apiVocalTexts : [],
+            useApiLines: hasOriginalText,
+            apiVocalTexts,
+            apiVocalLineData
+        };
+    }
+
+    const useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === domLineTexts.length);
+    const lineTexts = useApiLines ? apiVocalTexts! : domLineTexts;
+    return {
+        canTranslate: lineTexts.some(text => text.trim().length > 0),
+        lineTexts,
+        useApiLines,
+        apiVocalTexts,
+        apiVocalLineData
+    };
+}
+
 export function getLyricsFirstLineText(): string | null {
     const lines = getLyricsLines();
     if (lines.length > 0) {
@@ -520,6 +615,8 @@ export async function translateCurrentLyrics(): Promise<void> {
         let apiLineTexts: string[] | null = null;
         let apiLanguage: string | undefined;
         let apiLineData: LyricLineData[] | null = null;
+        let cachedSourceLines: string[] | null = null;
+        let cachedSourceLanguage: string | undefined;
         try {
             const apiResult = await fetchLyricsFromAPI();
             if (apiResult && apiResult.lines.length > 0) {
@@ -529,6 +626,14 @@ export async function translateCurrentLyrics(): Promise<void> {
             }
         } catch (apiErr) {
             warn('SpicyLyrics API fetch failed, falling back to DOM:', apiErr);
+        }
+
+        if (romanizationOn && currentTrackUri) {
+            const trackCache = getTrackCache(currentTrackUri, state.targetLanguage);
+            if (trackCache?.sourceLines && hasOriginalScript(trackCache.sourceLines)) {
+                cachedSourceLines = trackCache.sourceLines;
+                cachedSourceLanguage = trackCache.lang;
+            }
         }
         
         let apiVocalTexts: string[] | null = null;
@@ -544,7 +649,7 @@ export async function translateCurrentLyrics(): Promise<void> {
             }
         }
         
-        let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
+        let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === lines.length);
         
         if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
             for (let retryAttempt = 0; retryAttempt < 4; retryAttempt++) {
@@ -561,33 +666,29 @@ export async function translateCurrentLyrics(): Promise<void> {
                 }
             }
             
-            if (!useApiLines && apiVocalTexts.length > 0 && lines.length > 0) {
-                useApiLines = true;
-                const domCount = lines.length;
-                if (apiVocalTexts.length > domCount) {
-                    apiVocalTexts = apiVocalTexts.slice(0, domCount);
-                    if (apiVocalLineData) apiVocalLineData = apiVocalLineData.slice(0, domCount);
-                } else if (apiVocalTexts.length < domCount) {
-                    // Pad with empty sentinels for excess DOM lines the API doesn't cover.
-                    // Never feed romanized DOM text to the translator — Google auto-detects
-                    // romaji as English and echoes it back unchanged, which then passes
-                    // through applyTranslations and renders as a bogus "translation".
-                    for (let i = apiVocalTexts.length; i < domCount; i++) {
-                        apiVocalTexts.push('');
-                        if (apiVocalLineData) {
-                            apiVocalLineData.push({
-                                text: '',
-                                startTime: 0,
-                                endTime: 0,
-                                isInstrumental: false,
-                            });
-                        }
-                    }
-                }
-            }
         }
 
-        if (!useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
+        let sourceSelection = resolveTranslationSourceLines({
+            domLineTexts,
+            romanizationOn,
+            apiVocalTexts,
+            apiVocalLineData,
+            cachedSourceLines
+        });
+
+        if (!sourceSelection.canTranslate) {
+            removeTranslations();
+            if (romanizationOn && state.showNotifications && Spicetify.showNotification) {
+                Spicetify.showNotification('Original lyrics unavailable while romanization is enabled', true);
+            }
+            return;
+        }
+
+        apiVocalTexts = sourceSelection.apiVocalTexts;
+        apiVocalLineData = sourceSelection.apiVocalLineData;
+        useApiLines = sourceSelection.useApiLines;
+
+        if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
             for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
                 await new Promise(resolve => setTimeout(resolve, 600));
                 lines = getLyricsLines();
@@ -607,6 +708,17 @@ export async function translateCurrentLyrics(): Promise<void> {
                     break;
                 }
             }
+
+            sourceSelection = resolveTranslationSourceLines({
+                domLineTexts,
+                romanizationOn,
+                apiVocalTexts,
+                apiVocalLineData,
+                cachedSourceLines
+            });
+            apiVocalTexts = sourceSelection.apiVocalTexts;
+            apiVocalLineData = sourceSelection.apiVocalLineData;
+            useApiLines = sourceSelection.useApiLines;
         }
         
         let matchedTimingData: LyricLineData[] | null = null;
@@ -638,7 +750,7 @@ export async function translateCurrentLyrics(): Promise<void> {
             }
         }
         
-        const lineTexts = useApiLines ? apiVocalTexts! : domLineTexts;
+        const lineTexts = sourceSelection.lineTexts;
         
         if (useApiLines) {
         } else if (apiVocalTexts) {
@@ -649,7 +761,7 @@ export async function translateCurrentLyrics(): Promise<void> {
             return;
         }
         
-        const detectedLang = apiLanguage || state.detectedLanguage || undefined;
+        const detectedLang = apiLanguage || cachedSourceLanguage || state.detectedLanguage || undefined;
 
         let skipCheck: { skip: boolean; reason?: string; detectedLanguage?: string };
         if (romanizationOn && apiLanguage) {

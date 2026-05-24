@@ -157,6 +157,26 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         visibleForApis: ['gemini']
     },
     {
+        id: 'gemini-model',
+        label: 'Gemini Model',
+        type: 'text',
+        storageKey: 'gemini-model',
+        defaultValue: 'gemini-2.0-flash',
+        placeholder: 'gemini-2.5-flash, gemini-2.0-flash',
+        description: 'Model name used in the Gemini generateContent endpoint',
+        visibleForApis: ['gemini']
+    },
+    {
+        id: 'gemini-temperature',
+        label: 'Gemini Temperature',
+        type: 'text',
+        storageKey: 'gemini-temperature',
+        defaultValue: '0.3',
+        placeholder: '0.0 - 2.0',
+        description: 'Controls Gemini output randomness',
+        visibleForApis: ['gemini']
+    },
+    {
         id: 'auto-translate',
         label: 'Auto-Translate on Song Change',
         type: 'toggle',
@@ -229,7 +249,9 @@ function configureTranslationApi(): void {
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
         openaiModel: state.openaiModel,
-        geminiApiKey: state.geminiApiKey
+        geminiApiKey: state.geminiApiKey,
+        geminiModel: state.geminiModel,
+        geminiTemperature: state.geminiTemperature
     });
 }
 
@@ -283,6 +305,14 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'gemini-api-key':
             state.geminiApiKey = String(value);
+            configureTranslationApi();
+            break;
+        case 'gemini-model':
+            state.geminiModel = String(value);
+            configureTranslationApi();
+            break;
+        case 'gemini-temperature':
+            state.geminiTemperature = String(value);
             configureTranslationApi();
             break;
         case 'auto-translate':

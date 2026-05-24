@@ -3,6 +3,8 @@ import { normalizeLanguageCode } from './languageDetection';
 
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
+const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
+const SPICY_LYRICS_CACHE_VERSION = 12;
 
 interface SyllableData {
     Text: string;
@@ -75,6 +77,13 @@ interface QueryResponse {
     }>;
 }
 
+interface SpicyLyricsCacheItem {
+    ExpiresAt?: number;
+    CacheVersion?: number;
+    Content?: any;
+    Value?: string;
+}
+
 const captureCache = new Map<string, LyricsData>();
 let interceptorInstalled = false;
 
@@ -122,6 +131,60 @@ function processCapturedResponse(trackId: string, payload: QueryResponse): void 
             return;
         }
     }
+}
+
+async function readSpicyLyricsCache(trackId: string): Promise<LyricsData | null> {
+    try {
+        if (!trackId || typeof caches === 'undefined' || typeof caches.open !== 'function') {
+            return null;
+        }
+
+        const cache = await caches.open(SPICY_LYRICS_CACHE_NAME);
+        const response = await cache.match(`/${trackId}`);
+        if (!response || typeof response.json !== 'function') {
+            return null;
+        }
+
+        const item = await response.json() as SpicyLyricsCacheItem | LyricsData;
+        if (isLyricsData(item)) {
+            return item;
+        }
+
+        if (!item || typeof item !== 'object' || item.Value === 'NO_LYRICS') {
+            return null;
+        }
+
+        if (typeof item.CacheVersion === 'number' && item.CacheVersion !== SPICY_LYRICS_CACHE_VERSION) {
+            return null;
+        }
+
+        if (typeof item.ExpiresAt === 'number' && item.ExpiresAt < Date.now()) {
+            return null;
+        }
+
+        const content = item.Content;
+        if (!content || content.Value === 'NO_LYRICS') {
+            return null;
+        }
+
+        return isLyricsData(content) ? content : null;
+    } catch (err) {
+        warn('Failed to read Spicy Lyrics cache:', err);
+        return null;
+    }
+}
+
+async function getStoredLyricsData(trackId: string): Promise<LyricsData | null> {
+    const captured = captureCache.get(trackId);
+    if (captured) return captured;
+
+    const cached = await readSpicyLyricsCache(trackId);
+    if (cached) {
+        captureCache.set(trackId, cached);
+        return cached;
+    }
+
+    return null;
 }
 
 function installFetchInterceptor(): void {
@@ -173,12 +236,21 @@ installFetchInterceptor();
 
 async function waitForCapture(trackId: string, timeoutMs: number = 8000, pollMs: number = 100): Promise<LyricsData | null> {
     const start = Date.now();
+    let nextStoreCheck = 0;
+
     while (Date.now() - start < timeoutMs) {
         const cached = captureCache.get(trackId);
         if (cached) return cached;
+
+        if (Date.now() >= nextStoreCheck) {
+            const stored = await getStoredLyricsData(trackId);
+            if (stored) return stored;
+            nextStoreCheck = Date.now() + 500;
+        }
+
         await new Promise(resolve => setTimeout(resolve, pollMs));
     }
-    return captureCache.get(trackId) ?? null;
+    return getStoredLyricsData(trackId);
 }
 
 
@@ -332,6 +404,22 @@ export function getCachedLineData(): LyricLineData[] | null {
     return cachedLineData;
 }
 
+function cacheParsedLyrics(trackId: string, lyrics: LyricsData): { lines: string[]; lineData: LyricLineData[]; language?: string } | null {
+    const lineData = extractLinesData(lyrics);
+    if (lineData.length === 0) {
+        return null;
+    }
+
+    cachedTrackId = trackId;
+    cachedLineData = lineData;
+    cachedLanguage = getLyricsLanguage(lyrics) || null;
+
+    return {
+        lines: lineData.map(l => l.text),
+        lineData,
+        language: cachedLanguage || undefined
+    };
+}
 
 export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData: LyricLineData[]; language?: string } | null> {
     const trackId = getCurrentTrackId();
@@ -348,22 +436,12 @@ export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData:
     }
 
     try {
-        const lyrics = await waitForCapture(trackId);
+        const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
         if (!lyrics) {
             return null;
         }
 
-        const lineData = extractLinesData(lyrics);
-        if (lineData.length === 0) {
-            return null;
-        }
-
-        cachedTrackId = trackId;
-        cachedLineData = lineData;
-        cachedLanguage = getLyricsLanguage(lyrics) || null;
-
-        const lines = lineData.map(l => l.text);
-        return { lines, lineData, language: cachedLanguage || undefined };
+        return cacheParsedLyrics(trackId, lyrics);
     } catch (err) {
         warn('Failed to capture lyrics from Spicy Lyrics fetch:', err);
         return null;
@@ -385,25 +463,12 @@ export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines:
     }
 
     try {
-        const lyrics = await waitForCapture(trackId);
+        const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
         if (!lyrics) {
             return null;
         }
 
-        const lineData = extractLinesData(lyrics);
-        if (lineData.length === 0) {
-            return null;
-        }
-
-        cachedTrackId = trackId;
-        cachedLineData = lineData;
-        cachedLanguage = getLyricsLanguage(lyrics) || null;
-
-        return {
-            lines: lineData.map(l => l.text),
-            lineData,
-            language: cachedLanguage || undefined
-        };
+        return cacheParsedLyrics(trackId, lyrics);
     } catch (err) {
         warn('Failed to capture lyrics for track URI:', trackUri, err);
         return null;
@@ -415,6 +480,7 @@ export function clearLyricsCache(): void {
     cachedTrackId = null;
     cachedLineData = null;
     cachedLanguage = null;
+    captureCache.clear();
 }
 
 export default {
