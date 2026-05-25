@@ -3339,7 +3339,7 @@ ${text}`
         replaceEl.classList.add("slt-replace-instrumental");
       } else {
         const vocabEnabled = storage.get("vocabulary-mode") === "true";
-        const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+        const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
         if (vocabEnabled) {
           replaceEl.classList.add("slt-vocab-line");
           appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, "slt-replace-word");
@@ -3415,23 +3415,232 @@ ${text}`
       container.appendChild(span);
     });
   }
+  var JAPANESE_TEXT_REGEX = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u;
+  var JAPANESE_FINAL_PARTICLES = ["\u304B\u306A", "\u3088\u306D", "\u3060\u3088", "\u3060\u306D", "\u306D", "\u306A", "\u3088", "\u304B", "\u3055"];
+  var JAPANESE_STATE_PREFIXES = [
+    "\u3053\u306E\u307E\u307E",
+    "\u305D\u306E\u307E\u307E",
+    "\u3042\u306E\u307E\u307E",
+    "\u3053\u3093\u306A",
+    "\u305D\u3093\u306A",
+    "\u3042\u3093\u306A",
+    "\u3053\u3053",
+    "\u305D\u3053",
+    "\u3042\u305D\u3053",
+    "\u3053\u308C",
+    "\u305D\u308C",
+    "\u3042\u308C"
+  ];
+  function normalizeVocabularyToken(text) {
+    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}?]+/gu, "").trim();
+  }
+  function splitTranslatedWords(text) {
+    return (text || "").trim().split(/\s+/).filter(Boolean);
+  }
+  function splitJapaneseChunk(chunk) {
+    let rest = chunk.trim();
+    const parts = [];
+    let finalParticle = "";
+    const finalMatch = [...JAPANESE_FINAL_PARTICLES].sort((a, b) => b.length - a.length).find((particle) => rest.endsWith(particle) && rest.length > particle.length);
+    if (finalMatch) {
+      finalParticle = finalMatch;
+      rest = rest.slice(0, -finalMatch.length);
+    }
+    const prefix = [...JAPANESE_STATE_PREFIXES].sort((a, b) => b.length - a.length).find((candidate) => rest.startsWith(candidate) && rest.length > candidate.length);
+    if (prefix) {
+      parts.push(prefix);
+      rest = rest.slice(prefix.length);
+    }
+    if (rest.trim()) {
+      parts.push(rest.trim());
+    }
+    if (finalParticle) {
+      parts.push(finalParticle);
+    }
+    return parts.length > 0 ? parts : [chunk];
+  }
+  function segmentVocabularySourceText(text) {
+    const chunks = (text || "").trim().split(/\s+/).filter(Boolean);
+    if (chunks.length === 0)
+      return [];
+    const segments = [];
+    for (const chunk of chunks) {
+      if (JAPANESE_TEXT_REGEX.test(chunk)) {
+        segments.push(...splitJapaneseChunk(chunk));
+      } else {
+        segments.push(chunk);
+      }
+    }
+    return segments.filter(Boolean);
+  }
+  function classifyJapaneseSourceUnit(text) {
+    if (JAPANESE_STATE_PREFIXES.some((prefix) => text.startsWith(prefix)))
+      return "state";
+    if (JAPANESE_FINAL_PARTICLES.includes(text))
+      return "final";
+    return "content";
+  }
+  function translatedPhraseRange(translatedWords, phrases, usedIndexes, preferEnd = false) {
+    const normalizedWords = translatedWords.map(normalizeVocabularyToken);
+    const normalizedPhrases = phrases.map((phrase) => phrase.map(normalizeVocabularyToken).filter(Boolean)).filter((phrase) => phrase.length > 0).sort((a, b) => b.length - a.length);
+    for (const phrase of normalizedPhrases) {
+      const starts = normalizedWords.map((_, index) => index).filter((index) => index + phrase.length <= normalizedWords.length);
+      if (preferEnd)
+        starts.reverse();
+      for (const start of starts) {
+        const end = start + phrase.length;
+        let matches = true;
+        for (let i = start; i < end; i++) {
+          if (usedIndexes.has(i) || normalizedWords[i] !== phrase[i - start]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches)
+          return { start, end };
+      }
+    }
+    return null;
+  }
+  function contiguousUnusedRanges(totalWords, usedIndexes) {
+    const ranges = [];
+    let start = -1;
+    for (let i = 0; i < totalWords; i++) {
+      if (!usedIndexes.has(i)) {
+        if (start === -1)
+          start = i;
+      } else if (start !== -1) {
+        ranges.push({ start, end: i });
+        start = -1;
+      }
+    }
+    if (start !== -1)
+      ranges.push({ start, end: totalWords });
+    return ranges;
+  }
+  function phraseFromRange(words, range) {
+    return words.slice(range.start, range.end).join(" ").trim();
+  }
+  function alignJapaneseVocabularyPairs(sourceUnits, translatedWords, originalText, translatedText) {
+    const usedTranslatedIndexes = /* @__PURE__ */ new Set();
+    const assignments = /* @__PURE__ */ new Map();
+    let semanticMatches = 0;
+    sourceUnits.forEach((unit, sourceIndex) => {
+      const kind = classifyJapaneseSourceUnit(unit);
+      const range = kind === "state" ? translatedPhraseRange(translatedWords, [
+        ["the", "nay"],
+        ["nhu", "vay"],
+        ["nhu", "the"],
+        ["vay"],
+        ["this", "way"],
+        ["like", "this"],
+        ["as", "it", "is"],
+        ["as", "is"]
+      ], usedTranslatedIndexes) : kind === "final" ? translatedPhraseRange(translatedWords, [
+        ["thoi"],
+        ["nhe"],
+        ["nhi"],
+        ["day"],
+        ["ha"],
+        ["sao"],
+        ["?"]
+      ], usedTranslatedIndexes, true) : null;
+      if (!range)
+        return;
+      for (let i = range.start; i < range.end; i++)
+        usedTranslatedIndexes.add(i);
+      semanticMatches++;
+      assignments.set(sourceIndex, {
+        original: unit,
+        translated: phraseFromRange(translatedWords, range),
+        confidence: "high",
+        sourceIndex,
+        translatedStart: range.start
+      });
+    });
+    if (semanticMatches === 0) {
+      return [{
+        original: originalText.trim(),
+        translated: translatedText.trim(),
+        confidence: "low",
+        sourceIndex: 0,
+        translatedStart: 0
+      }];
+    }
+    const unassignedSourceIndexes = sourceUnits.map((_, index) => index).filter((index) => !assignments.has(index));
+    const remainingRanges = contiguousUnusedRanges(translatedWords.length, usedTranslatedIndexes).filter((range) => range.end > range.start);
+    if (unassignedSourceIndexes.length === 1 && remainingRanges.length > 0) {
+      const sourceIndex = unassignedSourceIndexes[0];
+      const first = remainingRanges[0];
+      const last = remainingRanges[remainingRanges.length - 1];
+      assignments.set(sourceIndex, {
+        original: sourceUnits[sourceIndex],
+        translated: phraseFromRange(translatedWords, { start: first.start, end: last.end }),
+        confidence: "medium",
+        sourceIndex,
+        translatedStart: first.start
+      });
+    } else if (unassignedSourceIndexes.length > 1 && remainingRanges.length > 0) {
+      const remainingText = remainingRanges.map((range) => phraseFromRange(translatedWords, range)).join(" ").trim();
+      const translatedBuckets = distributeWords(splitTranslatedWords(remainingText), unassignedSourceIndexes.length);
+      unassignedSourceIndexes.forEach((sourceIndex, bucketIndex) => {
+        if (!translatedBuckets[bucketIndex])
+          return;
+        assignments.set(sourceIndex, {
+          original: sourceUnits[sourceIndex],
+          translated: translatedBuckets[bucketIndex],
+          confidence: "low",
+          sourceIndex,
+          translatedStart: remainingRanges[0].start + bucketIndex
+        });
+      });
+    }
+    const pairs = Array.from(assignments.values()).filter((pair) => pair.original.trim() && pair.translated.trim()).sort((a, b) => a.translatedStart - b.translatedStart || a.sourceIndex - b.sourceIndex);
+    return pairs.length > 0 ? pairs : [{
+      original: originalText.trim(),
+      translated: translatedText.trim(),
+      confidence: "low",
+      sourceIndex: 0,
+      translatedStart: 0
+    }];
+  }
+  function buildVocabularyPairs(originalText, translatedText) {
+    const original = (originalText || "").trim();
+    const translated = (translatedText || "").trim();
+    const sourceUnits = segmentVocabularySourceText(original);
+    const translatedWords = splitTranslatedWords(translated);
+    if (sourceUnits.length === 0 || translatedWords.length === 0) {
+      return [];
+    }
+    if (JAPANESE_TEXT_REGEX.test(original)) {
+      return alignJapaneseVocabularyPairs(sourceUnits, translatedWords, original, translated);
+    }
+    const pairCount = Math.min(sourceUnits.length, translatedWords.length);
+    const originalChunks = distributeWords(sourceUnits, pairCount);
+    const translatedChunks = distributeWords(translatedWords, pairCount);
+    return originalChunks.map((chunk, index) => ({
+      original: chunk,
+      translated: translatedChunks[index],
+      confidence: "medium",
+      sourceIndex: index,
+      translatedStart: index
+    }));
+  }
   function appendVocabularyPairs(doc, container, originalText, translatedText, originalLine, wordClassName) {
-    const origWords = originalText.trim().split(/\s+/).filter(Boolean);
-    const transWords = translatedText.trim().split(/\s+/).filter(Boolean);
-    if (origWords.length === 0 || transWords.length === 0) {
+    const pairs = buildVocabularyPairs(originalText, translatedText);
+    if (pairs.length === 0) {
       container.textContent = translatedText;
       return;
     }
     const originalWordUnits = getWordUnits(originalLine);
-    const pairCount = Math.min(origWords.length, transWords.length);
-    const origChunks = distributeWords(origWords, pairCount);
-    const transChunks = distributeWords(transWords, pairCount);
-    const transRatio = transWords.length / Math.max(originalWordUnits.length, 1);
     let globalWordIndex = 0;
-    for (let i = 0; i < pairCount; i++) {
+    const origChunks = pairs.map((pair) => pair.original);
+    const transChunks = pairs.map((pair) => pair.translated);
+    for (const [i, vocabPair] of pairs.entries()) {
       const pair = doc.createElement("span");
       pair.className = "slt-vocab-pair";
-      const chunkWords = transChunks[i].split(/\s+/).filter(Boolean);
+      pair.dataset.confidence = vocabPair.confidence;
+      const chunkWords = splitTranslatedWords(vocabPair.translated);
       const transSpan = doc.createElement("span");
       transSpan.className = `slt-vocab-translated ${wordClassName}`;
       if (wordClassName === "slt-sync-word") {
@@ -3439,15 +3648,15 @@ ${text}`
       } else {
         transSpan.classList.add("word-notsng");
       }
-      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(Math.floor(globalWordIndex / Math.max(transRatio, 0.01)), originalWordUnits.length - 1) : globalWordIndex;
+      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1) : vocabPair.sourceIndex;
       transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
       transSpan.dataset.wordIndex = globalWordIndex.toString();
-      transSpan.textContent = transChunks[i];
+      transSpan.textContent = vocabPair.translated;
       pair.appendChild(transSpan);
       globalWordIndex += chunkWords.length;
       const origSpan = doc.createElement("span");
       origSpan.className = "slt-vocab-original";
-      origSpan.textContent = origChunks[i];
+      origSpan.textContent = vocabPair.original;
       pair.appendChild(origSpan);
       pair.title = `${origChunks[i]}  \u2192  ${transChunks[i]}`;
       container.appendChild(pair);
@@ -3634,7 +3843,7 @@ ${text}`
           translationEl.dataset.forLine = index.toString();
           translationEl.dataset.lineIndex = index.toString();
           const isVocabMode = storage.get("vocabulary-mode") === "true";
-          const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+          const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
           if (isBreak) {
             translationEl.textContent = "\u2022 \u2022 \u2022";
             translationEl.classList.add("slt-music-break");
