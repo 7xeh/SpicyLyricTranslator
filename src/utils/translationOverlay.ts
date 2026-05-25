@@ -338,7 +338,12 @@ function applyReplaceMode(doc: Document): void {
             replaceEl.classList.add('slt-replace-instrumental');
         } else {
             const vocabEnabled = storage.get('vocabulary-mode') === 'true';
-            const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
+            let pairBelowText = originalText;
+            if (domIsRomanized) {
+                pairBelowText = originalTextMap.get(index) || originalText;
+            } else {
+                pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+            }
             if (vocabEnabled) {
                 replaceEl.classList.add('slt-vocab-line');
                 appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, 'slt-replace-word');
@@ -731,25 +736,25 @@ function appendVocabularyPairs(
 
     for (const [i, vocabPair] of pairs.entries()) {
         const pair = doc.createElement('span');
-        pair.className = 'slt-vocab-pair';
+        pair.className = `slt-vocab-pair ${wordClassName}`;
         pair.dataset.confidence = vocabPair.confidence;
 
-        // Translated word(s) — gradient-synced span
-        const chunkWords = splitTranslatedWords(vocabPair.translated);
-        const transSpan = doc.createElement('span');
-        transSpan.className = `slt-vocab-translated ${wordClassName}`;
-
         if (wordClassName === 'slt-sync-word') {
-            transSpan.classList.add('slt-word-future');
+            pair.classList.add('slt-word-future');
         } else {
-            transSpan.classList.add('word-notsng');
+            pair.classList.add('word-notsng');
         }
 
         const mappedOriginalIndex = originalWordUnits.length > 0
             ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1)
             : vocabPair.sourceIndex;
-        transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
-        transSpan.dataset.wordIndex = globalWordIndex.toString();
+        pair.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
+        pair.dataset.wordIndex = globalWordIndex.toString();
+
+        // Translated word(s) — gradient-synced span
+        const chunkWords = splitTranslatedWords(vocabPair.translated);
+        const transSpan = doc.createElement('span');
+        transSpan.className = 'slt-vocab-translated';
         transSpan.textContent = vocabPair.translated;
         pair.appendChild(transSpan);
 
@@ -1053,7 +1058,12 @@ function applyInterleavedMode(doc: Document): void {
                 translationEl.dataset.lineIndex = index.toString();
 
                 const isVocabMode = storage.get('vocabulary-mode') === 'true';
-                const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
+                let pairBelowText = originalText;
+                if (domIsRomanized) {
+                    pairBelowText = originalTextMap.get(index) || originalText;
+                } else {
+                    pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+                }
 
                 if (isBreak) {
                     translationEl.textContent = '• • •';

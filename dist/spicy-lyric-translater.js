@@ -3494,7 +3494,12 @@ ${text}`
         replaceEl.classList.add("slt-replace-instrumental");
       } else {
         const vocabEnabled = storage.get("vocabulary-mode") === "true";
-        const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
+        let pairBelowText = originalText;
+        if (domIsRomanized) {
+          pairBelowText = originalTextMap.get(index) || originalText;
+        } else {
+          pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+        }
         if (vocabEnabled) {
           replaceEl.classList.add("slt-vocab-line");
           appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, "slt-replace-word");
@@ -3793,19 +3798,19 @@ ${text}`
     const transChunks = pairs.map((pair) => pair.translated);
     for (const [i, vocabPair] of pairs.entries()) {
       const pair = doc.createElement("span");
-      pair.className = "slt-vocab-pair";
+      pair.className = `slt-vocab-pair ${wordClassName}`;
       pair.dataset.confidence = vocabPair.confidence;
-      const chunkWords = splitTranslatedWords(vocabPair.translated);
-      const transSpan = doc.createElement("span");
-      transSpan.className = `slt-vocab-translated ${wordClassName}`;
       if (wordClassName === "slt-sync-word") {
-        transSpan.classList.add("slt-word-future");
+        pair.classList.add("slt-word-future");
       } else {
-        transSpan.classList.add("word-notsng");
+        pair.classList.add("word-notsng");
       }
       const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1) : vocabPair.sourceIndex;
-      transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
-      transSpan.dataset.wordIndex = globalWordIndex.toString();
+      pair.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
+      pair.dataset.wordIndex = globalWordIndex.toString();
+      const chunkWords = splitTranslatedWords(vocabPair.translated);
+      const transSpan = doc.createElement("span");
+      transSpan.className = "slt-vocab-translated";
       transSpan.textContent = vocabPair.translated;
       pair.appendChild(transSpan);
       globalWordIndex += chunkWords.length;
@@ -3998,7 +4003,12 @@ ${text}`
           translationEl.dataset.forLine = index.toString();
           translationEl.dataset.lineIndex = index.toString();
           const isVocabMode = storage.get("vocabulary-mode") === "true";
-          const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
+          let pairBelowText = originalText;
+          if (domIsRomanized) {
+            pairBelowText = originalTextMap.get(index) || originalText;
+          } else {
+            pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+          }
           if (isBreak) {
             translationEl.textContent = "\u2022 \u2022 \u2022";
             translationEl.classList.add("slt-music-break");
@@ -5126,6 +5136,7 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line {
     -webkit-background-clip: border-box !important;
     text-shadow: none;
     font-weight: inherit;
+    filter: none !important;
 }
 
 .slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
@@ -5136,6 +5147,7 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line {
     background-clip: border-box !important;
     -webkit-background-clip: border-box !important;
     text-shadow: none;
+    filter: none !important;
 }
 
 
@@ -5876,6 +5888,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     border-bottom-color: rgba(30, 215, 96, 0.6);
 }
 
+.slt-vocab-pair.slt-replace-word,
+.slt-vocab-pair.slt-sync-word {
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    text-shadow: none !important;
+}
+
 .slt-vocab-translated {
     font-size: 1em;
     font-weight: 700;
@@ -5891,42 +5913,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     --text-shadow-opacity: 0%;
     text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
 
-    --gradient-degrees: 90deg;
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
-    --gradient-position: -20%;
     --gradient-offset: 0%;
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
     background-clip: text !important;
     -webkit-background-clip: text !important;
     background-image: linear-gradient(
-        var(--gradient-degrees),
-        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
-        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + 20% + var(--gradient-offset))
+        var(--gradient-degrees, 90deg),
+        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position, -20%),
+        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position, -20%) + 20% + var(--gradient-offset))
     ) !important;
-}
-
-.slt-vocab-translated.word-notsng,
-.slt-vocab-translated.slt-word-future {
-    opacity: 0.51;
-}
-
-.slt-vocab-translated.word-sung,
-.slt-vocab-translated.slt-word-past {
-    opacity: 0.5;
-    --gradient-position: 100%;
-}
-
-.slt-vocab-translated.word-active,
-.slt-vocab-translated.slt-word-active {
-    opacity: 1;
 }
 
 .slt-vocab-original {
     font-size: 0.65em;
     line-height: 1.15;
-    color: rgba(255, 255, 255, 0.3);
     letter-spacing: 0.01em;
     filter: blur(3px);
     transition: filter 0.25s ease, color 0.25s ease;
@@ -5934,6 +5937,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     white-space: normal;
     word-break: break-word;
     margin-top: 1px;
+
+    --gradient-alpha: 0.85;
+    --gradient-alpha-end: 0.5;
+    --gradient-offset: 0%;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    background-image: linear-gradient(
+        var(--gradient-degrees, 90deg),
+        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position, -20%),
+        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position, -20%) + 20% + var(--gradient-offset))
+    ) !important;
 }
 
 .slt-vocab-pair:hover .slt-vocab-original {
@@ -5965,6 +5981,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     .slt-vocab-original {
         filter: none !important;
     }
+}
+
+
+.Cinema--Container .LyricsContainer::before,
+.Cinema--Container .LyricsContainer::after,
+.Cinema--Container .simplebar-content::before,
+.Cinema--Container .simplebar-content::after,
+#SpicyLyricsPage.ForcedCompactMode .LyricsContainer::before,
+#SpicyLyricsPage.ForcedCompactMode .LyricsContainer::after,
+#SpicyLyricsPage.ForcedCompactMode .simplebar-content::before,
+#SpicyLyricsPage.ForcedCompactMode .simplebar-content::after,
+#SpicyLyricsPage.CompactMode .LyricsContainer::before,
+#SpicyLyricsPage.CompactMode .LyricsContainer::after,
+#SpicyLyricsPage.CompactMode .simplebar-content::before,
+#SpicyLyricsPage.CompactMode .simplebar-content::after {
+    min-height: 100% !important;
+}
+
+/* Fix SpicyThemes background overlay position shifting in Compact Mode */
+#SpicyLyricsPage.CompactMode .ContentBox .LyricsContainer,
+#SpicyLyricsPage.ForcedCompactMode .ContentBox .LyricsContainer,
+.Cinema--Container .ContentBox .LyricsContainer {
+    margin-top: 0 !important;
+    padding-top: 21cqh !important;
 }
 `;
   function injectStyles() {
