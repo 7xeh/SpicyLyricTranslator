@@ -1,13 +1,83 @@
 import { storage } from './storage';
 import { state } from './state';
 import { clearTranslationCache } from './translator';
-import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, clearAllTrackCache, getTrackCache } from './trackCache';
+import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
 import { reapplyTranslations } from './core';
-import { fetchLyricsForTrackUri } from './lyricsFetcher';
+import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
+const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
+
+function showActionNotification(message: string, isError: boolean = false): void {
+    if (state.showNotifications && Spicetify.showNotification) {
+        Spicetify.showNotification(message, isError);
+    }
+}
+
+export function clearAllCachedTranslations(): void {
+    clearTranslationCache();
+    showActionNotification('All cached translations deleted!');
+}
+
+export async function clearSpicyLyricsCachedLyrics(): Promise<void> {
+    try {
+        clearLyricsCache();
+        if (typeof caches !== 'undefined' && typeof caches.delete === 'function') {
+            await caches.delete(SPICY_LYRICS_CACHE_NAME);
+        }
+        showActionNotification('Spicy Lyrics cached lyrics deleted!');
+    } catch (e) {
+        showActionNotification('Failed to clear Spicy Lyrics cached lyrics', true);
+    }
+}
+
+export function renderModalCacheActionsMarkup(): string {
+    return `
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
+                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
+            </div>
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
+                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
+            </div>`;
+}
+
+export function bindModalCacheActions(container: ParentNode): void {
+    const viewSpicyLyricsCacheButton = container.querySelector('#slt-view-spicy-lyrics-cache') as HTMLButtonElement | null;
+    const spicyLyricsCacheButton = container.querySelector('#slt-clear-spicy-lyrics-cache') as HTMLButtonElement | null;
+    const translationCacheButton = container.querySelector('#slt-clear-translation-cache') as HTMLButtonElement | null;
+
+    viewSpicyLyricsCacheButton?.addEventListener('click', () => {
+        Spicetify.PopupModal?.hide();
+        setTimeout(() => openSpicyLyricsCacheViewer(), 150);
+    });
+
+    spicyLyricsCacheButton?.addEventListener('click', async () => {
+        const previousText = spicyLyricsCacheButton.textContent || 'Clear Spicy Lyrics Cache';
+        spicyLyricsCacheButton.disabled = true;
+        spicyLyricsCacheButton.textContent = 'Clearing...';
+        await clearSpicyLyricsCachedLyrics();
+        spicyLyricsCacheButton.textContent = 'Cleared';
+        setTimeout(() => {
+            spicyLyricsCacheButton.disabled = false;
+            spicyLyricsCacheButton.textContent = previousText;
+        }, 1200);
+    });
+
+    translationCacheButton?.addEventListener('click', () => {
+        const previousText = translationCacheButton.textContent || 'Clear All Cached Translations';
+        translationCacheButton.disabled = true;
+        clearAllCachedTranslations();
+        translationCacheButton.textContent = 'Cleared';
+        setTimeout(() => {
+            translationCacheButton.disabled = false;
+            translationCacheButton.textContent = previousText;
+        }, 1200);
+    });
+}
 
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
@@ -81,7 +151,7 @@ function createNativeInput(id: string, label: string, type: string, currentValue
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
         <div class="x-settings-secondColumn">
-            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml(placeholder)}">
+            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml(placeholder)}" autocomplete="off" spellcheck="false" data-form-type="other">
         </div>
     `;
 
@@ -181,13 +251,7 @@ function createNativeSettingsSection(): HTMLElement {
         'slt-settings.clear-cache',
         'Clear All Cached Translations',
         'Clear Cache',
-        () => {
-            clearAllTrackCache();
-            clearTranslationCache();
-            if (state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('All cached translations deleted!');
-            }
-        }
+        clearAllCachedTranslations
     ));
     
     sectionContent.appendChild(createNativeButton(
@@ -427,7 +491,7 @@ function renderModalSettingsMarkup(): string {
                 ${description}
             </div>
             <div class="slt-modal-field-control">
-                <input type="${field.type}" id="${id}" value="${escapeHtml(String(value))}" placeholder="${escapeHtml(field.placeholder || '')}">
+                <input type="${field.type}" id="${id}" value="${escapeHtml(String(value))}" placeholder="${escapeHtml(field.placeholder || '')}" autocomplete="off" spellcheck="false" data-form-type="other">
             </div>
         </div>`;
     }).join('');
@@ -566,6 +630,20 @@ function createSettingsUI(): HTMLElement {
                 background: var(--spice-card);
                 border: 1px solid var(--spice-button-disabled);
             }
+            .slt-button.danger {
+                background: rgba(255, 80, 80, 0.18);
+                border: 1px solid rgba(255, 80, 80, 0.35);
+                color: #ff7373;
+            }
+            .slt-button.danger:hover {
+                background: rgba(255, 80, 80, 0.3);
+                color: #fff;
+            }
+            .slt-button:disabled {
+                cursor: default;
+                opacity: 0.65;
+                transform: none;
+            }
             .slt-description {
                 display: block;
                 font-size: 12px;
@@ -585,6 +663,12 @@ function createSettingsUI(): HTMLElement {
             .slt-modal-actions {
                 border-top: 1px solid rgba(255, 255, 255, 0.08);
                 margin-top: 4px;
+            }
+            .slt-modal-cache-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
             }
             .slt-modal-footer {
                 color: var(--spice-subtext);
@@ -621,8 +705,15 @@ function createSettingsUI(): HTMLElement {
         
         ${renderModalSettingsMarkup()}
 
-        <div class="slt-modal-actions">
-            <button class="slt-button secondary" id="slt-view-cache">View Translation Cache</button>
+        <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
+                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
+            </div>
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
+                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
+            </div>
         </div>
         
         <div class="slt-modal-footer">
@@ -643,6 +734,7 @@ function createSettingsUI(): HTMLElement {
     
     setTimeout(() => {
         bindModalSettingsFields(container);
+        bindModalCacheActions(container);
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
@@ -1390,8 +1482,7 @@ function createCacheViewerUI(): HTMLElement {
         
         const deleteAllBtn = container.querySelector('#slt-delete-all-cache');
         deleteAllBtn?.addEventListener('click', () => {
-            clearAllTrackCache();
-            clearTranslationCache();
+            clearAllCachedTranslations();
             
             const tracksEl = container.querySelector('#slt-stat-tracks');
             const linesEl = container.querySelector('#slt-stat-lines');
@@ -1405,10 +1496,6 @@ function createCacheViewerUI(): HTMLElement {
             
             const actionsDiv = container.querySelector('.slt-cache-actions');
             if (actionsDiv) actionsDiv.remove();
-            
-            if (state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('All cached translations deleted!');
-            }
         });
     }, 0);
     
@@ -1420,6 +1507,423 @@ function openCacheViewer(): void {
         Spicetify.PopupModal.display({
             title: 'Translation Cache',
             content: createCacheViewerUI(),
+            isLarge: true
+        });
+    }
+}async function createSpicyLyricsCacheViewerUI(): Promise<HTMLElement> {
+    const container = document.createElement('div');
+    container.className = 'slt-cache-viewer';
+    
+    container.innerHTML = `<div style="padding: 20px; text-align: center;">Loading cache...</div>`;
+    
+    try {
+        let keys: readonly Request[] = [];
+        let cacheItems: any[] = [];
+        let totalSize = 0;
+        
+        if (typeof caches !== 'undefined') {
+            const cache = await caches.open(SPICY_LYRICS_CACHE_NAME);
+            keys = await cache.keys();
+            
+            cacheItems = await Promise.all(keys.map(async (req) => {
+                const url = new URL(req.url);
+                const pathParts = url.pathname.split('/').filter(Boolean);
+                const trackId = pathParts.length > 0 ? pathParts[pathParts.length - 1] : null;
+                const isTrackId = trackId && trackId.length === 22;
+                
+                let type = 'Unknown';
+                let lang = '';
+                let linesCount = 0;
+                let sizeBytes = 0;
+                
+                try {
+                    const res = await cache.match(req);
+                    if (res) {
+                        const buffer = await res.arrayBuffer();
+                        sizeBytes = buffer.byteLength;
+                        totalSize += sizeBytes;
+                        
+                        const text = new TextDecoder().decode(buffer);
+                        const parsed = JSON.parse(text);
+                        let lyricsData = parsed;
+                        
+                        if (parsed && !parsed.Type && parsed.Content !== undefined) {
+                            lyricsData = parsed.Content;
+                        }
+                        
+                        if (lyricsData && typeof lyricsData === 'object') {
+                            if (lyricsData.Type) type = lyricsData.Type;
+                            if (lyricsData.Language) lang = lyricsData.Language;
+                            if (lyricsData.Lines) linesCount = lyricsData.Lines.length;
+                            else if (lyricsData.Content) linesCount = lyricsData.Content.length;
+                        }
+                    }
+                } catch (e) {}
+                
+                return { req, url, trackId, isTrackId, type, lang, linesCount, sizeBytes };
+            }));
+        }
+        
+        let currentTotalSize = totalSize;
+        
+        container.innerHTML = `
+        <style>
+            .slt-cache-viewer {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                padding: 24px;
+                color: var(--spice-text);
+                width: min(800px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
+                box-sizing: border-box;
+                overflow: hidden;
+            }
+            .slt-cache-stats {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+                padding: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .slt-stat {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .slt-stat-label {
+                font-size: 11px;
+                color: var(--spice-subtext);
+                text-transform: uppercase;
+                line-height: 1.35;
+            }
+            .slt-stat-value {
+                font-size: 18px;
+                font-weight: 700;
+                color: var(--spice-text);
+                line-height: 1.25;
+            }
+            .slt-cache-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                overflow-y: auto;
+                min-height: 160px;
+                max-height: min(42vh, 420px);
+                padding-right: 8px;
+            }
+            .slt-cache-item {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: center;
+                padding: 12px 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                gap: 12px;
+                min-width: 0;
+            }
+            .slt-cache-item-info {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                flex: 1;
+                min-width: 0;
+            }
+            .slt-cache-item-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--spice-text);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                line-height: 1.35;
+            }
+            .slt-cache-item-meta {
+                font-size: 12px;
+                color: var(--spice-subtext);
+                opacity: 0.78;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
+            }
+            .slt-cache-delete {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 4px;
+                border: none;
+                background: rgba(255, 80, 80, 0.2);
+                color: #ff5050;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+                flex-shrink: 0;
+                white-space: nowrap;
+            }
+            .slt-cache-delete:hover {
+                background: rgba(255, 80, 80, 0.4);
+            }
+            .slt-cache-item-actions {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+            .slt-cache-action {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 4px;
+                border: none;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+                color: var(--spice-text);
+                background: var(--spice-main-elevated);
+                white-space: nowrap;
+            }
+            .slt-cache-action:hover {
+                opacity: 0.85;
+            }
+            .slt-cache-delete-all {
+                min-height: 40px;
+                padding: 9px 18px;
+                border-radius: 500px;
+                border: none;
+                background: rgba(255, 80, 80, 0.2);
+                color: #ff5050;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: background 0.2s;
+                white-space: normal;
+                text-align: center;
+            }
+            .slt-cache-delete-all:hover {
+                background: rgba(255, 80, 80, 0.4);
+            }
+            .slt-empty-cache {
+                text-align: center;
+                padding: 24px;
+                color: var(--spice-subtext);
+                font-size: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+            }
+            .slt-cache-actions {
+                display: flex;
+                justify-content: center;
+                padding-top: 8px;
+            }
+            .slt-cache-toolbar {
+                display: flex;
+                justify-content: flex-end;
+            }
+            .slt-cache-back {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 500px;
+                border: none;
+                background: var(--spice-main-elevated);
+                color: var(--spice-text);
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+            .slt-cache-back:hover {
+                opacity: 0.85;
+            }
+            @media (max-width: 620px) {
+                .slt-cache-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-cache-stats {
+                    grid-template-columns: 1fr;
+                }
+                .slt-cache-item {
+                    grid-template-columns: 1fr;
+                    align-items: stretch;
+                }
+                .slt-cache-item-actions {
+                    justify-content: flex-start;
+                    flex-wrap: wrap;
+                }
+            }
+        </style>
+        <div class="slt-cache-toolbar">
+            <button id="slt-sl-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
+        </div>
+        
+        <div class="slt-cache-stats">
+            <div class="slt-stat">
+                <span class="slt-stat-label">Cached Requests</span>
+                <span class="slt-stat-value" id="slt-sl-stat-tracks">${cacheItems.length}</span>
+            </div>
+            <div class="slt-stat">
+                <span class="slt-stat-label">Cache Size</span>
+                <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes(totalSize)}</span>
+            </div>
+        </div>
+        
+        <div class="slt-cache-list" id="slt-sl-cache-list">
+            ${cacheItems.length === 0 ? 
+                '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>' :
+                cacheItems.map((item, index) => {
+                    const displayTitle = item.isTrackId ? 'Track ID: ' + item.trackId : item.url.pathname;
+                    
+                    let metaText = item.url.hostname;
+                    if (item.type !== 'Unknown' || item.lang || item.linesCount > 0) {
+                        const details = [];
+                        if (item.lang) details.push(item.lang.toUpperCase());
+                        if (item.type !== 'Unknown') details.push(item.type);
+                        if (item.linesCount > 0) details.push(`${item.linesCount} lines`);
+                        details.push(formatBytes(item.sizeBytes));
+                        metaText = details.join(' • ');
+                    } else if (item.sizeBytes > 0) {
+                        metaText = `${item.url.hostname} • ${formatBytes(item.sizeBytes)}`;
+                    }
+                    
+                    return `
+                    <div class="slt-cache-item" data-url="${escapeHtml(item.req.url)}" data-size="${item.sizeBytes}" data-track="${item.isTrackId ? item.trackId : ''}">
+                        <div class="slt-cache-item-info">
+                            <span class="slt-cache-item-title">${escapeHtml(displayTitle)}</span>
+                            <span class="slt-cache-item-meta">${escapeHtml(metaText)}</span>
+                        </div>
+                        <div class="slt-cache-item-actions">
+                            ${item.isTrackId ? `<button class="slt-cache-action slt-cache-play">Play</button>` : ''}
+                            <button class="slt-cache-delete" data-index="${index}">Delete</button>
+                        </div>
+                    </div>
+                `}).join('')
+            }
+        </div>
+        
+        ${cacheItems.length > 0 ? `
+        <div class="slt-cache-actions">
+            <button class="slt-cache-delete-all" id="slt-sl-delete-all-cache">Delete All Spicy Lyrics Cache</button>
+        </div>
+        ` : ''}
+    `;
+    
+    setTimeout(() => {
+        const backToSettingsBtn = container.querySelector('#slt-sl-cache-back-to-settings') as HTMLButtonElement;
+        backToSettingsBtn?.addEventListener('click', () => {
+            Spicetify.PopupModal?.hide();
+            setTimeout(() => openSettingsModal(), 120);
+        });
+
+        container.querySelectorAll('.slt-cache-play').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const button = e.currentTarget as HTMLButtonElement;
+                const item = button.closest('.slt-cache-item') as HTMLElement;
+                const trackId = item?.dataset.track;
+                if (!trackId) return;
+
+                button.disabled = true;
+                const previousText = button.textContent;
+                button.textContent = 'Opening...';
+
+                try {
+                    const uri = `spotify:track:${trackId}`;
+                    const played = await playCachedTrack(uri);
+                    if (Spicetify.showNotification) {
+                        Spicetify.showNotification(played ? 'Opening cached track' : 'Unable to play track directly', !played);
+                    }
+                } finally {
+                    button.disabled = false;
+                    button.textContent = previousText || 'Play';
+                }
+            });
+        });
+
+        container.querySelectorAll('.slt-cache-delete').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const item = (e.target as HTMLElement).closest('.slt-cache-item') as HTMLElement;
+                if (item) {
+                    const url = item.dataset.url;
+                    if (url && typeof caches !== 'undefined') {
+                        try {
+                            const cache = await caches.open(SPICY_LYRICS_CACHE_NAME);
+                            await cache.delete(url);
+                            
+                            const itemSize = parseInt(item.dataset.size || '0', 10);
+                            currentTotalSize = Math.max(0, currentTotalSize - itemSize);
+                            
+                            item.remove();
+                            
+                            const tracksEl = container.querySelector('#slt-sl-stat-tracks');
+                            if (tracksEl) {
+                                const current = parseInt(tracksEl.textContent || '0', 10);
+                                tracksEl.textContent = String(Math.max(0, current - 1));
+                            }
+                            
+                            const sizeEl = container.querySelector('#slt-sl-stat-size');
+                            if (sizeEl) sizeEl.textContent = formatBytes(currentTotalSize);
+                            
+                            const list = container.querySelector('#slt-sl-cache-list');
+                            if (list && list.querySelectorAll('.slt-cache-item').length === 0) {
+                                list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
+                                const actionsDiv = container.querySelector('.slt-cache-actions');
+                                if (actionsDiv) actionsDiv.remove();
+                            }
+                        } catch (e) {
+                            console.error('Failed to delete cache item', e);
+                        }
+                    }
+                }
+            });
+        });
+        
+        const deleteAllBtn = container.querySelector('#slt-sl-delete-all-cache');
+        deleteAllBtn?.addEventListener('click', async () => {
+            await clearSpicyLyricsCachedLyrics();
+            
+            currentTotalSize = 0;
+            const tracksEl = container.querySelector('#slt-sl-stat-tracks');
+            if (tracksEl) tracksEl.textContent = '0';
+            
+            const sizeEl = container.querySelector('#slt-sl-stat-size');
+            if (sizeEl) sizeEl.textContent = '0 B';
+            
+            const list = container.querySelector('#slt-sl-cache-list');
+            if (list) list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
+            
+            const actionsDiv = container.querySelector('.slt-cache-actions');
+            if (actionsDiv) actionsDiv.remove();
+        });
+    }, 0);
+    
+    } catch (e) {
+        container.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff7373;">Failed to load cache</div>`;
+    }
+    
+    return container;
+};
+
+async function openSpicyLyricsCacheViewer(): Promise<void> {
+    if (Spicetify.PopupModal) {
+        Spicetify.PopupModal.display({
+            title: 'Spicy Lyrics Cache',
+            content: (() => {
+                const div = document.createElement('div');
+                div.style.padding = '20px';
+                div.style.textAlign = 'center';
+                div.textContent = 'Loading cache...';
+                return div;
+            })(),
+            isLarge: true
+        });
+        
+        const ui = await createSpicyLyricsCacheViewerUI();
+        
+        Spicetify.PopupModal.display({
+            title: 'Spicy Lyrics Cache',
+            content: ui,
             isLarge: true
         });
     }
@@ -1446,11 +1950,28 @@ export async function registerSettings(): Promise<void> {
         const registerMenuItem = () => {
             if ((Spicetify as any).Menu) {
                 try {
-                    new (Spicetify as any).Menu.Item(
-                        'Spicy Lyric Translator',
-                        false,
-                        openSettingsModal
-                    ).register();
+                    [
+                        {
+                            label: 'Spicy Lyric Translator Settings',
+                            callback: openSettingsModal
+                        },
+                        {
+                            label: 'Clear Spicy Lyrics Cache',
+                            callback: () => {
+                                void clearSpicyLyricsCachedLyrics();
+                            }
+                        },
+                        {
+                            label: 'Clear SLT Translation Cache',
+                            callback: clearAllCachedTranslations
+                        }
+                    ].forEach(item => {
+                        new (Spicetify as any).Menu.Item(
+                            item.label,
+                            false,
+                            item.callback
+                        ).register();
+                    });
                     return true;
                 } catch (e) {
                 }

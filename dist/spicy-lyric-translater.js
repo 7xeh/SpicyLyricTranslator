@@ -161,8 +161,16 @@ var SpicyLyricTranslater = (() => {
         const stored = this.get(key);
         if (stored === null)
           return null;
+        if (stored.startsWith("AIza") || stored.startsWith("sk-")) {
+          return stored;
+        }
         try {
-          return decodeURIComponent(escape(atob(stored)));
+          const decoded = decodeURIComponent(escape(atob(stored)));
+          const reencoded = btoa(unescape(encodeURIComponent(decoded)));
+          if (reencoded === stored) {
+            return decoded;
+          }
+          return stored;
         } catch {
           return stored;
         }
@@ -174,6 +182,25 @@ var SpicyLyricTranslater = (() => {
   var storage_default = storage;
 
   // src/utils/state.ts
+  var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+  var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+  var DEFAULT_LIBRETRANSLATE_URL = "https://libretranslate.com/translate";
+  function normalizeStoredOpenAIModel(model) {
+    const value = (model || "").trim();
+    return value === "gpt-5.5" || value === "gpt-4o-mini" ? value : DEFAULT_OPENAI_MODEL;
+  }
+  function normalizeStoredGeminiModel(model) {
+    const value = (model || "").trim().replace(/^models\//, "");
+    if (value === "gemini-3.1-flash-lite" || value === "gemini-3.5-flash" || value === "gemini-3.1-pro-preview")
+      return value;
+    if (value.includes("flash-lite"))
+      return "gemini-3.1-flash-lite";
+    if (value.includes("pro"))
+      return "gemini-3.1-pro-preview";
+    if (value.includes("flash"))
+      return "gemini-3.5-flash";
+    return DEFAULT_GEMINI_MODEL;
+  }
   var state = {
     isEnabled: storage.get("translation-enabled") === "true",
     isTranslating: false,
@@ -185,10 +212,14 @@ var SpicyLyricTranslater = (() => {
     customApiKey: storage.getSecret("custom-api-key") || "",
     customApiFormat: storage.get("custom-api-format") || "generic",
     customApiModel: storage.get("custom-api-model") || "",
+    libreTranslateApiUrl: storage.get("libretranslate-api-url") || DEFAULT_LIBRETRANSLATE_URL,
+    libreTranslateApiKey: storage.getSecret("libretranslate-api-key") || "",
     deeplApiKey: storage.getSecret("deepl-api-key") || "",
     openaiApiKey: storage.getSecret("openai-api-key") || "",
-    openaiModel: storage.get("openai-model") || "gpt-4o-mini",
+    openaiModel: normalizeStoredOpenAIModel(storage.get("openai-model")),
     geminiApiKey: storage.getSecret("gemini-api-key") || "",
+    geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
+    geminiTemperature: storage.get("gemini-temperature") || "0.3",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
     lastViewMode: null,
@@ -1157,15 +1188,22 @@ var SpicyLyricTranslater = (() => {
   }
 
   // src/utils/translator.ts
+  var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
+  var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
+  var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
   var customApiFormat = "generic";
   var customApiModel = "";
+  var libreTranslateApiUrl = DEFAULT_LIBRETRANSLATE_URL2;
+  var libreTranslateApiKey = "";
   var deeplApiKey = "";
   var openaiApiKey = "";
-  var openaiModel = "gpt-4o-mini";
+  var openaiModel = DEFAULT_OPENAI_MODEL2;
   var geminiApiKey = "";
+  var geminiModel = DEFAULT_GEMINI_MODEL2;
+  var geminiTemperature = 0.3;
   var RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2e3,
@@ -1177,6 +1215,7 @@ var SpicyLyricTranslater = (() => {
   var BATCH_MARKER_PREFIX = "[[SLT_BATCH_";
   var BATCH_CHUNK_SIZE = 6;
   var NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
+  var SPICETIFY_CORS_PROXY_BASE = "https://cors-proxy.spicetify.app/";
   function normalizeSourceLineForFingerprint(line) {
     return (line || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
@@ -1358,6 +1397,145 @@ var SpicyLyricTranslater = (() => {
     }
     lastApiCallTime = Date.now();
   }
+  function getCosmosAsync() {
+    try {
+      return globalThis.Spicetify?.CosmosAsync || null;
+    } catch {
+      return null;
+    }
+  }
+  function isLikelyCorsOrNetworkError(err) {
+    if (err instanceof TypeError)
+      return true;
+    const message = err instanceof Error ? err.message : String(err || "");
+    return /failed to fetch|networkerror|cors|load failed/i.test(message);
+  }
+  var NonRetryableProviderError = class extends Error {
+    constructor(message, status) {
+      super(message);
+      this.status = status;
+      this.name = "NonRetryableProviderError";
+    }
+  };
+  function isNonRetryableProviderError(err) {
+    if (err instanceof NonRetryableProviderError)
+      return true;
+    const message = err instanceof Error ? err.message : String(err || "");
+    const statusMatch = message.match(/\b(4\d\d)\b/);
+    if (!statusMatch)
+      return false;
+    const status = Number(statusMatch[1]);
+    return status !== 408 && status !== 429;
+  }
+  function createProviderHttpError(providerName, status, errorText) {
+    const message = `${providerName} API error: ${status}${errorText ? ` ${sanitizeProviderErrorText(errorText).slice(0, 240)}` : ""}`;
+    if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+      return new NonRetryableProviderError(message, status);
+    }
+    return new Error(message);
+  }
+  function createProviderConfigError(message) {
+    return new NonRetryableProviderError(message);
+  }
+  function sanitizeProviderErrorText(text) {
+    return (text || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-...").replace(/AIza[A-Za-z0-9_-]+/g, "AIza...");
+  }
+  function getSpicetifyCorsProxyUrl(url) {
+    return `${SPICETIFY_CORS_PROXY_BASE}${url}`;
+  }
+  function normalizeProviderJsonPayload(data, providerName) {
+    if (typeof data !== "string") {
+      return data;
+    }
+    const trimmed = data.trim();
+    if (!trimmed) {
+      throw new NonRetryableProviderError(`${providerName} API returned an empty response`);
+    }
+    if (trimmed.startsWith("<")) {
+      throw new NonRetryableProviderError(`${providerName} API returned HTML instead of JSON. Check the endpoint URL or API key.`);
+    }
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      throw new NonRetryableProviderError(`${providerName} API returned invalid JSON: ${trimmed.slice(0, 160)}`);
+    }
+  }
+  async function readProviderJsonResponse(response, providerName) {
+    const responseText = await response.text().catch(() => "");
+    if (!response.ok) {
+      throw createProviderHttpError(providerName, response.status, responseText);
+    }
+    return normalizeProviderJsonPayload(responseText, providerName);
+  }
+  async function postJsonProvider(url, body, headers, providerName, options = {}) {
+    const cosmos = getCosmosAsync();
+    if (options.preferCosmos && cosmos?.post) {
+      return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+    }
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      return await readProviderJsonResponse(response, providerName);
+    } catch (err) {
+      if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
+        return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+      }
+      throw err;
+    }
+  }
+  function buildLibreTranslateForm(text, targetLang) {
+    const params = new URLSearchParams();
+    const values = Array.isArray(text) ? text : [text];
+    values.forEach((value) => params.append("q", value));
+    params.set("source", "auto");
+    params.set("target", targetLang);
+    params.set("format", "text");
+    if (libreTranslateApiKey) {
+      params.set("api_key", libreTranslateApiKey);
+    }
+    return params;
+  }
+  function formToJsonObject(params) {
+    const result = {};
+    params.forEach((value, key) => {
+      const existing = result[key];
+      if (existing === void 0) {
+        result[key] = value;
+      } else if (Array.isArray(existing)) {
+        existing.push(value);
+      } else {
+        result[key] = [existing, value];
+      }
+    });
+    return result;
+  }
+  async function postFormProvider(url, params, providerName, options = {}) {
+    const cosmos = getCosmosAsync();
+    if (options.preferCosmos && cosmos?.post) {
+      return normalizeProviderJsonPayload(
+        await cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+        providerName
+      );
+    }
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body: params
+      });
+      return await readProviderJsonResponse(response, providerName);
+    } catch (err) {
+      if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
+        return normalizeProviderJsonPayload(
+          await cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+          providerName
+        );
+      }
+      throw err;
+    }
+  }
   async function retryWithBackoff(fn, maxRetries = RATE_LIMIT.maxRetries, baseDelay = RATE_LIMIT.minDelayMs) {
     let lastError = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1366,7 +1544,7 @@ var SpicyLyricTranslater = (() => {
         return await fn();
       } catch (error2) {
         lastError = error2;
-        if (error2 instanceof Error && error2.message.includes("40")) {
+        if (isNonRetryableProviderError(error2)) {
           throw error2;
         }
         if (attempt < maxRetries) {
@@ -1392,14 +1570,22 @@ var SpicyLyricTranslater = (() => {
         customApiFormat = apiKeys.customApiFormat;
       if (apiKeys.customApiModel !== void 0)
         customApiModel = apiKeys.customApiModel;
+      if (apiKeys.libreTranslateApiUrl !== void 0)
+        libreTranslateApiUrl = normalizeLibreTranslateUrl(apiKeys.libreTranslateApiUrl);
+      if (apiKeys.libreTranslateApiKey !== void 0)
+        libreTranslateApiKey = apiKeys.libreTranslateApiKey;
       if (apiKeys.deeplApiKey !== void 0)
         deeplApiKey = apiKeys.deeplApiKey;
       if (apiKeys.openaiApiKey !== void 0)
         openaiApiKey = apiKeys.openaiApiKey;
       if (apiKeys.openaiModel !== void 0)
-        openaiModel = apiKeys.openaiModel;
+        openaiModel = normalizeOpenAIModelName(apiKeys.openaiModel);
       if (apiKeys.geminiApiKey !== void 0)
         geminiApiKey = apiKeys.geminiApiKey;
+      if (apiKeys.geminiModel !== void 0)
+        geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
+      if (apiKeys.geminiTemperature !== void 0)
+        geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
     }
   }
   var CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1e3;
@@ -1619,56 +1805,72 @@ var SpicyLyricTranslater = (() => {
     }
     throw new Error("Invalid response from Google Translate");
   }
-  async function translateWithLibreTranslate(text, targetLang) {
-    const url = "https://libretranslate.de/translate";
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        q: text,
-        source: "auto",
-        target: targetLang,
-        format: "text"
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`LibreTranslate API error: ${response.status}`);
+  function normalizeLibreTranslateUrl(url) {
+    const trimmed = (url || "").trim();
+    return trimmed || DEFAULT_LIBRETRANSLATE_URL2;
+  }
+  function getLibreTranslateUrl() {
+    const url = normalizeLibreTranslateUrl(libreTranslateApiUrl);
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+        throw createProviderConfigError("LibreTranslate URL must use http or https.");
+      }
+      const normalizedPath = parsedUrl.pathname.replace(/\/+$/, "");
+      if (!normalizedPath || normalizedPath === "") {
+        parsedUrl.pathname = "/translate";
+      } else if (!normalizedPath.endsWith("/translate")) {
+        parsedUrl.pathname = `${normalizedPath}/translate`;
+      }
+      return parsedUrl.toString();
+    } catch (error2) {
+      if (error2 instanceof NonRetryableProviderError) {
+        throw error2;
+      }
+      throw createProviderConfigError("Invalid LibreTranslate URL format. Set it in Settings.");
     }
-    const data = await response.json();
-    return data.translatedText;
+  }
+  function libreTranslateHostedRequiresKey(url) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return host === "libretranslate.com" || host.endsWith(".libretranslate.com");
+    } catch {
+      return false;
+    }
+  }
+  function validateLibreTranslateConfig() {
+    const url = getLibreTranslateUrl();
+    if (libreTranslateHostedRequiresKey(url) && !libreTranslateApiKey) {
+      throw createProviderConfigError("LibreTranslate API key required for hosted LibreTranslate. Set a key or use a self-hosted URL.");
+    }
+    return url;
+  }
+  async function translateWithLibreTranslate(text, targetLang) {
+    const url = validateLibreTranslateConfig();
+    const data = await postFormProvider(
+      url,
+      buildLibreTranslateForm(text, targetLang),
+      "LibreTranslate",
+      { preferCosmos: true }
+    );
+    if (typeof data?.translatedText === "string") {
+      return data.translatedText;
+    }
+    throw new Error("Invalid response from LibreTranslate API");
   }
   async function translateWithDeepL(text, targetLang) {
     if (!deeplApiKey) {
-      throw new Error("DeepL API key not configured. Set it in Settings.");
+      throw createProviderConfigError("DeepL API key not configured. Set it in Settings.");
     }
     const isFreePlan = deeplApiKey.endsWith(":fx");
     const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
     const url = `${baseUrl}/v2/translate`;
-    const deeplLangMap = {
-      "en": "EN-US",
-      "pt": "PT-BR",
-      "zh": "ZH-HANS",
-      "zh-TW": "ZH-HANT"
-    };
-    const deeplTarget = deeplLangMap[targetLang] || targetLang.toUpperCase();
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        text: [text],
-        target_lang: deeplTarget
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(`DeepL API error: ${response.status}`);
-    }
-    const data = await response.json();
+    const data = await postJsonProvider(
+      getSpicetifyCorsProxyUrl(url),
+      buildDeepLBody([text], targetLang),
+      getDeepLHeaders(deeplApiKey),
+      "DeepL"
+    );
     if (data.translations && data.translations.length > 0) {
       return {
         translation: data.translations[0].text,
@@ -1679,36 +1881,19 @@ var SpicyLyricTranslater = (() => {
   }
   async function translateWithOpenAI(text, targetLang) {
     if (!openaiApiKey) {
-      throw new Error("OpenAI API key not configured. Set it in Settings.");
+      throw createProviderConfigError("OpenAI API key not configured. Set it in Settings.");
     }
     const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
+    const data = await postJsonProvider(
+      "https://api.openai.com/v1/chat/completions",
+      buildOpenAIChatBody(text, langName),
+      {
         "Authorization": `Bearer ${openaiApiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: openaiModel || "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
-          },
-          {
-            role: "user",
-            content: text
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: Math.max(text.length * 3, 500)
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
-    const data = await response.json();
+      "OpenAI",
+      { preferCosmos: true }
+    );
     if (data.choices && data.choices.length > 0) {
       const translation = data.choices[0].message?.content?.trim();
       if (translation) {
@@ -1717,18 +1902,76 @@ var SpicyLyricTranslater = (() => {
     }
     throw new Error("Invalid response from OpenAI API");
   }
+  function normalizeOpenAIModelName(model) {
+    const trimmed = (model || "").trim();
+    if (!trimmed)
+      return DEFAULT_OPENAI_MODEL2;
+    if (trimmed === "gpt-5.5" || trimmed === "gpt-4o-mini")
+      return trimmed;
+    return DEFAULT_OPENAI_MODEL2;
+  }
+  function isOpenAISpeedModeModel(model) {
+    return model === "gpt-5.5";
+  }
+  function buildOpenAIChatBody(text, langName) {
+    const model = normalizeOpenAIModelName(openaiModel);
+    const useSpeedMode = isOpenAISpeedModeModel(model);
+    const instruction = `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+    const body = {
+      model,
+      messages: [
+        {
+          role: useSpeedMode ? "developer" : "system",
+          content: instruction
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      max_completion_tokens: Math.max(text.length * 3, 500)
+    };
+    if (useSpeedMode) {
+      body.reasoning_effort = "none";
+    } else {
+      body.temperature = 0.3;
+    }
+    return body;
+  }
+  function normalizeGeminiModelName(model) {
+    const trimmed = (model || "").trim().replace(/^models\//, "");
+    if (!trimmed)
+      return DEFAULT_GEMINI_MODEL2;
+    if (trimmed === "gemini-3.1-flash-lite" || trimmed === "gemini-3.5-flash" || trimmed === "gemini-3.1-pro-preview") {
+      return trimmed;
+    }
+    if (trimmed.includes("flash-lite"))
+      return "gemini-3.1-flash-lite";
+    if (trimmed.includes("pro"))
+      return "gemini-3.1-pro-preview";
+    if (trimmed.includes("flash"))
+      return "gemini-3.5-flash";
+    return DEFAULT_GEMINI_MODEL2;
+  }
+  function normalizeGeminiTemperature(value) {
+    const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+    if (!Number.isFinite(parsed)) {
+      return 0.3;
+    }
+    return Math.min(2, Math.max(0, parsed));
+  }
+  function getGeminiGenerateContentUrl(model) {
+    const normalizedModel = normalizeGeminiModelName(model);
+    return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(normalizedModel)}:generateContent`;
+  }
   async function translateWithGemini(text, targetLang) {
     if (!geminiApiKey) {
-      throw new Error("Gemini API key not configured. Set it in Settings.");
+      throw createProviderConfigError("Gemini API key not configured. Set it in Settings.");
     }
     const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiApiKey
-      },
-      body: JSON.stringify({
+    const data = await postJsonProvider(
+      getGeminiGenerateContentUrl(geminiModel),
+      {
         contents: [
           {
             parts: [
@@ -1741,16 +1984,18 @@ ${text}`
           }
         ],
         generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: Math.max(text.length * 3, 500)
+          temperature: geminiTemperature,
+          maxOutputTokens: Math.max(text.length * 3, 2048),
+          thinkingConfig: { thinkingBudget: 0 }
         }
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-    const data = await response.json();
+      },
+      {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey
+      },
+      "Gemini",
+      { preferCosmos: true }
+    );
     if (data.candidates && data.candidates.length > 0) {
       const translation = data.candidates[0]?.content?.parts?.[0]?.text?.trim();
       if (translation) {
@@ -1761,7 +2006,7 @@ ${text}`
   }
   function validateCustomApiUrl() {
     if (!customApiUrl) {
-      throw new Error("Custom API URL not configured");
+      throw createProviderConfigError("Custom API URL not configured. Set it in Settings.");
     }
     try {
       const parsedUrl = new URL(customApiUrl);
@@ -1784,6 +2029,18 @@ ${text}`
       "zh-TW": "ZH-HANT"
     };
     return deeplLangMap[targetLang] || targetLang.toUpperCase();
+  }
+  function buildDeepLBody(texts, targetLang) {
+    return {
+      text: texts,
+      target_lang: getDeepLTargetLanguage(targetLang)
+    };
+  }
+  function getDeepLHeaders(apiKey) {
+    return {
+      "Authorization": `DeepL-Auth-Key ${apiKey}`,
+      "Content-Type": "application/json"
+    };
   }
   function getTranslationLanguageName(targetLang) {
     return SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
@@ -1847,7 +2104,7 @@ ${text}`
           }
         ],
         generationConfig: {
-          temperature: 0.3,
+          temperature: geminiTemperature,
           maxOutputTokens: Math.max(text.length * 3, 500)
         }
       };
@@ -1978,30 +2235,41 @@ ${text}`
   function customApiSupportsBatchArray() {
     return customApiFormat === "generic" || customApiFormat === "libretranslate" || customApiFormat === "deepl";
   }
+  function canUseBatchArrayProvider() {
+    if (preferredApi === "libretranslate")
+      return true;
+    if (preferredApi === "deepl")
+      return Boolean(deeplApiKey);
+    if (preferredApi === "custom")
+      return Boolean(customApiUrl && customApiSupportsBatchArray());
+    return false;
+  }
   async function translateBatchArray(texts, targetLang) {
     if (texts.length === 0) {
       return { translations: [], detectedLang: void 0 };
     }
+    if (preferredApi === "deepl" && !deeplApiKey) {
+      throw createProviderConfigError("DeepL API key not configured. Set it in Settings.");
+    }
+    if (preferredApi === "custom" && !customApiUrl) {
+      throw createProviderConfigError("Custom API URL not configured. Set it in Settings.");
+    }
     if (preferredApi === "deepl" && deeplApiKey || preferredApi === "custom" && customApiFormat === "deepl") {
-      const isFreePlan = deeplApiKey.endsWith(":fx");
+      const selectedDeepLKey = preferredApi === "custom" ? customApiKey : deeplApiKey;
+      const isFreePlan = selectedDeepLKey.endsWith(":fx");
       const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
       const url2 = preferredApi === "custom" ? validateCustomApiUrl() : `${baseUrl}/v2/translate`;
-      const headers2 = preferredApi === "custom" ? getCustomApiHeaders("deepl") : {
-        "Authorization": `DeepL-Auth-Key ${deeplApiKey}`,
-        "Content-Type": "application/json"
-      };
-      const response2 = await fetch(url2, {
-        method: "POST",
-        headers: headers2,
-        body: JSON.stringify({
-          text: texts,
-          target_lang: getDeepLTargetLanguage(targetLang)
-        })
-      });
-      if (!response2.ok) {
-        throw new Error(`DeepL batch API error: ${response2.status}`);
-      }
-      const data2 = await response2.json();
+      const data2 = preferredApi === "deepl" ? await postJsonProvider(
+        getSpicetifyCorsProxyUrl(url2),
+        buildDeepLBody(texts, targetLang),
+        getDeepLHeaders(selectedDeepLKey),
+        "DeepL batch"
+      ) : await postJsonProvider(
+        url2,
+        buildDeepLBody(texts, targetLang),
+        getCustomApiHeaders("deepl"),
+        "DeepL batch"
+      );
       if (data2.translations && Array.isArray(data2.translations)) {
         return {
           translations: data2.translations.map((t) => t.text || ""),
@@ -2013,30 +2281,28 @@ ${text}`
     if (preferredApi === "custom" && !customApiSupportsBatchArray()) {
       throw new Error("Custom API format does not support array batch payloads");
     }
-    const url = preferredApi === "libretranslate" ? "https://libretranslate.de/translate" : validateCustomApiUrl();
+    const url = preferredApi === "libretranslate" ? validateLibreTranslateConfig() : validateCustomApiUrl();
     if (!url) {
       throw new Error("Custom API URL not configured");
     }
-    const headers = preferredApi === "custom" ? getCustomApiHeaders(customApiFormat || "generic") : {
-      "Content-Type": "application/json"
-    };
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
+    const data = preferredApi === "libretranslate" ? await postFormProvider(
+      url,
+      buildLibreTranslateForm(texts.join("\n"), targetLang),
+      "LibreTranslate batch",
+      { preferCosmos: true }
+    ) : await postJsonProvider(
+      url,
+      {
         q: texts,
         text: texts,
         source: "auto",
         target: targetLang,
         target_lang: targetLang,
         format: "text"
-      })
-    });
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
-      throw new Error(`Batch API error: ${response.status}`);
-    }
-    const data = await response.json();
+      },
+      getCustomApiHeaders(customApiFormat || "generic"),
+      "Batch API"
+    );
     const normalized = normalizeBatchTranslations(data);
     if (normalized) {
       return normalized;
@@ -2055,6 +2321,9 @@ ${text}`
     const markerNonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const combinedText = lines.map((line, index) => `${BATCH_MARKER_PREFIX}${markerNonce}_${index}]]${line}`).join("\n");
     return { combinedText, markerNonce };
+  }
+  function hasInternalBatchMarkers(text) {
+    return (text || "").includes(BATCH_MARKER_PREFIX) || /\[\[\s*SLT[\s_-]*BATCH/i.test(text || "");
   }
   function parseMarkedBatchResponse(translatedText, expectedCount, markerNonce) {
     const markerRegex = new RegExp(`\\[\\[SLT_BATCH_${markerNonce}_(\\d+)\\]\\]`, "g");
@@ -2088,14 +2357,29 @@ ${text}`
     return byIndex;
   }
   function normalizeTranslatedLine(text) {
-    return text.replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim();
+    return text.replace(/```[a-z0-9_-]*/gi, "").replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function foldWrapperLineForComparison(text) {
+    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+  function isBatchWrapperLine(line) {
+    const folded = foldWrapperLineForComparison(line);
+    if (!folded)
+      return true;
+    if (/^```/.test(folded))
+      return true;
+    return /^(here('|')?s|here is|here are|sure[,!. ]|translation:?|translated lyrics:?|ban dich:?|duoi day|day la)/.test(folded);
+  }
+  function removeBatchWrapperLines(text) {
+    return (text || "").split(/\r?\n/).filter((line) => !isBatchWrapperLine(line)).join("\n");
   }
   function parseBatchTextFallbacks(translatedText, expectedCount) {
-    const separatorSplit = translatedText.split(BATCH_SEPARATOR_REGEX).map((s) => normalizeTranslatedLine(s));
+    const batchText = removeBatchWrapperLines(translatedText);
+    const separatorSplit = batchText.split(BATCH_SEPARATOR_REGEX).map((s) => normalizeTranslatedLine(s));
     if (separatorSplit.length === expectedCount) {
       return separatorSplit;
     }
-    const newlineSplit = translatedText.split(/\r?\n+/).map((s) => normalizeTranslatedLine(s)).filter(Boolean);
+    const newlineSplit = batchText.split(/\r?\n+/).map((s) => normalizeTranslatedLine(s)).filter(Boolean);
     if (newlineSplit.length === expectedCount) {
       return newlineSplit;
     }
@@ -2130,13 +2414,16 @@ ${text}`
       const result = await retryWithBackoff(() => translateText(lines[0], targetLang, sourceLang));
       return { translations: [result.translatedText], detectedLang: result.detectedLanguage };
     }
-    if (preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") {
+    if (canUseBatchArrayProvider()) {
       try {
         const batchResult = await retryWithBackoff(() => translateBatchArray(lines, targetLang));
         if (batchResult.translations.length === lines.length) {
           return batchResult;
         }
       } catch (batchArrayError) {
+        if (isNonRetryableProviderError(batchArrayError)) {
+          throw batchArrayError;
+        }
         warn("Source-aligned batch-array translation unavailable, falling back to marker batching:", batchArrayError);
       }
     }
@@ -2270,6 +2557,13 @@ ${text}`
         wasTranslated: true
       };
     } catch (primaryError) {
+      if (isNonRetryableProviderError(primaryError)) {
+        throw primaryError;
+      }
+      if (hasInternalBatchMarkers(text)) {
+        const message = primaryError instanceof Error ? primaryError.message : String(primaryError || "Provider failed");
+        throw new NonRetryableProviderError(message);
+      }
       warn(`Primary API (${preferredApi}) failed, trying fallbacks:`, primaryError);
       for (const fallbackApi of fallbackApis) {
         try {
@@ -2393,7 +2687,7 @@ ${text}`
     let detectedLang = detectedSourceLang || "auto";
     try {
       let translatedLines = null;
-      if (!hasMixedSourceLanguages && (preferredApi === "custom" && customApiSupportsBatchArray() || preferredApi === "libretranslate" || preferredApi === "deepl") && uncachedLines.length > 1) {
+      if (!hasMixedSourceLanguages && canUseBatchArrayProvider() && uncachedLines.length > 1) {
         try {
           const batchResult = await retryWithBackoff(() => translateBatchArray(uncachedLines.map((l) => l.text), targetLang));
           translatedLines = batchResult.translations;
@@ -2401,6 +2695,9 @@ ${text}`
             detectedLang = batchResult.detectedLang;
           }
         } catch (batchArrayError) {
+          if (isNonRetryableProviderError(batchArrayError)) {
+            throw batchArrayError;
+          }
           warn("Batch-array translation unavailable, falling back to marker batching:", batchArrayError);
         }
       }
@@ -2585,6 +2882,8 @@ ${text}`
   // src/utils/lyricsFetcher.ts
   var SPICY_API_HOST = "api.spicylyrics.org";
   var SPICY_QUERY_PATH = "/query";
+  var SPICY_LYRICS_CACHE_NAME = "SpicyLyrics_LyricsStore";
+  var SPICY_LYRICS_CACHE_VERSION = 12;
   var captureCache = /* @__PURE__ */ new Map();
   var interceptorInstalled = false;
   function isLyricsData(obj) {
@@ -2637,6 +2936,50 @@ ${text}`
       }
     }
   }
+  async function readSpicyLyricsCache(trackId) {
+    try {
+      if (!trackId || typeof caches === "undefined" || typeof caches.open !== "function") {
+        return null;
+      }
+      const cache = await caches.open(SPICY_LYRICS_CACHE_NAME);
+      const response = await cache.match(`/${trackId}`);
+      if (!response || typeof response.json !== "function") {
+        return null;
+      }
+      const item = await response.json();
+      if (isLyricsData(item)) {
+        return item;
+      }
+      if (!item || typeof item !== "object" || item.Value === "NO_LYRICS") {
+        return null;
+      }
+      if (typeof item.CacheVersion === "number" && item.CacheVersion !== SPICY_LYRICS_CACHE_VERSION) {
+        return null;
+      }
+      if (typeof item.ExpiresAt === "number" && item.ExpiresAt < Date.now()) {
+        return null;
+      }
+      const content = item.Content;
+      if (!content || content.Value === "NO_LYRICS") {
+        return null;
+      }
+      return isLyricsData(content) ? content : null;
+    } catch (err) {
+      warn("Failed to read Spicy Lyrics cache:", err);
+      return null;
+    }
+  }
+  async function getStoredLyricsData(trackId) {
+    const captured = captureCache.get(trackId);
+    if (captured)
+      return captured;
+    const cached = await readSpicyLyricsCache(trackId);
+    if (cached) {
+      captureCache.set(trackId, cached);
+      return cached;
+    }
+    return null;
+  }
   function installFetchInterceptor() {
     if (interceptorInstalled)
       return;
@@ -2684,13 +3027,20 @@ ${text}`
   installFetchInterceptor();
   async function waitForCapture(trackId, timeoutMs = 8e3, pollMs = 100) {
     const start = Date.now();
+    let nextStoreCheck = 0;
     while (Date.now() - start < timeoutMs) {
       const cached = captureCache.get(trackId);
       if (cached)
         return cached;
+      if (Date.now() >= nextStoreCheck) {
+        const stored = await getStoredLyricsData(trackId);
+        if (stored)
+          return stored;
+        nextStoreCheck = Date.now() + 500;
+      }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
-    return captureCache.get(trackId) ?? null;
+    return getStoredLyricsData(trackId);
   }
   function getCurrentTrackId() {
     try {
@@ -2825,6 +3175,20 @@ ${text}`
       return language;
     return void 0;
   }
+  function cacheParsedLyrics(trackId, lyrics) {
+    const lineData = extractLinesData(lyrics);
+    if (lineData.length === 0) {
+      return null;
+    }
+    cachedTrackId = trackId;
+    cachedLineData = lineData;
+    cachedLanguage = getLyricsLanguage(lyrics) || null;
+    return {
+      lines: lineData.map((l) => l.text),
+      lineData,
+      language: cachedLanguage || void 0
+    };
+  }
   async function fetchLyricsFromAPI() {
     const trackId = getCurrentTrackId();
     if (!trackId) {
@@ -2838,19 +3202,11 @@ ${text}`
       };
     }
     try {
-      const lyrics = await waitForCapture(trackId);
+      const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
       if (!lyrics) {
         return null;
       }
-      const lineData = extractLinesData(lyrics);
-      if (lineData.length === 0) {
-        return null;
-      }
-      cachedTrackId = trackId;
-      cachedLineData = lineData;
-      cachedLanguage = getLyricsLanguage(lyrics) || null;
-      const lines = lineData.map((l) => l.text);
-      return { lines, lineData, language: cachedLanguage || void 0 };
+      return cacheParsedLyrics(trackId, lyrics);
     } catch (err) {
       warn("Failed to capture lyrics from Spicy Lyrics fetch:", err);
       return null;
@@ -2869,22 +3225,11 @@ ${text}`
       };
     }
     try {
-      const lyrics = await waitForCapture(trackId);
+      const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
       if (!lyrics) {
         return null;
       }
-      const lineData = extractLinesData(lyrics);
-      if (lineData.length === 0) {
-        return null;
-      }
-      cachedTrackId = trackId;
-      cachedLineData = lineData;
-      cachedLanguage = getLyricsLanguage(lyrics) || null;
-      return {
-        lines: lineData.map((l) => l.text),
-        lineData,
-        language: cachedLanguage || void 0
-      };
+      return cacheParsedLyrics(trackId, lyrics);
     } catch (err) {
       warn("Failed to capture lyrics for track URI:", trackUri, err);
       return null;
@@ -2894,6 +3239,7 @@ ${text}`
     cachedTrackId = null;
     cachedLineData = null;
     cachedLanguage = null;
+    captureCache.clear();
   }
 
   // src/utils/translationOverlay.ts
@@ -3148,7 +3494,7 @@ ${text}`
         replaceEl.classList.add("slt-replace-instrumental");
       } else {
         const vocabEnabled = storage.get("vocabulary-mode") === "true";
-        const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+        const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
         if (vocabEnabled) {
           replaceEl.classList.add("slt-vocab-line");
           appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, "slt-replace-word");
@@ -3224,23 +3570,232 @@ ${text}`
       container.appendChild(span);
     });
   }
+  var JAPANESE_TEXT_REGEX = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u;
+  var JAPANESE_FINAL_PARTICLES = ["\u304B\u306A", "\u3088\u306D", "\u3060\u3088", "\u3060\u306D", "\u306D", "\u306A", "\u3088", "\u304B", "\u3055"];
+  var JAPANESE_STATE_PREFIXES = [
+    "\u3053\u306E\u307E\u307E",
+    "\u305D\u306E\u307E\u307E",
+    "\u3042\u306E\u307E\u307E",
+    "\u3053\u3093\u306A",
+    "\u305D\u3093\u306A",
+    "\u3042\u3093\u306A",
+    "\u3053\u3053",
+    "\u305D\u3053",
+    "\u3042\u305D\u3053",
+    "\u3053\u308C",
+    "\u305D\u308C",
+    "\u3042\u308C"
+  ];
+  function normalizeVocabularyToken(text) {
+    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}?]+/gu, "").trim();
+  }
+  function splitTranslatedWords(text) {
+    return (text || "").trim().split(/\s+/).filter(Boolean);
+  }
+  function splitJapaneseChunk(chunk) {
+    let rest = chunk.trim();
+    const parts = [];
+    let finalParticle = "";
+    const finalMatch = [...JAPANESE_FINAL_PARTICLES].sort((a, b) => b.length - a.length).find((particle) => rest.endsWith(particle) && rest.length > particle.length);
+    if (finalMatch) {
+      finalParticle = finalMatch;
+      rest = rest.slice(0, -finalMatch.length);
+    }
+    const prefix = [...JAPANESE_STATE_PREFIXES].sort((a, b) => b.length - a.length).find((candidate) => rest.startsWith(candidate) && rest.length > candidate.length);
+    if (prefix) {
+      parts.push(prefix);
+      rest = rest.slice(prefix.length);
+    }
+    if (rest.trim()) {
+      parts.push(rest.trim());
+    }
+    if (finalParticle) {
+      parts.push(finalParticle);
+    }
+    return parts.length > 0 ? parts : [chunk];
+  }
+  function segmentVocabularySourceText(text) {
+    const chunks = (text || "").trim().split(/\s+/).filter(Boolean);
+    if (chunks.length === 0)
+      return [];
+    const segments = [];
+    for (const chunk of chunks) {
+      if (JAPANESE_TEXT_REGEX.test(chunk)) {
+        segments.push(...splitJapaneseChunk(chunk));
+      } else {
+        segments.push(chunk);
+      }
+    }
+    return segments.filter(Boolean);
+  }
+  function classifyJapaneseSourceUnit(text) {
+    if (JAPANESE_STATE_PREFIXES.some((prefix) => text.startsWith(prefix)))
+      return "state";
+    if (JAPANESE_FINAL_PARTICLES.includes(text))
+      return "final";
+    return "content";
+  }
+  function translatedPhraseRange(translatedWords, phrases, usedIndexes, preferEnd = false) {
+    const normalizedWords = translatedWords.map(normalizeVocabularyToken);
+    const normalizedPhrases = phrases.map((phrase) => phrase.map(normalizeVocabularyToken).filter(Boolean)).filter((phrase) => phrase.length > 0).sort((a, b) => b.length - a.length);
+    for (const phrase of normalizedPhrases) {
+      const starts = normalizedWords.map((_, index) => index).filter((index) => index + phrase.length <= normalizedWords.length);
+      if (preferEnd)
+        starts.reverse();
+      for (const start of starts) {
+        const end = start + phrase.length;
+        let matches = true;
+        for (let i = start; i < end; i++) {
+          if (usedIndexes.has(i) || normalizedWords[i] !== phrase[i - start]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches)
+          return { start, end };
+      }
+    }
+    return null;
+  }
+  function contiguousUnusedRanges(totalWords, usedIndexes) {
+    const ranges = [];
+    let start = -1;
+    for (let i = 0; i < totalWords; i++) {
+      if (!usedIndexes.has(i)) {
+        if (start === -1)
+          start = i;
+      } else if (start !== -1) {
+        ranges.push({ start, end: i });
+        start = -1;
+      }
+    }
+    if (start !== -1)
+      ranges.push({ start, end: totalWords });
+    return ranges;
+  }
+  function phraseFromRange(words, range) {
+    return words.slice(range.start, range.end).join(" ").trim();
+  }
+  function alignJapaneseVocabularyPairs(sourceUnits, translatedWords, originalText, translatedText) {
+    const usedTranslatedIndexes = /* @__PURE__ */ new Set();
+    const assignments = /* @__PURE__ */ new Map();
+    let semanticMatches = 0;
+    sourceUnits.forEach((unit, sourceIndex) => {
+      const kind = classifyJapaneseSourceUnit(unit);
+      const range = kind === "state" ? translatedPhraseRange(translatedWords, [
+        ["the", "nay"],
+        ["nhu", "vay"],
+        ["nhu", "the"],
+        ["vay"],
+        ["this", "way"],
+        ["like", "this"],
+        ["as", "it", "is"],
+        ["as", "is"]
+      ], usedTranslatedIndexes) : kind === "final" ? translatedPhraseRange(translatedWords, [
+        ["thoi"],
+        ["nhe"],
+        ["nhi"],
+        ["day"],
+        ["ha"],
+        ["sao"],
+        ["?"]
+      ], usedTranslatedIndexes, true) : null;
+      if (!range)
+        return;
+      for (let i = range.start; i < range.end; i++)
+        usedTranslatedIndexes.add(i);
+      semanticMatches++;
+      assignments.set(sourceIndex, {
+        original: unit,
+        translated: phraseFromRange(translatedWords, range),
+        confidence: "high",
+        sourceIndex,
+        translatedStart: range.start
+      });
+    });
+    if (semanticMatches === 0) {
+      return [{
+        original: originalText.trim(),
+        translated: translatedText.trim(),
+        confidence: "low",
+        sourceIndex: 0,
+        translatedStart: 0
+      }];
+    }
+    const unassignedSourceIndexes = sourceUnits.map((_, index) => index).filter((index) => !assignments.has(index));
+    const remainingRanges = contiguousUnusedRanges(translatedWords.length, usedTranslatedIndexes).filter((range) => range.end > range.start);
+    if (unassignedSourceIndexes.length === 1 && remainingRanges.length > 0) {
+      const sourceIndex = unassignedSourceIndexes[0];
+      const first = remainingRanges[0];
+      const last = remainingRanges[remainingRanges.length - 1];
+      assignments.set(sourceIndex, {
+        original: sourceUnits[sourceIndex],
+        translated: phraseFromRange(translatedWords, { start: first.start, end: last.end }),
+        confidence: "medium",
+        sourceIndex,
+        translatedStart: first.start
+      });
+    } else if (unassignedSourceIndexes.length > 1 && remainingRanges.length > 0) {
+      const remainingText = remainingRanges.map((range) => phraseFromRange(translatedWords, range)).join(" ").trim();
+      const translatedBuckets = distributeWords(splitTranslatedWords(remainingText), unassignedSourceIndexes.length);
+      unassignedSourceIndexes.forEach((sourceIndex, bucketIndex) => {
+        if (!translatedBuckets[bucketIndex])
+          return;
+        assignments.set(sourceIndex, {
+          original: sourceUnits[sourceIndex],
+          translated: translatedBuckets[bucketIndex],
+          confidence: "low",
+          sourceIndex,
+          translatedStart: remainingRanges[0].start + bucketIndex
+        });
+      });
+    }
+    const pairs = Array.from(assignments.values()).filter((pair) => pair.original.trim() && pair.translated.trim()).sort((a, b) => a.translatedStart - b.translatedStart || a.sourceIndex - b.sourceIndex);
+    return pairs.length > 0 ? pairs : [{
+      original: originalText.trim(),
+      translated: translatedText.trim(),
+      confidence: "low",
+      sourceIndex: 0,
+      translatedStart: 0
+    }];
+  }
+  function buildVocabularyPairs(originalText, translatedText) {
+    const original = (originalText || "").trim();
+    const translated = (translatedText || "").trim();
+    const sourceUnits = segmentVocabularySourceText(original);
+    const translatedWords = splitTranslatedWords(translated);
+    if (sourceUnits.length === 0 || translatedWords.length === 0) {
+      return [];
+    }
+    if (JAPANESE_TEXT_REGEX.test(original)) {
+      return alignJapaneseVocabularyPairs(sourceUnits, translatedWords, original, translated);
+    }
+    const pairCount = Math.min(sourceUnits.length, translatedWords.length);
+    const originalChunks = distributeWords(sourceUnits, pairCount);
+    const translatedChunks = distributeWords(translatedWords, pairCount);
+    return originalChunks.map((chunk, index) => ({
+      original: chunk,
+      translated: translatedChunks[index],
+      confidence: "medium",
+      sourceIndex: index,
+      translatedStart: index
+    }));
+  }
   function appendVocabularyPairs(doc, container, originalText, translatedText, originalLine, wordClassName) {
-    const origWords = originalText.trim().split(/\s+/).filter(Boolean);
-    const transWords = translatedText.trim().split(/\s+/).filter(Boolean);
-    if (origWords.length === 0 || transWords.length === 0) {
+    const pairs = buildVocabularyPairs(originalText, translatedText);
+    if (pairs.length === 0) {
       container.textContent = translatedText;
       return;
     }
     const originalWordUnits = getWordUnits(originalLine);
-    const pairCount = Math.min(origWords.length, transWords.length);
-    const origChunks = distributeWords(origWords, pairCount);
-    const transChunks = distributeWords(transWords, pairCount);
-    const transRatio = transWords.length / Math.max(originalWordUnits.length, 1);
     let globalWordIndex = 0;
-    for (let i = 0; i < pairCount; i++) {
+    const origChunks = pairs.map((pair) => pair.original);
+    const transChunks = pairs.map((pair) => pair.translated);
+    for (const [i, vocabPair] of pairs.entries()) {
       const pair = doc.createElement("span");
       pair.className = "slt-vocab-pair";
-      const chunkWords = transChunks[i].split(/\s+/).filter(Boolean);
+      pair.dataset.confidence = vocabPair.confidence;
+      const chunkWords = splitTranslatedWords(vocabPair.translated);
       const transSpan = doc.createElement("span");
       transSpan.className = `slt-vocab-translated ${wordClassName}`;
       if (wordClassName === "slt-sync-word") {
@@ -3248,15 +3803,15 @@ ${text}`
       } else {
         transSpan.classList.add("word-notsng");
       }
-      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(Math.floor(globalWordIndex / Math.max(transRatio, 0.01)), originalWordUnits.length - 1) : globalWordIndex;
+      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1) : vocabPair.sourceIndex;
       transSpan.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
       transSpan.dataset.wordIndex = globalWordIndex.toString();
-      transSpan.textContent = transChunks[i];
+      transSpan.textContent = vocabPair.translated;
       pair.appendChild(transSpan);
       globalWordIndex += chunkWords.length;
       const origSpan = doc.createElement("span");
       origSpan.className = "slt-vocab-original";
-      origSpan.textContent = origChunks[i];
+      origSpan.textContent = vocabPair.original;
       pair.appendChild(origSpan);
       pair.title = `${origChunks[i]}  \u2192  ${transChunks[i]}`;
       container.appendChild(pair);
@@ -3443,7 +3998,7 @@ ${text}`
           translationEl.dataset.forLine = index.toString();
           translationEl.dataset.lineIndex = index.toString();
           const isVocabMode = storage.get("vocabulary-mode") === "true";
-          const pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
+          const pairBelowText = originalTextMap.get(index) || romanizationMap.get(index) || originalText;
           if (isBreak) {
             translationEl.textContent = "\u2022 \u2022 \u2022";
             translationEl.classList.add("slt-music-break");
@@ -5448,7 +6003,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.3" : "0.0.0";
+    return true ? "2.0.4" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6657,19 +7212,26 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (btn.classList.contains("active"))
         return true;
     }
+    const keys = [
+      "SpicyLyrics-romanization",
+      "SpicyLyrics:romanization",
+      "romanization"
+    ];
     try {
       const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
       if (spicetifyStorage?.get) {
-        const val = spicetifyStorage.get("SpicyLyrics:romanization");
-        if (val === "true")
-          return true;
-        if (val === "false")
-          return false;
+        for (const key of keys) {
+          const val = spicetifyStorage.get(key);
+          if (val === "true")
+            return true;
+          if (val === "false")
+            return false;
+        }
       }
     } catch (e) {
     }
     try {
-      for (const key of ["SpicyLyrics:romanization", "romanization"]) {
+      for (const key of keys) {
         const val = localStorage.getItem(key);
         if (val === "true")
           return true;
@@ -6922,6 +7484,66 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return document.querySelectorAll(".non-existent-selector");
   }
+  function emptyLineData() {
+    return {
+      text: "",
+      startTime: 0,
+      endTime: 0,
+      isInstrumental: false
+    };
+  }
+  function hasOriginalScript(lines) {
+    return Boolean(lines?.some((line) => /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(line || "")));
+  }
+  function resolveTranslationSourceLines(input) {
+    const domLineTexts = [...input.domLineTexts];
+    const cachedOriginalLines = hasOriginalScript(input.cachedSourceLines) ? [...input.cachedSourceLines] : null;
+    let apiVocalTexts = input.apiVocalTexts ? [...input.apiVocalTexts] : cachedOriginalLines;
+    let apiVocalLineData = input.apiVocalLineData ? [...input.apiVocalLineData] : cachedOriginalLines?.map((line) => ({ ...emptyLineData(), text: line })) || null;
+    if (input.romanizationOn) {
+      if (!apiVocalTexts || apiVocalTexts.length === 0) {
+        return {
+          canTranslate: false,
+          reason: "missing-original-lyrics",
+          lineTexts: [],
+          useApiLines: false,
+          apiVocalTexts,
+          apiVocalLineData
+        };
+      }
+      const domCount = domLineTexts.length;
+      if (domCount > 0 && apiVocalTexts.length > domCount) {
+        apiVocalTexts = apiVocalTexts.slice(0, domCount);
+        if (apiVocalLineData)
+          apiVocalLineData = apiVocalLineData.slice(0, domCount);
+      } else if (domCount > 0 && apiVocalTexts.length < domCount) {
+        for (let i = apiVocalTexts.length; i < domCount; i++) {
+          apiVocalTexts.push("");
+          if (apiVocalLineData) {
+            apiVocalLineData.push(emptyLineData());
+          }
+        }
+      }
+      const hasOriginalText = apiVocalTexts.some((text) => text.trim().length > 0);
+      return {
+        canTranslate: hasOriginalText,
+        reason: hasOriginalText ? void 0 : "missing-original-lyrics",
+        lineTexts: hasOriginalText ? apiVocalTexts : [],
+        useApiLines: hasOriginalText,
+        apiVocalTexts,
+        apiVocalLineData
+      };
+    }
+    const useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === domLineTexts.length);
+    const lineTexts = useApiLines ? apiVocalTexts : domLineTexts;
+    return {
+      canTranslate: lineTexts.some((text) => text.trim().length > 0),
+      lineTexts,
+      useApiLines,
+      apiVocalTexts,
+      apiVocalLineData
+    };
+  }
   function getLyricsFirstLineText() {
     const lines = getLyricsLines();
     if (lines.length > 0) {
@@ -7022,6 +7644,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       let apiLineTexts = null;
       let apiLanguage;
       let apiLineData = null;
+      let cachedSourceLines = null;
+      let cachedSourceLanguage;
       try {
         const apiResult = await fetchLyricsFromAPI();
         if (apiResult && apiResult.lines.length > 0) {
@@ -7031,6 +7655,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         }
       } catch (apiErr) {
         warn("SpicyLyrics API fetch failed, falling back to DOM:", apiErr);
+      }
+      if (romanizationOn && currentTrackUri2) {
+        const trackCache = getTrackCache(currentTrackUri2, state.targetLanguage);
+        if (trackCache?.sourceLines && hasOriginalScript(trackCache.sourceLines)) {
+          cachedSourceLines = trackCache.sourceLines;
+          cachedSourceLanguage = trackCache.lang;
+        }
       }
       let apiVocalTexts = null;
       let apiVocalLineData = null;
@@ -7044,7 +7675,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           }
         }
       }
-      let useApiLines = apiVocalTexts && apiVocalTexts.length === lines.length;
+      let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === lines.length);
       if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
         for (let retryAttempt = 0; retryAttempt < 4; retryAttempt++) {
           await new Promise((resolve) => setTimeout(resolve, 400));
@@ -7058,29 +7689,25 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             break;
           }
         }
-        if (!useApiLines && apiVocalTexts.length > 0 && lines.length > 0) {
-          useApiLines = true;
-          const domCount = lines.length;
-          if (apiVocalTexts.length > domCount) {
-            apiVocalTexts = apiVocalTexts.slice(0, domCount);
-            if (apiVocalLineData)
-              apiVocalLineData = apiVocalLineData.slice(0, domCount);
-          } else if (apiVocalTexts.length < domCount) {
-            for (let i = apiVocalTexts.length; i < domCount; i++) {
-              apiVocalTexts.push("");
-              if (apiVocalLineData) {
-                apiVocalLineData.push({
-                  text: "",
-                  startTime: 0,
-                  endTime: 0,
-                  isInstrumental: false
-                });
-              }
-            }
-          }
-        }
       }
-      if (!useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
+      let sourceSelection = resolveTranslationSourceLines({
+        domLineTexts,
+        romanizationOn,
+        apiVocalTexts,
+        apiVocalLineData,
+        cachedSourceLines
+      });
+      if (!sourceSelection.canTranslate) {
+        removeTranslations();
+        if (romanizationOn && state.showNotifications && Spicetify.showNotification) {
+          Spicetify.showNotification("Original lyrics unavailable while romanization is enabled", true);
+        }
+        return;
+      }
+      apiVocalTexts = sourceSelection.apiVocalTexts;
+      apiVocalLineData = sourceSelection.apiVocalLineData;
+      useApiLines = sourceSelection.useApiLines;
+      if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
         for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
           await new Promise((resolve) => setTimeout(resolve, 600));
           lines = getLyricsLines();
@@ -7098,6 +7725,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             break;
           }
         }
+        sourceSelection = resolveTranslationSourceLines({
+          domLineTexts,
+          romanizationOn,
+          apiVocalTexts,
+          apiVocalLineData,
+          cachedSourceLines
+        });
+        apiVocalTexts = sourceSelection.apiVocalTexts;
+        apiVocalLineData = sourceSelection.apiVocalLineData;
+        useApiLines = sourceSelection.useApiLines;
       }
       let matchedTimingData = null;
       if (!useApiLines && apiVocalTexts && apiVocalLineData && apiVocalTexts.length > 0) {
@@ -7126,7 +7763,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           }
         }
       }
-      const lineTexts = useApiLines ? apiVocalTexts : domLineTexts;
+      const lineTexts = sourceSelection.lineTexts;
       if (useApiLines) {
       } else if (apiVocalTexts) {
       }
@@ -7134,7 +7771,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       if (nonEmptyTexts.length === 0) {
         return;
       }
-      const detectedLang = apiLanguage || state.detectedLanguage || void 0;
+      const detectedLang = apiLanguage || cachedSourceLanguage || state.detectedLanguage || void 0;
       let skipCheck;
       if (romanizationOn && apiLanguage) {
         const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
@@ -7736,8 +8373,29 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       type: "text",
       storageKey: "custom-api-model",
       defaultValue: "",
-      placeholder: "gpt-4o-mini, llama3.1, gemini-2.0-flash",
+      placeholder: "gpt-4o-mini, llama3.1, gemini-3.1-flash-lite",
       visibleForApis: ["custom"]
+    },
+    {
+      id: "libretranslate-api-url",
+      label: "LibreTranslate URL",
+      type: "text",
+      storageKey: "libretranslate-api-url",
+      defaultValue: "https://libretranslate.com/translate",
+      placeholder: "https://libretranslate.com/translate",
+      description: "Use the hosted endpoint with a key, or a self-hosted URL without one",
+      visibleForApis: ["libretranslate"]
+    },
+    {
+      id: "libretranslate-api-key",
+      label: "LibreTranslate API Key",
+      type: "password",
+      storageKey: "libretranslate-api-key",
+      defaultValue: "",
+      placeholder: "API key",
+      description: "Required for hosted libretranslate.com",
+      secret: true,
+      visibleForApis: ["libretranslate"]
     },
     {
       id: "deepl-api-key",
@@ -7763,11 +8421,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     {
       id: "openai-model",
       label: "OpenAI Model",
-      type: "text",
+      type: "select",
       storageKey: "openai-model",
       defaultValue: "gpt-4o-mini",
-      placeholder: "gpt-4o-mini",
-      description: "e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo",
+      options: [
+        { value: "gpt-5.5", text: "GPT-5.5 Speed" },
+        { value: "gpt-4o-mini", text: "GPT-4o mini" }
+      ],
+      description: "GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option",
       visibleForApis: ["openai"]
     },
     {
@@ -7779,6 +8440,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       placeholder: "AIza...",
       description: "Get a key at aistudio.google.com/apikey",
       secret: true,
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "gemini-model",
+      label: "Gemini Model",
+      type: "select",
+      storageKey: "gemini-model",
+      defaultValue: "gemini-3.1-flash-lite",
+      options: [
+        { value: "gemini-3.1-flash-lite", text: "3.1 Flash-Lite" },
+        { value: "gemini-3.5-flash", text: "3.5 Flash" },
+        { value: "gemini-3.1-pro-preview", text: "3.1 Pro" }
+      ],
+      description: "Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics",
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "gemini-temperature",
+      label: "Gemini Temperature",
+      type: "text",
+      storageKey: "gemini-temperature",
+      defaultValue: "0.3",
+      placeholder: "0.0 - 2.0",
+      description: "Controls output randomness (0.0 = deterministic, 2.0 = highly creative)",
       visibleForApis: ["gemini"]
     },
     {
@@ -7826,6 +8511,26 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   function isSettingFieldVisible(field, api = getCurrentApiPreference()) {
     return !field.visibleForApis || field.visibleForApis.includes(api);
   }
+  function normalizeLegacySelectValue(fieldId, value) {
+    const stored = (value || "").trim().replace(/^models\//, "");
+    if (!stored)
+      return value;
+    if (fieldId === "openai-model") {
+      return stored === "gpt-5.5" || stored === "gpt-4o-mini" ? stored : "gpt-4o-mini";
+    }
+    if (fieldId === "gemini-model") {
+      if (stored === "gemini-3.1-flash-lite" || stored === "gemini-3.5-flash" || stored === "gemini-3.1-pro-preview")
+        return stored;
+      if (stored.includes("flash-lite"))
+        return "gemini-3.1-flash-lite";
+      if (stored.includes("pro"))
+        return "gemini-3.1-pro-preview";
+      if (stored.includes("flash"))
+        return "gemini-3.5-flash";
+      return "gemini-3.1-flash-lite";
+    }
+    return value;
+  }
   function readSettingValue(field) {
     if (field.type === "toggle") {
       const stored2 = storage.get(field.storageKey);
@@ -7835,17 +8540,25 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return stored2 === "true";
     }
     const stored = field.secret ? storage.getSecret(field.storageKey) : storage.get(field.storageKey);
-    return stored ?? String(field.defaultValue);
+    const normalizedStored = field.type === "select" ? normalizeLegacySelectValue(field.id, stored) : stored;
+    if (field.type === "select" && field.options && normalizedStored && field.options.every((option) => option.value !== normalizedStored)) {
+      return String(field.defaultValue);
+    }
+    return normalizedStored ?? String(field.defaultValue);
   }
   function configureTranslationApi() {
     setPreferredApi(state.preferredApi, state.customApiUrl, {
       customApiKey: state.customApiKey,
       customApiFormat: state.customApiFormat,
       customApiModel: state.customApiModel,
+      libreTranslateApiUrl: state.libreTranslateApiUrl,
+      libreTranslateApiKey: state.libreTranslateApiKey,
       deeplApiKey: state.deeplApiKey,
       openaiApiKey: state.openaiApiKey,
       openaiModel: state.openaiModel,
-      geminiApiKey: state.geminiApiKey
+      geminiApiKey: state.geminiApiKey,
+      geminiModel: state.geminiModel,
+      geminiTemperature: state.geminiTemperature
     });
   }
   function writeSettingValue(field, value) {
@@ -7883,6 +8596,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         state.customApiModel = String(value);
         configureTranslationApi();
         break;
+      case "libretranslate-api-url":
+        state.libreTranslateApiUrl = String(value);
+        configureTranslationApi();
+        break;
+      case "libretranslate-api-key":
+        state.libreTranslateApiKey = String(value);
+        configureTranslationApi();
+        break;
       case "deepl-api-key":
         state.deeplApiKey = String(value);
         configureTranslationApi();
@@ -7897,6 +8618,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         break;
       case "gemini-api-key":
         state.geminiApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-model":
+        state.geminiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-temperature":
+        state.geminiTemperature = String(value);
         configureTranslationApi();
         break;
       case "auto-translate":
@@ -7920,6 +8649,57 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
 
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
+  var SPICY_LYRICS_CACHE_NAME2 = "SpicyLyrics_LyricsStore";
+  function showActionNotification(message, isError = false) {
+    if (state.showNotifications && Spicetify.showNotification) {
+      Spicetify.showNotification(message, isError);
+    }
+  }
+  function clearAllCachedTranslations() {
+    clearTranslationCache();
+    showActionNotification("All cached translations deleted!");
+  }
+  async function clearSpicyLyricsCachedLyrics() {
+    try {
+      clearLyricsCache();
+      if (typeof caches !== "undefined" && typeof caches.delete === "function") {
+        await caches.delete(SPICY_LYRICS_CACHE_NAME2);
+      }
+      showActionNotification("Spicy Lyrics cached lyrics deleted!");
+    } catch (e) {
+      showActionNotification("Failed to clear Spicy Lyrics cached lyrics", true);
+    }
+  }
+  function bindModalCacheActions(container) {
+    const viewSpicyLyricsCacheButton = container.querySelector("#slt-view-spicy-lyrics-cache");
+    const spicyLyricsCacheButton = container.querySelector("#slt-clear-spicy-lyrics-cache");
+    const translationCacheButton = container.querySelector("#slt-clear-translation-cache");
+    viewSpicyLyricsCacheButton?.addEventListener("click", () => {
+      Spicetify.PopupModal?.hide();
+      setTimeout(() => openSpicyLyricsCacheViewer(), 150);
+    });
+    spicyLyricsCacheButton?.addEventListener("click", async () => {
+      const previousText = spicyLyricsCacheButton.textContent || "Clear Spicy Lyrics Cache";
+      spicyLyricsCacheButton.disabled = true;
+      spicyLyricsCacheButton.textContent = "Clearing...";
+      await clearSpicyLyricsCachedLyrics();
+      spicyLyricsCacheButton.textContent = "Cleared";
+      setTimeout(() => {
+        spicyLyricsCacheButton.disabled = false;
+        spicyLyricsCacheButton.textContent = previousText;
+      }, 1200);
+    });
+    translationCacheButton?.addEventListener("click", () => {
+      const previousText = translationCacheButton.textContent || "Clear All Cached Translations";
+      translationCacheButton.disabled = true;
+      clearAllCachedTranslations();
+      translationCacheButton.textContent = "Cleared";
+      setTimeout(() => {
+        translationCacheButton.disabled = false;
+        translationCacheButton.textContent = previousText;
+      }, 1200);
+    });
+  }
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
@@ -7982,7 +8762,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
         <div class="x-settings-secondColumn">
-            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml2(placeholder)}">
+            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml2(placeholder)}" autocomplete="off" spellcheck="false" data-form-type="other">
         </div>
     `;
     const input = row.querySelector("input");
@@ -8067,13 +8847,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       "slt-settings.clear-cache",
       "Clear All Cached Translations",
       "Clear Cache",
-      () => {
-        clearAllTrackCache();
-        clearTranslationCache();
-        if (state.showNotifications && Spicetify.showNotification) {
-          Spicetify.showNotification("All cached translations deleted!");
-        }
-      }
+      clearAllCachedTranslations
     ));
     sectionContent.appendChild(createNativeButton(
       "slt-settings.view-changelog",
@@ -8282,7 +9056,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 ${description}
             </div>
             <div class="slt-modal-field-control">
-                <input type="${field.type}" id="${id}" value="${escapeHtml2(String(value))}" placeholder="${escapeHtml2(field.placeholder || "")}">
+                <input type="${field.type}" id="${id}" value="${escapeHtml2(String(value))}" placeholder="${escapeHtml2(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">
             </div>
         </div>`;
     }).join("");
@@ -8417,6 +9191,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 background: var(--spice-card);
                 border: 1px solid var(--spice-button-disabled);
             }
+            .slt-button.danger {
+                background: rgba(255, 80, 80, 0.18);
+                border: 1px solid rgba(255, 80, 80, 0.35);
+                color: #ff7373;
+            }
+            .slt-button.danger:hover {
+                background: rgba(255, 80, 80, 0.3);
+                color: #fff;
+            }
+            .slt-button:disabled {
+                cursor: default;
+                opacity: 0.65;
+                transform: none;
+            }
             .slt-description {
                 display: block;
                 font-size: 12px;
@@ -8436,6 +9224,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             .slt-modal-actions {
                 border-top: 1px solid rgba(255, 255, 255, 0.08);
                 margin-top: 4px;
+            }
+            .slt-modal-cache-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
             }
             .slt-modal-footer {
                 color: var(--spice-subtext);
@@ -8472,8 +9266,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         
         ${renderModalSettingsMarkup()}
 
-        <div class="slt-modal-actions">
-            <button class="slt-button secondary" id="slt-view-cache">View Translation Cache</button>
+        <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
+                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
+            </div>
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
+                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
+            </div>
         </div>
         
         <div class="slt-modal-footer">
@@ -8496,6 +9297,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     `;
     setTimeout(() => {
       bindModalSettingsFields(container);
+      bindModalCacheActions(container);
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
       const checkUpdatesButton = container.querySelector("#slt-check-updates");
@@ -9209,8 +10011,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       });
       const deleteAllBtn = container.querySelector("#slt-delete-all-cache");
       deleteAllBtn?.addEventListener("click", () => {
-        clearAllTrackCache();
-        clearTranslationCache();
+        clearAllCachedTranslations();
         const tracksEl = container.querySelector("#slt-stat-tracks");
         const linesEl = container.querySelector("#slt-stat-lines");
         const sizeEl = container.querySelector("#slt-stat-size");
@@ -9226,9 +10027,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const actionsDiv = container.querySelector(".slt-cache-actions");
         if (actionsDiv)
           actionsDiv.remove();
-        if (state.showNotifications && Spicetify.showNotification) {
-          Spicetify.showNotification("All cached translations deleted!");
-        }
       });
     }, 0);
     return container;
@@ -9238,6 +10036,403 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       Spicetify.PopupModal.display({
         title: "Translation Cache",
         content: createCacheViewerUI(),
+        isLarge: true
+      });
+    }
+  }
+  async function createSpicyLyricsCacheViewerUI() {
+    const container = document.createElement("div");
+    container.className = "slt-cache-viewer";
+    container.innerHTML = `<div style="padding: 20px; text-align: center;">Loading cache...</div>`;
+    try {
+      let keys = [];
+      let cacheItems = [];
+      let totalSize = 0;
+      if (typeof caches !== "undefined") {
+        const cache = await caches.open(SPICY_LYRICS_CACHE_NAME2);
+        keys = await cache.keys();
+        cacheItems = await Promise.all(keys.map(async (req) => {
+          const url = new URL(req.url);
+          const pathParts = url.pathname.split("/").filter(Boolean);
+          const trackId = pathParts.length > 0 ? pathParts[pathParts.length - 1] : null;
+          const isTrackId = trackId && trackId.length === 22;
+          let type = "Unknown";
+          let lang = "";
+          let linesCount = 0;
+          let sizeBytes = 0;
+          try {
+            const res = await cache.match(req);
+            if (res) {
+              const buffer = await res.arrayBuffer();
+              sizeBytes = buffer.byteLength;
+              totalSize += sizeBytes;
+              const text = new TextDecoder().decode(buffer);
+              const parsed = JSON.parse(text);
+              let lyricsData = parsed;
+              if (parsed && !parsed.Type && parsed.Content !== void 0) {
+                lyricsData = parsed.Content;
+              }
+              if (lyricsData && typeof lyricsData === "object") {
+                if (lyricsData.Type)
+                  type = lyricsData.Type;
+                if (lyricsData.Language)
+                  lang = lyricsData.Language;
+                if (lyricsData.Lines)
+                  linesCount = lyricsData.Lines.length;
+                else if (lyricsData.Content)
+                  linesCount = lyricsData.Content.length;
+              }
+            }
+          } catch (e) {
+          }
+          return { req, url, trackId, isTrackId, type, lang, linesCount, sizeBytes };
+        }));
+      }
+      let currentTotalSize = totalSize;
+      container.innerHTML = `
+        <style>
+            .slt-cache-viewer {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                padding: 24px;
+                color: var(--spice-text);
+                width: min(800px, 90vw);
+                max-width: 100%;
+                max-height: 72vh;
+                box-sizing: border-box;
+                overflow: hidden;
+            }
+            .slt-cache-stats {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+                padding: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .slt-stat {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .slt-stat-label {
+                font-size: 11px;
+                color: var(--spice-subtext);
+                text-transform: uppercase;
+                line-height: 1.35;
+            }
+            .slt-stat-value {
+                font-size: 18px;
+                font-weight: 700;
+                color: var(--spice-text);
+                line-height: 1.25;
+            }
+            .slt-cache-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                overflow-y: auto;
+                min-height: 160px;
+                max-height: min(42vh, 420px);
+                padding-right: 8px;
+            }
+            .slt-cache-item {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: center;
+                padding: 12px 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                gap: 12px;
+                min-width: 0;
+            }
+            .slt-cache-item-info {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                flex: 1;
+                min-width: 0;
+            }
+            .slt-cache-item-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--spice-text);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                line-height: 1.35;
+            }
+            .slt-cache-item-meta {
+                font-size: 12px;
+                color: var(--spice-subtext);
+                opacity: 0.78;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
+            }
+            .slt-cache-delete {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 4px;
+                border: none;
+                background: rgba(255, 80, 80, 0.2);
+                color: #ff5050;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+                flex-shrink: 0;
+                white-space: nowrap;
+            }
+            .slt-cache-delete:hover {
+                background: rgba(255, 80, 80, 0.4);
+            }
+            .slt-cache-item-actions {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+            .slt-cache-action {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 4px;
+                border: none;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: opacity 0.2s, background 0.2s;
+                color: var(--spice-text);
+                background: var(--spice-main-elevated);
+                white-space: nowrap;
+            }
+            .slt-cache-action:hover {
+                opacity: 0.85;
+            }
+            .slt-cache-delete-all {
+                min-height: 40px;
+                padding: 9px 18px;
+                border-radius: 500px;
+                border: none;
+                background: rgba(255, 80, 80, 0.2);
+                color: #ff5050;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                transition: background 0.2s;
+                white-space: normal;
+                text-align: center;
+            }
+            .slt-cache-delete-all:hover {
+                background: rgba(255, 80, 80, 0.4);
+            }
+            .slt-empty-cache {
+                text-align: center;
+                padding: 24px;
+                color: var(--spice-subtext);
+                font-size: 14px;
+                background: var(--spice-card);
+                border-radius: 8px;
+            }
+            .slt-cache-actions {
+                display: flex;
+                justify-content: center;
+                padding-top: 8px;
+            }
+            .slt-cache-toolbar {
+                display: flex;
+                justify-content: flex-end;
+            }
+            .slt-cache-back {
+                min-height: 36px;
+                padding: 8px 14px;
+                border-radius: 500px;
+                border: none;
+                background: var(--spice-main-elevated);
+                color: var(--spice-text);
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+            .slt-cache-back:hover {
+                opacity: 0.85;
+            }
+            @media (max-width: 620px) {
+                .slt-cache-viewer {
+                    width: min(100%, 90vw);
+                    padding: 16px;
+                }
+                .slt-cache-stats {
+                    grid-template-columns: 1fr;
+                }
+                .slt-cache-item {
+                    grid-template-columns: 1fr;
+                    align-items: stretch;
+                }
+                .slt-cache-item-actions {
+                    justify-content: flex-start;
+                    flex-wrap: wrap;
+                }
+            }
+        </style>
+        <div class="slt-cache-toolbar">
+            <button id="slt-sl-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
+        </div>
+        
+        <div class="slt-cache-stats">
+            <div class="slt-stat">
+                <span class="slt-stat-label">Cached Requests</span>
+                <span class="slt-stat-value" id="slt-sl-stat-tracks">${cacheItems.length}</span>
+            </div>
+            <div class="slt-stat">
+                <span class="slt-stat-label">Cache Size</span>
+                <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes(totalSize)}</span>
+            </div>
+        </div>
+        
+        <div class="slt-cache-list" id="slt-sl-cache-list">
+            ${cacheItems.length === 0 ? '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>' : cacheItems.map((item, index) => {
+        const displayTitle = item.isTrackId ? "Track ID: " + item.trackId : item.url.pathname;
+        let metaText = item.url.hostname;
+        if (item.type !== "Unknown" || item.lang || item.linesCount > 0) {
+          const details = [];
+          if (item.lang)
+            details.push(item.lang.toUpperCase());
+          if (item.type !== "Unknown")
+            details.push(item.type);
+          if (item.linesCount > 0)
+            details.push(`${item.linesCount} lines`);
+          details.push(formatBytes(item.sizeBytes));
+          metaText = details.join(" \u2022 ");
+        } else if (item.sizeBytes > 0) {
+          metaText = `${item.url.hostname} \u2022 ${formatBytes(item.sizeBytes)}`;
+        }
+        return `
+                    <div class="slt-cache-item" data-url="${escapeHtml2(item.req.url)}" data-size="${item.sizeBytes}" data-track="${item.isTrackId ? item.trackId : ""}">
+                        <div class="slt-cache-item-info">
+                            <span class="slt-cache-item-title">${escapeHtml2(displayTitle)}</span>
+                            <span class="slt-cache-item-meta">${escapeHtml2(metaText)}</span>
+                        </div>
+                        <div class="slt-cache-item-actions">
+                            ${item.isTrackId ? `<button class="slt-cache-action slt-cache-play">Play</button>` : ""}
+                            <button class="slt-cache-delete" data-index="${index}">Delete</button>
+                        </div>
+                    </div>
+                `;
+      }).join("")}
+        </div>
+        
+        ${cacheItems.length > 0 ? `
+        <div class="slt-cache-actions">
+            <button class="slt-cache-delete-all" id="slt-sl-delete-all-cache">Delete All Spicy Lyrics Cache</button>
+        </div>
+        ` : ""}
+    `;
+      setTimeout(() => {
+        const backToSettingsBtn = container.querySelector("#slt-sl-cache-back-to-settings");
+        backToSettingsBtn?.addEventListener("click", () => {
+          Spicetify.PopupModal?.hide();
+          setTimeout(() => openSettingsModal(), 120);
+        });
+        container.querySelectorAll(".slt-cache-play").forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const button = e.currentTarget;
+            const item = button.closest(".slt-cache-item");
+            const trackId = item?.dataset.track;
+            if (!trackId)
+              return;
+            button.disabled = true;
+            const previousText = button.textContent;
+            button.textContent = "Opening...";
+            try {
+              const uri = `spotify:track:${trackId}`;
+              const played = await playCachedTrack(uri);
+              if (Spicetify.showNotification) {
+                Spicetify.showNotification(played ? "Opening cached track" : "Unable to play track directly", !played);
+              }
+            } finally {
+              button.disabled = false;
+              button.textContent = previousText || "Play";
+            }
+          });
+        });
+        container.querySelectorAll(".slt-cache-delete").forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const item = e.target.closest(".slt-cache-item");
+            if (item) {
+              const url = item.dataset.url;
+              if (url && typeof caches !== "undefined") {
+                try {
+                  const cache = await caches.open(SPICY_LYRICS_CACHE_NAME2);
+                  await cache.delete(url);
+                  const itemSize = parseInt(item.dataset.size || "0", 10);
+                  currentTotalSize = Math.max(0, currentTotalSize - itemSize);
+                  item.remove();
+                  const tracksEl = container.querySelector("#slt-sl-stat-tracks");
+                  if (tracksEl) {
+                    const current = parseInt(tracksEl.textContent || "0", 10);
+                    tracksEl.textContent = String(Math.max(0, current - 1));
+                  }
+                  const sizeEl = container.querySelector("#slt-sl-stat-size");
+                  if (sizeEl)
+                    sizeEl.textContent = formatBytes(currentTotalSize);
+                  const list = container.querySelector("#slt-sl-cache-list");
+                  if (list && list.querySelectorAll(".slt-cache-item").length === 0) {
+                    list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
+                    const actionsDiv = container.querySelector(".slt-cache-actions");
+                    if (actionsDiv)
+                      actionsDiv.remove();
+                  }
+                } catch (e2) {
+                  console.error("Failed to delete cache item", e2);
+                }
+              }
+            }
+          });
+        });
+        const deleteAllBtn = container.querySelector("#slt-sl-delete-all-cache");
+        deleteAllBtn?.addEventListener("click", async () => {
+          await clearSpicyLyricsCachedLyrics();
+          currentTotalSize = 0;
+          const tracksEl = container.querySelector("#slt-sl-stat-tracks");
+          if (tracksEl)
+            tracksEl.textContent = "0";
+          const sizeEl = container.querySelector("#slt-sl-stat-size");
+          if (sizeEl)
+            sizeEl.textContent = "0 B";
+          const list = container.querySelector("#slt-sl-cache-list");
+          if (list)
+            list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
+          const actionsDiv = container.querySelector(".slt-cache-actions");
+          if (actionsDiv)
+            actionsDiv.remove();
+        });
+      }, 0);
+    } catch (e) {
+      container.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff7373;">Failed to load cache</div>`;
+    }
+    return container;
+  }
+  async function openSpicyLyricsCacheViewer() {
+    if (Spicetify.PopupModal) {
+      Spicetify.PopupModal.display({
+        title: "Spicy Lyrics Cache",
+        content: (() => {
+          const div = document.createElement("div");
+          div.style.padding = "20px";
+          div.style.textAlign = "center";
+          div.textContent = "Loading cache...";
+          return div;
+        })(),
+        isLarge: true
+      });
+      const ui = await createSpicyLyricsCacheViewerUI();
+      Spicetify.PopupModal.display({
+        title: "Spicy Lyrics Cache",
+        content: ui,
         isLarge: true
       });
     }
@@ -9260,11 +10455,28 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       const registerMenuItem = () => {
         if (Spicetify.Menu) {
           try {
-            new Spicetify.Menu.Item(
-              "Spicy Lyric Translator",
-              false,
-              openSettingsModal
-            ).register();
+            [
+              {
+                label: "Spicy Lyric Translator Settings",
+                callback: openSettingsModal
+              },
+              {
+                label: "Clear Spicy Lyrics Cache",
+                callback: () => {
+                  void clearSpicyLyricsCachedLyrics();
+                }
+              },
+              {
+                label: "Clear SLT Translation Cache",
+                callback: clearAllCachedTranslations
+              }
+            ].forEach((item) => {
+              new Spicetify.Menu.Item(
+                item.label,
+                false,
+                item.callback
+              ).register();
+            });
             return true;
           } catch (e) {
           }
@@ -9683,10 +10895,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       customApiKey: state.customApiKey,
       customApiFormat: state.customApiFormat,
       customApiModel: state.customApiModel,
+      libreTranslateApiUrl: state.libreTranslateApiUrl,
+      libreTranslateApiKey: state.libreTranslateApiKey,
       deeplApiKey: state.deeplApiKey,
       openaiApiKey: state.openaiApiKey,
       openaiModel: state.openaiModel,
-      geminiApiKey: state.geminiApiKey
+      geminiApiKey: state.geminiApiKey,
+      geminiModel: state.geminiModel,
+      geminiTemperature: state.geminiTemperature
     });
     injectStyles();
     initConnectionIndicator();

@@ -32,10 +32,14 @@ export async function initialize(): Promise<void> {
         customApiKey: state.customApiKey,
         customApiFormat: state.customApiFormat,
         customApiModel: state.customApiModel,
+        libreTranslateApiUrl: state.libreTranslateApiUrl,
+        libreTranslateApiKey: state.libreTranslateApiKey,
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
         openaiModel: state.openaiModel,
-        geminiApiKey: state.geminiApiKey
+        geminiApiKey: state.geminiApiKey,
+        geminiModel: state.geminiModel,
+        geminiTemperature: state.geminiTemperature
     });
     injectStyles();
     initConnectionIndicator();

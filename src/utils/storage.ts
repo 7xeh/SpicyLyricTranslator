@@ -143,8 +143,19 @@ export const storage = {
         try {
             const stored = this.get(key);
             if (stored === null) return null;
+            
+            // Known plaintext API key prefixes — return as-is (backward compat with pre-encoding versions)
+            if (stored.startsWith('AIza') || stored.startsWith('sk-')) {
+                return stored;
+            }
+            
             try {
-                return decodeURIComponent(escape(atob(stored)));
+                const decoded = decodeURIComponent(escape(atob(stored)));
+                const reencoded = btoa(unescape(encodeURIComponent(decoded)));
+                if (reencoded === stored) {
+                    return decoded;
+                }
+                return stored;
             } catch {
                 return stored;
             }

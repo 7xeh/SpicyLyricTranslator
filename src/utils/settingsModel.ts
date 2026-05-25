@@ -111,8 +111,29 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'text',
         storageKey: 'custom-api-model',
         defaultValue: '',
-        placeholder: 'gpt-4o-mini, llama3.1, gemini-2.0-flash',
+        placeholder: 'gpt-4o-mini, llama3.1, gemini-3.1-flash-lite',
         visibleForApis: ['custom']
+    },
+    {
+        id: 'libretranslate-api-url',
+        label: 'LibreTranslate URL',
+        type: 'text',
+        storageKey: 'libretranslate-api-url',
+        defaultValue: 'https://libretranslate.com/translate',
+        placeholder: 'https://libretranslate.com/translate',
+        description: 'Use the hosted endpoint with a key, or a self-hosted URL without one',
+        visibleForApis: ['libretranslate']
+    },
+    {
+        id: 'libretranslate-api-key',
+        label: 'LibreTranslate API Key',
+        type: 'password',
+        storageKey: 'libretranslate-api-key',
+        defaultValue: '',
+        placeholder: 'API key',
+        description: 'Required for hosted libretranslate.com',
+        secret: true,
+        visibleForApis: ['libretranslate']
     },
     {
         id: 'deepl-api-key',
@@ -138,11 +159,14 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     {
         id: 'openai-model',
         label: 'OpenAI Model',
-        type: 'text',
+        type: 'select',
         storageKey: 'openai-model',
         defaultValue: 'gpt-4o-mini',
-        placeholder: 'gpt-4o-mini',
-        description: 'e.g. gpt-4o-mini, gpt-4o, gpt-4-turbo',
+        options: [
+            { value: 'gpt-5.5', text: 'GPT-5.5 Speed' },
+            { value: 'gpt-4o-mini', text: 'GPT-4o mini' }
+        ],
+        description: 'GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option',
         visibleForApis: ['openai']
     },
     {
@@ -154,6 +178,30 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         placeholder: 'AIza...',
         description: 'Get a key at aistudio.google.com/apikey',
         secret: true,
+        visibleForApis: ['gemini']
+    },
+    {
+        id: 'gemini-model',
+        label: 'Gemini Model',
+        type: 'select',
+        storageKey: 'gemini-model',
+        defaultValue: 'gemini-3.1-flash-lite',
+        options: [
+            { value: 'gemini-3.1-flash-lite', text: '3.1 Flash-Lite' },
+            { value: 'gemini-3.5-flash', text: '3.5 Flash' },
+            { value: 'gemini-3.1-pro-preview', text: '3.1 Pro' }
+        ],
+        description: 'Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics',
+        visibleForApis: ['gemini']
+    },
+    {
+        id: 'gemini-temperature',
+        label: 'Gemini Temperature',
+        type: 'text',
+        storageKey: 'gemini-temperature',
+        defaultValue: '0.3',
+        placeholder: '0.0 - 2.0',
+        description: 'Controls output randomness (0.0 = deterministic, 2.0 = highly creative)',
         visibleForApis: ['gemini']
     },
     {
@@ -208,6 +256,22 @@ export function isSettingFieldVisible(field: SettingsField, api: ApiPreference =
     return !field.visibleForApis || field.visibleForApis.includes(api);
 }
 
+function normalizeLegacySelectValue(fieldId: string, value: string | null): string | null {
+    const stored = (value || '').trim().replace(/^models\//, '');
+    if (!stored) return value;
+    if (fieldId === 'openai-model') {
+        return stored === 'gpt-5.5' || stored === 'gpt-4o-mini' ? stored : 'gpt-4o-mini';
+    }
+    if (fieldId === 'gemini-model') {
+        if (stored === 'gemini-3.1-flash-lite' || stored === 'gemini-3.5-flash' || stored === 'gemini-3.1-pro-preview') return stored;
+        if (stored.includes('flash-lite')) return 'gemini-3.1-flash-lite';
+        if (stored.includes('pro')) return 'gemini-3.1-pro-preview';
+        if (stored.includes('flash')) return 'gemini-3.5-flash';
+        return 'gemini-3.1-flash-lite';
+    }
+    return value;
+}
+
 export function readSettingValue(field: SettingsField): string | boolean {
     if (field.type === 'toggle') {
         const stored = storage.get(field.storageKey);
@@ -218,7 +282,11 @@ export function readSettingValue(field: SettingsField): string | boolean {
     }
 
     const stored = field.secret ? storage.getSecret(field.storageKey) : storage.get(field.storageKey);
-    return stored ?? String(field.defaultValue);
+    const normalizedStored = field.type === 'select' ? normalizeLegacySelectValue(field.id, stored) : stored;
+    if (field.type === 'select' && field.options && normalizedStored && field.options.every(option => option.value !== normalizedStored)) {
+        return String(field.defaultValue);
+    }
+    return normalizedStored ?? String(field.defaultValue);
 }
 
 function configureTranslationApi(): void {
@@ -226,10 +294,14 @@ function configureTranslationApi(): void {
         customApiKey: state.customApiKey,
         customApiFormat: state.customApiFormat,
         customApiModel: state.customApiModel,
+        libreTranslateApiUrl: state.libreTranslateApiUrl,
+        libreTranslateApiKey: state.libreTranslateApiKey,
         deeplApiKey: state.deeplApiKey,
         openaiApiKey: state.openaiApiKey,
         openaiModel: state.openaiModel,
-        geminiApiKey: state.geminiApiKey
+        geminiApiKey: state.geminiApiKey,
+        geminiModel: state.geminiModel,
+        geminiTemperature: state.geminiTemperature
     });
 }
 
@@ -269,6 +341,14 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             state.customApiModel = String(value);
             configureTranslationApi();
             break;
+        case 'libretranslate-api-url':
+            state.libreTranslateApiUrl = String(value);
+            configureTranslationApi();
+            break;
+        case 'libretranslate-api-key':
+            state.libreTranslateApiKey = String(value);
+            configureTranslationApi();
+            break;
         case 'deepl-api-key':
             state.deeplApiKey = String(value);
             configureTranslationApi();
@@ -283,6 +363,14 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'gemini-api-key':
             state.geminiApiKey = String(value);
+            configureTranslationApi();
+            break;
+        case 'gemini-model':
+            state.geminiModel = String(value);
+            configureTranslationApi();
+            break;
+        case 'gemini-temperature':
+            state.geminiTemperature = String(value);
             configureTranslationApi();
             break;
         case 'auto-translate':
