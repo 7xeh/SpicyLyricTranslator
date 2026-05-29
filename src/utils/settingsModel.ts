@@ -205,6 +205,23 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         visibleForApis: ['gemini']
     },
     {
+        id: 'max-parallel-chunks',
+        label: 'Parallel Translation Requests',
+        type: 'select',
+        storageKey: 'max-parallel-chunks',
+        defaultValue: '4',
+        options: [
+            { value: '1', text: 'Off (one request)' },
+            { value: '2', text: '2 requests' },
+            { value: '3', text: '3 requests' },
+            { value: '4', text: '4 requests' },
+            { value: '5', text: '5 requests' },
+            { value: '6', text: '6 requests' }
+        ],
+        description: '⚠ Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.',
+        visibleForApis: ['openai', 'gemini', 'custom']
+    },
+    {
         id: 'auto-translate',
         label: 'Auto-Translate on Song Change',
         type: 'toggle',
@@ -301,7 +318,8 @@ function configureTranslationApi(): void {
         openaiModel: state.openaiModel,
         geminiApiKey: state.geminiApiKey,
         geminiModel: state.geminiModel,
-        geminiTemperature: state.geminiTemperature
+        geminiTemperature: state.geminiTemperature,
+        maxParallelChunks: state.maxParallelChunks
     });
 }
 
@@ -371,6 +389,10 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'gemini-temperature':
             state.geminiTemperature = String(value);
+            configureTranslationApi();
+            break;
+        case 'max-parallel-chunks':
+            state.maxParallelChunks = String(value);
             configureTranslationApi();
             break;
         case 'auto-translate':

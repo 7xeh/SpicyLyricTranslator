@@ -1544,7 +1544,7 @@ function createCacheViewerUI(): HTMLElement {
                             metricsPills.push(`<span class="slt-metric-pill" title="API calls">↻ ${track.metrics.apiCalls}</span>`);
                         }
                         return `
-                        <div class="slt-cache-item" data-uri="${track.trackUri}" data-lang="${track.targetLang}">
+                        <div class="slt-cache-item" data-uri="${escapeHtml(track.trackUri)}" data-lang="${escapeHtml(track.targetLang)}">
                             <div class="slt-cache-item-info">
                                 <span class="slt-cache-item-title">${escapeHtml(displayTitle)}</span>
                                 ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml(displayArtist)}</span>` : ''}
@@ -1553,7 +1553,7 @@ function createCacheViewerUI(): HTMLElement {
                             </div>
                             <div class="slt-cache-item-actions">
                                 <button class="slt-cache-action slt-cache-play" data-index="${index}">Play</button>
-                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${track.sourceLang}">View Lyrics</button>
+                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${escapeHtml(track.sourceLang)}">View Lyrics</button>
                                 <button class="slt-cache-delete" data-index="${index}">Delete</button>
                             </div>
                         </div>

@@ -735,6 +735,169 @@ test('Gemini accepts a complete code-fenced batch response without sending chunk
     assert.deepEqual(result.map(item => item.translatedText), translatedLines);
 });
 
+test('Gemini splits large songs into parallel chunks instead of one slow batch', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3'
+    } as any);
+
+    const sourceLines = Array.from({ length: 16 }, (_, i) => `строка${'я'.repeat(i + 1)}`);
+    const translationMap = new Map(sourceLines.map((line, i) => [line, `Translated line ${i}`]));
+    const expected = sourceLines.map((_, i) => `Translated line ${i}`);
+
+    const calls: FetchCall[] = [];
+    const seenSources: string[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const markedLines = promptText.split('\n').filter(line => line.includes('[[SLT_BATCH_'));
+        const translated = markedLines.map(line => {
+            const source = line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '');
+            seenSources.push(source);
+            return translationMap.get(source) ?? source;
+        });
+        return jsonResponse({
+            candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }]
+        });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(result.map(item => item.translatedText), expected);
+    assert.deepEqual([...seenSources].sort(), [...sourceLines].sort());
+});
+
+test('maxParallelChunks=1 keeps Gemini on a single sequential batch', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3',
+        maxParallelChunks: '1'
+    } as any);
+
+    const sourceLines = Array.from({ length: 16 }, (_, i) => `строка${'я'.repeat(i + 1)}`);
+    const translationMap = new Map(sourceLines.map((line, i) => [line, `Translated line ${i}`]));
+    const expected = sourceLines.map((_, i) => `Translated line ${i}`);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const translated = promptText.split('\n')
+            .filter(line => line.includes('[[SLT_BATCH_'))
+            .map(line => translationMap.get(line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '')) ?? line);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(result.map(item => item.translatedText), expected);
+});
+
+test('maxParallelChunks caps the number of concurrent Gemini requests', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3',
+        maxParallelChunks: '2'
+    } as any);
+
+    const sourceLines = Array.from({ length: 32 }, (_, i) => `строка${'я'.repeat(i + 1)}`);
+    const translationMap = new Map(sourceLines.map((line, i) => [line, `Translated line ${i}`]));
+    const expected = sourceLines.map((_, i) => `Translated line ${i}`);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const translated = promptText.split('\n')
+            .filter(line => line.includes('[[SLT_BATCH_'))
+            .map(line => translationMap.get(line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '')) ?? line);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(result.map(item => item.translatedText), expected);
+});
+
+test('maxParallelChunks allows up to 6 concurrent Gemini requests', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3',
+        maxParallelChunks: '6'
+    } as any);
+
+    const sourceLines = Array.from({ length: 48 }, (_, i) => `строка${'я'.repeat(i + 1)}`);
+    const translationMap = new Map(sourceLines.map((line, i) => [line, `Translated line ${i}`]));
+    const expected = sourceLines.map((_, i) => `Translated line ${i}`);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const translated = promptText.split('\n')
+            .filter(line => line.includes('[[SLT_BATCH_'))
+            .map(line => translationMap.get(line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '')) ?? line);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(calls.length, 6);
+    assert.deepEqual(result.map(item => item.translatedText), expected);
+});
+
+test('mixed-language songs translate each language group with parallel chunks', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3',
+        maxParallelChunks: '4'
+    } as any);
+
+    const japaneseLines = Array.from({ length: 12 }, (_, i) => `ことば${'の'.repeat(i + 1)}`);
+    const cyrillicLines = Array.from({ length: 4 }, (_, i) => `слово${'а'.repeat(i + 1)}`);
+    const sourceLines = [...japaneseLines, ...cyrillicLines];
+    const translationMap = new Map(sourceLines.map((line, i) => [line, `Translated line ${i}`]));
+    const expected = sourceLines.map((_, i) => `Translated line ${i}`);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const translated = promptText.split('\n')
+            .filter(line => line.includes('[[SLT_BATCH_'))
+            .map(line => translationMap.get(line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '')) ?? line);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(calls.length, 3);
+    assert.deepEqual(result.map(item => item.translatedText), expected);
+});
+
 test('Gemini uses CosmosAsync when available instead of raw browser fetch', async () => {
     resetState();
     setPreferredApi('gemini', undefined, {

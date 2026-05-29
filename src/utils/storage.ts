@@ -1,5 +1,7 @@
 const STORAGE_PREFIX = "spicy-lyric-translator:";
 
+const SECRET_ENCODING_PREFIX = 'b64:';
+
 const MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
 
 function isLocalStorageAvailable(): boolean {
@@ -133,7 +135,7 @@ export const storage = {
     setSecret(key: string, value: string): boolean {
         try {
             const encoded = btoa(unescape(encodeURIComponent(value)));
-            return this.set(key, encoded);
+            return this.set(key, SECRET_ENCODING_PREFIX + encoded);
         } catch (e) {
             return this.set(key, value);
         }
@@ -143,12 +145,20 @@ export const storage = {
         try {
             const stored = this.get(key);
             if (stored === null) return null;
-            
-            // Known plaintext API key prefixes — return as-is (backward compat with pre-encoding versions)
+
+            if (stored.startsWith(SECRET_ENCODING_PREFIX)) {
+                const rest = stored.slice(SECRET_ENCODING_PREFIX.length);
+                try {
+                    return decodeURIComponent(escape(atob(rest)));
+                } catch {
+                    return rest;
+                }
+            }
+
             if (stored.startsWith('AIza') || stored.startsWith('sk-')) {
                 return stored;
             }
-            
+
             try {
                 const decoded = decodeURIComponent(escape(atob(stored)));
                 const reencoded = btoa(unescape(encodeURIComponent(decoded)));

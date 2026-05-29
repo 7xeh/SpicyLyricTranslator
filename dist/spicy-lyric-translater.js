@@ -26,6 +26,7 @@ var SpicyLyricTranslater = (() => {
 
   // src/utils/storage.ts
   var STORAGE_PREFIX = "spicy-lyric-translator:";
+  var SECRET_ENCODING_PREFIX = "b64:";
   var MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
   function isLocalStorageAvailable() {
     try {
@@ -151,7 +152,7 @@ var SpicyLyricTranslater = (() => {
     setSecret(key, value) {
       try {
         const encoded = btoa(unescape(encodeURIComponent(value)));
-        return this.set(key, encoded);
+        return this.set(key, SECRET_ENCODING_PREFIX + encoded);
       } catch (e) {
         return this.set(key, value);
       }
@@ -161,6 +162,14 @@ var SpicyLyricTranslater = (() => {
         const stored = this.get(key);
         if (stored === null)
           return null;
+        if (stored.startsWith(SECRET_ENCODING_PREFIX)) {
+          const rest = stored.slice(SECRET_ENCODING_PREFIX.length);
+          try {
+            return decodeURIComponent(escape(atob(rest)));
+          } catch {
+            return rest;
+          }
+        }
         if (stored.startsWith("AIza") || stored.startsWith("sk-")) {
           return stored;
         }
@@ -220,6 +229,7 @@ var SpicyLyricTranslater = (() => {
     geminiApiKey: storage.getSecret("gemini-api-key") || "",
     geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
     geminiTemperature: storage.get("gemini-temperature") || "0.3",
+    maxParallelChunks: storage.get("max-parallel-chunks") || "4",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
     lastViewMode: null,
@@ -467,7 +477,6 @@ var SpicyLyricTranslater = (() => {
     const storage2 = getStorage();
     if (!storage2 || !trackUri || !lines.length)
       return;
-    pruneTrackCache();
     const cacheKey = getCacheKey(trackUri, targetLang);
     const meta = trackName ? { trackName, artistName } : getCurrentTrackMeta();
     const entry = {
@@ -1229,6 +1238,7 @@ var SpicyLyricTranslater = (() => {
   var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
   var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
   var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
+  var DEFAULT_PARALLEL_CHUNKS = 4;
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
@@ -1242,6 +1252,7 @@ var SpicyLyricTranslater = (() => {
   var geminiApiKey = "";
   var geminiModel = DEFAULT_GEMINI_MODEL2;
   var geminiTemperature = 0.3;
+  var maxParallelChunks = DEFAULT_PARALLEL_CHUNKS;
   var RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2e3,
@@ -1310,6 +1321,9 @@ var SpicyLyricTranslater = (() => {
   var BATCH_SEPARATOR_REGEX = /\s*\|\|\|\s*/g;
   var BATCH_MARKER_PREFIX = "[[SLT_BATCH_";
   var BATCH_CHUNK_SIZE = 6;
+  var MAX_PARALLEL_CHUNKS = 6;
+  var PARALLEL_CHUNK_MIN_LINES = 12;
+  var PARALLEL_TARGET_LINES_PER_CHUNK = 8;
   var NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
   var SPICETIFY_CORS_PROXY_BASE = "https://cors-proxy.spicetify.app/";
   function normalizeSourceLineForFingerprint(line) {
@@ -1506,6 +1520,28 @@ var SpicyLyricTranslater = (() => {
     const message = err instanceof Error ? err.message : String(err || "");
     return /failed to fetch|networkerror|cors|load failed/i.test(message);
   }
+  var PROVIDER_REQUEST_TIMEOUT_MS = 3e4;
+  function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} request timed out`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+  async function fetchWithTimeout(url, init, ms, label) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(`${label} request timed out`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   var NonRetryableProviderError = class extends Error {
     constructor(message, status) {
       super(message);
@@ -1517,7 +1553,7 @@ var SpicyLyricTranslater = (() => {
     if (err instanceof NonRetryableProviderError)
       return true;
     const message = err instanceof Error ? err.message : String(err || "");
-    const statusMatch = message.match(/\b(4\d\d)\b/);
+    const statusMatch = message.match(/API error: (4\d\d)\b/);
     if (!statusMatch)
       return false;
     const status = Number(statusMatch[1]);
@@ -1566,18 +1602,18 @@ var SpicyLyricTranslater = (() => {
   async function postJsonProvider(url, body, headers, providerName, options = {}) {
     const cosmos = getCosmosAsync();
     if (options.preferCosmos && cosmos?.post) {
-      return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+      return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
     }
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body)
-      });
+      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
       return await readProviderJsonResponse(response, providerName);
     } catch (err) {
       if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-        return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+        return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
       }
       throw err;
     }
@@ -1612,20 +1648,20 @@ var SpicyLyricTranslater = (() => {
     const cosmos = getCosmosAsync();
     if (options.preferCosmos && cosmos?.post) {
       return normalizeProviderJsonPayload(
-        await cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+        await withTimeout(cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
         providerName
       );
     }
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         body: params
-      });
+      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
       return await readProviderJsonResponse(response, providerName);
     } catch (err) {
       if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
         return normalizeProviderJsonPayload(
-          await cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+          await withTimeout(cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
           providerName
         );
       }
@@ -1682,6 +1718,8 @@ var SpicyLyricTranslater = (() => {
         geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
       if (apiKeys.geminiTemperature !== void 0)
         geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
+      if (apiKeys.maxParallelChunks !== void 0)
+        maxParallelChunks = normalizeMaxParallelChunks(apiKeys.maxParallelChunks);
     }
   }
   var CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1e3;
@@ -1853,13 +1891,11 @@ var SpicyLyricTranslater = (() => {
     }
     return null;
   }
-  function cacheTranslation(text, targetLang, translation, api) {
-    const cache = storage_default.getJSON("translation-cache", {});
+  function setCacheEntry(cache, text, targetLang, translation, api) {
     const key = `${targetLang}:${text}`;
     const normalizedTranslation = normalizeTranslatedLine(translation || "");
     if (normalizedTranslation === text && shouldInvalidateIdentityTranslation(text, targetLang)) {
       delete cache[key];
-      storage_default.setJSON("translation-cache", cache);
       return;
     }
     cache[key] = {
@@ -1867,6 +1903,10 @@ var SpicyLyricTranslater = (() => {
       timestamp: Date.now(),
       api
     };
+  }
+  function cacheTranslation(text, targetLang, translation, api) {
+    const cache = storage_default.getJSON("translation-cache", {});
+    setCacheEntry(cache, text, targetLang, translation, api);
     pruneTranslationCache(cache);
     storage_default.setJSON("translation-cache", cache);
   }
@@ -2059,6 +2099,13 @@ var SpicyLyricTranslater = (() => {
       return 0.3;
     }
     return Math.min(2, Math.max(0, parsed));
+  }
+  function normalizeMaxParallelChunks(value) {
+    const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_PARALLEL_CHUNKS;
+    }
+    return Math.min(MAX_PARALLEL_CHUNKS, Math.max(1, Math.floor(parsed)));
   }
   function getGeminiGenerateContentUrl(model) {
     const normalizedModel = normalizeGeminiModelName(model);
@@ -2490,6 +2537,66 @@ ${text}`
     }
     return null;
   }
+  function providerSupportsParallelChunking() {
+    if (preferredApi === "openai" || preferredApi === "gemini") {
+      return true;
+    }
+    if (preferredApi === "custom") {
+      return customApiFormat === "openai" || customApiFormat === "gemini";
+    }
+    return false;
+  }
+  function getConfiguredParallelCap() {
+    return Math.min(MAX_PARALLEL_CHUNKS, Math.max(1, Math.floor(maxParallelChunks) || 1));
+  }
+  function getParallelChunkCount(lineCount) {
+    const cap = getConfiguredParallelCap();
+    if (cap < 2) {
+      return 1;
+    }
+    return Math.min(cap, Math.max(2, Math.ceil(lineCount / PARALLEL_TARGET_LINES_PER_CHUNK)));
+  }
+  function shouldUseParallelChunking(lineCount) {
+    return providerSupportsParallelChunking() && lineCount >= PARALLEL_CHUNK_MIN_LINES && getParallelChunkCount(lineCount) >= 2;
+  }
+  function splitIntoChunks(items, chunkCount) {
+    const chunks = [];
+    const baseSize = Math.floor(items.length / chunkCount);
+    let remainder = items.length % chunkCount;
+    let start = 0;
+    for (let i = 0; i < chunkCount && start < items.length; i++) {
+      const size = baseSize + (remainder > 0 ? 1 : 0);
+      if (remainder > 0)
+        remainder--;
+      if (size === 0)
+        break;
+      chunks.push(items.slice(start, start + size));
+      start += size;
+    }
+    return chunks;
+  }
+  async function translateParallelChunkedBatch(lines, targetLang, sourceLang) {
+    const chunkCount = getParallelChunkCount(lines.length);
+    const chunks = splitIntoChunks(lines, chunkCount);
+    const chunkResults = await Promise.all(chunks.map(async (chunk) => {
+      const { combinedText, markerNonce } = buildMarkedBatchPayload(chunk);
+      const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
+      const parsed = parseMarkedBatchResponse(result.translatedText, chunk.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, chunk.length);
+      if (!parsed || parsed.length !== chunk.length) {
+        throw new Error(`Parallel chunk mismatch: sent ${chunk.length}, got ${parsed?.length ?? 0}`);
+      }
+      return { translations: parsed, detectedLang: result.detectedLanguage };
+    }));
+    const translations = [];
+    let detectedLang;
+    for (const chunkResult of chunkResults) {
+      translations.push(...chunkResult.translations);
+      if (!detectedLang && chunkResult.detectedLang) {
+        detectedLang = chunkResult.detectedLang;
+      }
+    }
+    return { translations, detectedLang };
+  }
   async function translateChunkedBatch(lines, targetLang, chunkSize = BATCH_CHUNK_SIZE, sourceLang) {
     const translations = [];
     let detectedLang;
@@ -2530,6 +2637,16 @@ ${text}`
           throw batchArrayError;
         }
         warn("Source-aligned batch-array translation unavailable, falling back to marker batching:", batchArrayError);
+      }
+    }
+    if (shouldUseParallelChunking(lines.length)) {
+      try {
+        const parallelResult = await translateParallelChunkedBatch(lines, targetLang, sourceLang);
+        if (parallelResult.translations.length === lines.length) {
+          return parallelResult;
+        }
+      } catch (parallelError) {
+        warn("Source-aligned parallel chunked batch failed, falling back to single marker batch:", parallelError);
       }
     }
     try {
@@ -2812,6 +2929,7 @@ ${text}`
     const results = [];
     const cachedResults = /* @__PURE__ */ new Map();
     const uncachedLines = [];
+    const lineCacheSnapshot = storage_default.getJSON("translation-cache", {});
     lines.forEach((line, index) => {
       if (!line.trim()) {
         cachedResults.set(index, {
@@ -2824,9 +2942,8 @@ ${text}`
       } else {
         const cached = getCachedTranslation(line, targetLang);
         if (cached) {
-          const lineCache = storage_default.getJSON("translation-cache", {});
           const lineKey = `${targetLang}:${line}`;
-          const lineCacheEntry = lineCache[lineKey];
+          const lineCacheEntry = lineCacheSnapshot[lineKey];
           cachedResults.set(index, {
             originalText: line,
             translatedText: cached,
@@ -2877,6 +2994,19 @@ ${text}`
           warn("Batch-array translation unavailable, falling back to marker batching:", batchArrayError);
         }
       }
+      if (!translatedLines && !hasMixedSourceLanguages && shouldUseParallelChunking(uncachedLines.length)) {
+        try {
+          const parallelResult = await translateParallelChunkedBatch(uncachedLines.map((l) => l.text), targetLang, detectedSourceLang);
+          if (parallelResult.translations.length === uncachedLines.length) {
+            translatedLines = parallelResult.translations;
+            if (parallelResult.detectedLang) {
+              detectedLang = parallelResult.detectedLang;
+            }
+          }
+        } catch (parallelError) {
+          warn("Parallel chunked batch failed, falling back to single marker batch:", parallelError);
+        }
+      }
       if (!translatedLines && !hasMixedSourceLanguages) {
         const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map((l) => l.text));
         const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
@@ -2909,7 +3039,7 @@ ${text}`
         for (const item of uncachedLines) {
           try {
             const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
-            const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
+            const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang), 1);
             perLineResults.push(single.translatedText);
             if (single.detectedLanguage && !hasMixedSourceLanguages && detectedLang === (detectedSourceLang || "auto")) {
               detectedLang = single.detectedLanguage;
@@ -2934,6 +3064,7 @@ ${text}`
           apiProvider: preferredApi
         });
       });
+      const repairCache = storage_default.getJSON("translation-cache", {});
       for (const item of uncachedLines) {
         const existing = cachedResults.get(item.index);
         const initialTranslation = existing?.translatedText || item.text;
@@ -2946,7 +3077,7 @@ ${text}`
         if (suspiciousOutput) {
           try {
             const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
-            const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
+            const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang), 1);
             const directNormalized = normalizeTranslatedLine(direct.translatedText || "");
             if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
               finalTranslation = directNormalized;
@@ -2961,7 +3092,7 @@ ${text}`
           finalTranslation = item.text;
         }
         if (finalTranslation !== item.text) {
-          cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+          setCacheEntry(repairCache, item.text, targetLang, finalTranslation, preferredApi);
         }
         cachedResults.set(item.index, {
           originalText: item.text,
@@ -2972,6 +3103,8 @@ ${text}`
           apiProvider: preferredApi
         });
       }
+      pruneTranslationCache(repairCache);
+      storage_default.setJSON("translation-cache", repairCache);
     } catch (error2) {
       error("Batch translation failed (fallback disabled to prevent rate limits):", error2);
       for (const item of uncachedLines) {
@@ -3090,9 +3223,21 @@ ${text}`
   var SPICY_API_HOST = "api.spicylyrics.org";
   var SPICY_QUERY_PATH = "/query";
   var SPICY_LYRICS_CACHE_NAME = "SpicyLyrics_LyricsStore";
-  var SPICY_LYRICS_CACHE_VERSION = 12;
+  var MAX_CAPTURE_CACHE_ENTRIES = 50;
   var captureCache = /* @__PURE__ */ new Map();
   var interceptorInstalled = false;
+  function setCaptureCache(trackId, data) {
+    if (captureCache.has(trackId)) {
+      captureCache.delete(trackId);
+    }
+    captureCache.set(trackId, data);
+    if (captureCache.size > MAX_CAPTURE_CACHE_ENTRIES) {
+      const oldest = captureCache.keys().next().value;
+      if (oldest !== void 0) {
+        captureCache.delete(oldest);
+      }
+    }
+  }
   function isLyricsData(obj) {
     if (!obj || typeof obj !== "object")
       return false;
@@ -3138,7 +3283,7 @@ ${text}`
         }
       }
       if (lyricsData) {
-        captureCache.set(trackId, lyricsData);
+        setCaptureCache(trackId, lyricsData);
         return;
       }
     }
@@ -3160,9 +3305,6 @@ ${text}`
       if (!item || typeof item !== "object" || item.Value === "NO_LYRICS") {
         return null;
       }
-      if (typeof item.CacheVersion === "number" && item.CacheVersion !== SPICY_LYRICS_CACHE_VERSION) {
-        return null;
-      }
       if (typeof item.ExpiresAt === "number" && item.ExpiresAt < Date.now()) {
         return null;
       }
@@ -3182,7 +3324,7 @@ ${text}`
       return captured;
     const cached = await readSpicyLyricsCache(trackId);
     if (cached) {
-      captureCache.set(trackId, cached);
+      setCaptureCache(trackId, cached);
       return cached;
     }
     return null;
@@ -4727,6 +4869,10 @@ ${text}`
       activeSyncRafId = null;
       return;
     }
+    if (translationMap.size === 0) {
+      activeSyncRafId = requestAnimationFrame(syncLoop);
+      return;
+    }
     try {
       onActiveLineChanged(document);
       updateWordSyncStates(document);
@@ -6238,7 +6384,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.5" : "0.0.0";
+    return true ? "2.0.6" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -6262,7 +6408,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var currentBackoffMs = 0;
   var checkTimer = null;
   var checkInProgress = false;
-  async function fetchWithTimeout(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  async function fetchWithTimeout2(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -6356,7 +6502,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     } catch (e) {
     }
     try {
-      const response = await fetchWithTimeout(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
+      const response = await fetchWithTimeout2(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
       if (response.ok) {
         const data = await response.json();
         const version = parseVersion(data.version);
@@ -6393,7 +6539,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
     }
     try {
-      const response = await fetchWithTimeout(GITHUB_API_URL, {
+      const response = await fetchWithTimeout2(GITHUB_API_URL, {
         headers: {
           "Accept": "application/vnd.github.v3+json"
         }
@@ -7272,7 +7418,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   async function fetchChangelogForVersion(version) {
     try {
       const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
-      const response = await fetchWithTimeout(tagUrl, {
+      const response = await fetchWithTimeout2(tagUrl, {
         headers: { "Accept": "application/vnd.github.v3+json" }
       });
       if (response.ok) {
@@ -7283,7 +7429,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     } catch (e) {
     }
     try {
-      const response = await fetchWithTimeout(GITHUB_API_URL, {
+      const response = await fetchWithTimeout2(GITHUB_API_URL, {
         headers: { "Accept": "application/vnd.github.v3+json" }
       });
       if (response.ok) {
@@ -7912,7 +8058,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
       let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === lines.length);
       if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
-        for (let retryAttempt = 0; retryAttempt < 4; retryAttempt++) {
+        for (let retryAttempt = 0; retryAttempt < 2; retryAttempt++) {
           await new Promise((resolve) => setTimeout(resolve, 400));
           lines = getLyricsLines();
           if (lines.length === 0)
@@ -7943,7 +8089,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       apiVocalLineData = sourceSelection.apiVocalLineData;
       useApiLines = sourceSelection.useApiLines;
       if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
-        for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
+        for (let retryAttempt = 0; retryAttempt < 3; retryAttempt++) {
           await new Promise((resolve) => setTimeout(resolve, 600));
           lines = getLyricsLines();
           if (lines.length === 0)
@@ -8763,6 +8909,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       visibleForApis: ["gemini"]
     },
     {
+      id: "max-parallel-chunks",
+      label: "Parallel Translation Requests",
+      type: "select",
+      storageKey: "max-parallel-chunks",
+      defaultValue: "4",
+      options: [
+        { value: "1", text: "Off (one request)" },
+        { value: "2", text: "2 requests" },
+        { value: "3", text: "3 requests" },
+        { value: "4", text: "4 requests" },
+        { value: "5", text: "5 requests" },
+        { value: "6", text: "6 requests" }
+      ],
+      description: "\u26A0 Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.",
+      visibleForApis: ["openai", "gemini", "custom"]
+    },
+    {
       id: "auto-translate",
       label: "Auto-Translate on Song Change",
       type: "toggle",
@@ -8854,7 +9017,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       openaiModel: state.openaiModel,
       geminiApiKey: state.geminiApiKey,
       geminiModel: state.geminiModel,
-      geminiTemperature: state.geminiTemperature
+      geminiTemperature: state.geminiTemperature,
+      maxParallelChunks: state.maxParallelChunks
     });
   }
   function writeSettingValue(field, value) {
@@ -8922,6 +9086,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         break;
       case "gemini-temperature":
         state.geminiTemperature = String(value);
+        configureTranslationApi();
+        break;
+      case "max-parallel-chunks":
+        state.maxParallelChunks = String(value);
         configureTranslationApi();
         break;
       case "auto-translate":
@@ -10376,7 +10544,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         metricsPills.push(`<span class="slt-metric-pill" title="API calls">\u21BB ${track.metrics.apiCalls}</span>`);
       }
       return `
-                        <div class="slt-cache-item" data-uri="${track.trackUri}" data-lang="${track.targetLang}">
+                        <div class="slt-cache-item" data-uri="${escapeHtml2(track.trackUri)}" data-lang="${escapeHtml2(track.targetLang)}">
                             <div class="slt-cache-item-info">
                                 <span class="slt-cache-item-title">${escapeHtml2(displayTitle)}</span>
                                 ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml2(displayArtist)}</span>` : ""}
@@ -10385,7 +10553,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                             </div>
                             <div class="slt-cache-item-actions">
                                 <button class="slt-cache-action slt-cache-play" data-index="${index}">Play</button>
-                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${track.sourceLang}">View Lyrics</button>
+                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${escapeHtml2(track.sourceLang)}">View Lyrics</button>
                                 <button class="slt-cache-delete" data-index="${index}">Delete</button>
                             </div>
                         </div>
@@ -11325,7 +11493,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         break;
     }
   }
-  async function fetchWithTimeout2(url, options = {}, timeout = CONNECTION_TIMEOUT) {
+  async function fetchWithTimeout3(url, options = {}, timeout = CONNECTION_TIMEOUT) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
     try {
@@ -11340,7 +11508,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   async function measureLatency() {
     try {
       const startTime = performance.now();
-      const response = await fetchWithTimeout2(`${API_BASE}?action=ping&_=${Date.now()}`);
+      const response = await fetchWithTimeout3(`${API_BASE}?action=ping&_=${Date.now()}`);
       if (!response.ok)
         return null;
       await response.json();
@@ -11377,7 +11545,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         version: storage.get("extension-version") || "1.0.0",
         clientId: getOrCreateClientId()
       });
-      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
+      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
       if (!response.ok)
         throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -11406,7 +11574,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         version: storage.get("extension-version") || "1.0.0",
         clientId: getOrCreateClientId()
       });
-      const response = await fetchWithTimeout2(`${API_BASE}?${params}`);
+      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
       if (!response.ok)
         throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -11587,10 +11755,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/utils/initialize.ts
+  var initialized = false;
   async function initialize() {
+    if (initialized)
+      return;
     while (typeof Spicetify === "undefined" || !Spicetify.Platform) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    initialized = true;
     setPreferredApi(state.preferredApi, state.customApiUrl, {
       customApiKey: state.customApiKey,
       customApiFormat: state.customApiFormat,
@@ -11602,7 +11774,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       openaiModel: state.openaiModel,
       geminiApiKey: state.geminiApiKey,
       geminiModel: state.geminiModel,
-      geminiTemperature: state.geminiTemperature
+      geminiTemperature: state.geminiTemperature,
+      maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
     initConnectionIndicator();

@@ -84,6 +84,7 @@ The extension works in the full lyrics view, the sidebar lyrics view, and pictur
 - Translation API: Google, LibreTranslate, DeepL, OpenAI, Gemini, or Custom
 - API credentials per provider (DeepL key, OpenAI key/model, Gemini key, Custom URL/key)
 - Gemini custom model and temperature
+- Parallel Translation Requests: split long songs across 1–6 concurrent requests (OpenAI/Gemini/Custom) for faster translation; higher values can increase API usage and hit free-tier rate limits
 - Auto-Translate on Song Change
 - Show Notifications
 - Show Translation Quality Indicator

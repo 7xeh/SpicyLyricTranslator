@@ -284,8 +284,6 @@ export function setTrackCache(
     const storage = getStorage();
     if (!storage || !trackUri || !lines.length) return;
 
-    pruneTrackCache();
-
     const cacheKey = getCacheKey(trackUri, targetLang);
 
     const meta = trackName ? { trackName, artistName } : getCurrentTrackMeta();

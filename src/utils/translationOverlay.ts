@@ -1656,7 +1656,12 @@ function syncLoop(): void {
         activeSyncRafId = null;
         return;
     }
-    
+
+    if (translationMap.size === 0) {
+        activeSyncRafId = requestAnimationFrame(syncLoop);
+        return;
+    }
+
     try {
         onActiveLineChanged(document);
         updateWordSyncStates(document);

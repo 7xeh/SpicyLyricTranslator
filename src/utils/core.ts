@@ -652,7 +652,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length === lines.length);
         
         if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
-            for (let retryAttempt = 0; retryAttempt < 4; retryAttempt++) {
+            for (let retryAttempt = 0; retryAttempt < 2; retryAttempt++) {
                 await new Promise(resolve => setTimeout(resolve, 400));
                 lines = getLyricsLines();
                 if (lines.length === 0) break;
@@ -689,7 +689,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         useApiLines = sourceSelection.useApiLines;
 
         if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
-            for (let retryAttempt = 0; retryAttempt < 8; retryAttempt++) {
+            for (let retryAttempt = 0; retryAttempt < 3; retryAttempt++) {
                 await new Promise(resolve => setTimeout(resolve, 600));
                 lines = getLyricsLines();
                 if (lines.length === 0) break;

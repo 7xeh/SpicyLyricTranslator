@@ -5,6 +5,7 @@ const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
 const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
 const SPICY_LYRICS_CACHE_VERSION = 12;
+const MAX_CAPTURE_CACHE_ENTRIES = 50;
 
 interface SyllableData {
     Text: string;
@@ -87,6 +88,19 @@ interface SpicyLyricsCacheItem {
 const captureCache = new Map<string, LyricsData>();
 let interceptorInstalled = false;
 
+function setCaptureCache(trackId: string, data: LyricsData): void {
+    if (captureCache.has(trackId)) {
+        captureCache.delete(trackId);
+    }
+    captureCache.set(trackId, data);
+    if (captureCache.size > MAX_CAPTURE_CACHE_ENTRIES) {
+        const oldest = captureCache.keys().next().value;
+        if (oldest !== undefined) {
+            captureCache.delete(oldest);
+        }
+    }
+}
+
 function isLyricsData(obj: any): obj is LyricsData {
     if (!obj || typeof obj !== 'object') return false;
     if (typeof obj.Type === 'string' && (obj.Type === 'Static' || obj.Type === 'Line' || obj.Type === 'Syllable')) {
@@ -127,7 +141,7 @@ function processCapturedResponse(trackId: string, payload: QueryResponse): void 
         }
 
         if (lyricsData) {
-            captureCache.set(trackId, lyricsData);
+            setCaptureCache(trackId, lyricsData);
             return;
         }
     }
@@ -154,10 +168,6 @@ async function readSpicyLyricsCache(trackId: string): Promise<LyricsData | null>
             return null;
         }
 
-        if (typeof item.CacheVersion === 'number' && item.CacheVersion !== SPICY_LYRICS_CACHE_VERSION) {
-            return null;
-        }
-
         if (typeof item.ExpiresAt === 'number' && item.ExpiresAt < Date.now()) {
             return null;
         }
@@ -180,7 +190,7 @@ async function getStoredLyricsData(trackId: string): Promise<LyricsData | null> 
 
     const cached = await readSpicyLyricsCache(trackId);
     if (cached) {
-        captureCache.set(trackId, cached);
+        setCaptureCache(trackId, cached);
         return cached;
     }
 

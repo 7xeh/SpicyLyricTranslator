@@ -47,6 +47,7 @@ export interface ExtensionState {
     geminiApiKey: string;
     geminiModel: string;
     geminiTemperature: string;
+    maxParallelChunks: string;
     lastTranslatedSongUri: string | null;
     translatedLyrics: Map<string, string>;
     lastViewMode: string | null;
@@ -80,6 +81,7 @@ export const state: ExtensionState = {
     geminiApiKey: storage.getSecret('gemini-api-key') || '',
     geminiModel: normalizeStoredGeminiModel(storage.get('gemini-model')),
     geminiTemperature: storage.get('gemini-temperature') || '0.3',
+    maxParallelChunks: storage.get('max-parallel-chunks') || '4',
     lastTranslatedSongUri: null,
     translatedLyrics: new Map(),
     lastViewMode: null,

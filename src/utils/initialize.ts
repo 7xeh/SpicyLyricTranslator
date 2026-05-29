@@ -23,11 +23,15 @@ import {
     setupViewModeObserver
 } from './core';
 
+let initialized = false;
+
 export async function initialize(): Promise<void> {
+    if (initialized) return;
     while (typeof Spicetify === 'undefined' || !Spicetify.Platform) {
         await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
+    initialized = true;
+
     setPreferredApi(state.preferredApi, state.customApiUrl, {
         customApiKey: state.customApiKey,
         customApiFormat: state.customApiFormat,
@@ -39,7 +43,8 @@ export async function initialize(): Promise<void> {
         openaiModel: state.openaiModel,
         geminiApiKey: state.geminiApiKey,
         geminiModel: state.geminiModel,
-        geminiTemperature: state.geminiTemperature
+        geminiTemperature: state.geminiTemperature,
+        maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
     initConnectionIndicator();

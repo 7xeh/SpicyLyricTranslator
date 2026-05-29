@@ -36,6 +36,7 @@ export type CustomApiFormat = 'generic' | 'libretranslate' | 'openai' | 'gemini'
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const DEFAULT_LIBRETRANSLATE_URL = 'https://libretranslate.com/translate';
+const DEFAULT_PARALLEL_CHUNKS = 4;
 
 let preferredApi: ApiPreference = 'google';
 let customApiUrl: string = '';
@@ -50,6 +51,7 @@ let openaiModel: string = DEFAULT_OPENAI_MODEL;
 let geminiApiKey: string = '';
 let geminiModel: string = DEFAULT_GEMINI_MODEL;
 let geminiTemperature: number = 0.3;
+let maxParallelChunks: number = DEFAULT_PARALLEL_CHUNKS;
 
 const RATE_LIMIT = {
     minDelayMs: 100,
@@ -130,6 +132,9 @@ const BATCH_SEPARATOR = ' ||| ';
 const BATCH_SEPARATOR_REGEX = /\s*\|\|\|\s*/g;
 const BATCH_MARKER_PREFIX = '[[SLT_BATCH_';
 const BATCH_CHUNK_SIZE = 6;
+const MAX_PARALLEL_CHUNKS = 6;
+const PARALLEL_CHUNK_MIN_LINES = 12;
+const PARALLEL_TARGET_LINES_PER_CHUNK = 8;
 const NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
 const SPICETIFY_CORS_PROXY_BASE = 'https://cors-proxy.spicetify.app/';
 
@@ -377,6 +382,7 @@ type ApiKeyConfig = {
     geminiApiKey?: string;
     geminiModel?: string;
     geminiTemperature?: string | number;
+    maxParallelChunks?: string | number;
 };
 
 type CosmosAsyncClient = {
@@ -397,6 +403,31 @@ function isLikelyCorsOrNetworkError(err: unknown): boolean {
     return /failed to fetch|networkerror|cors|load failed/i.test(message);
 }
 
+const PROVIDER_REQUEST_TIMEOUT_MS = 30000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} request timed out`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number, label: string): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+            throw new Error(`${label} request timed out`);
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 class NonRetryableProviderError extends Error {
     constructor(message: string, readonly status?: number) {
         super(message);
@@ -407,7 +438,7 @@ class NonRetryableProviderError extends Error {
 function isNonRetryableProviderError(err: unknown): boolean {
     if (err instanceof NonRetryableProviderError) return true;
     const message = err instanceof Error ? err.message : String(err || '');
-    const statusMatch = message.match(/\b(4\d\d)\b/);
+    const statusMatch = message.match(/API error: (4\d\d)\b/);
     if (!statusMatch) return false;
     const status = Number(statusMatch[1]);
     return status !== 408 && status !== 429;
@@ -473,20 +504,20 @@ async function postJsonProvider(
     const cosmos = getCosmosAsync();
 
     if (options.preferCosmos && cosmos?.post) {
-        return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+        return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
     }
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(body)
-        });
+        }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
 
         return await readProviderJsonResponse(response, providerName);
     } catch (err) {
         if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-            return normalizeProviderJsonPayload(await cosmos.post(url, body, headers), providerName);
+            return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
         }
         throw err;
     }
@@ -532,22 +563,22 @@ async function postFormProvider(
 
     if (options.preferCosmos && cosmos?.post) {
         return normalizeProviderJsonPayload(
-            await cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }),
+            await withTimeout(cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
             providerName
         );
     }
 
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
             method: 'POST',
             body: params
-        });
+        }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
 
         return await readProviderJsonResponse(response, providerName);
     } catch (err) {
         if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
             return normalizeProviderJsonPayload(
-                await cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }),
+                await withTimeout(cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
                 providerName
             );
         }
@@ -603,6 +634,7 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
         if (apiKeys.geminiModel !== undefined) geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
         if (apiKeys.geminiTemperature !== undefined) geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
+        if (apiKeys.maxParallelChunks !== undefined) maxParallelChunks = normalizeMaxParallelChunks(apiKeys.maxParallelChunks);
     }
 }
 
@@ -797,22 +829,24 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
     return null;
 }
 
-function cacheTranslation(text: string, targetLang: string, translation: string, api?: string): void {
-    const cache = storage.getJSON<TranslationCache>('translation-cache', {});
+function setCacheEntry(cache: TranslationCache, text: string, targetLang: string, translation: string, api?: string): void {
     const key = `${targetLang}:${text}`;
     const normalizedTranslation = normalizeTranslatedLine(translation || '');
     if (normalizedTranslation === text && shouldInvalidateIdentityTranslation(text, targetLang)) {
         delete cache[key];
-        storage.setJSON('translation-cache', cache);
         return;
     }
-    
+
     cache[key] = {
         translation: normalizedTranslation,
         timestamp: Date.now(),
         api
     };
+}
 
+function cacheTranslation(text: string, targetLang: string, translation: string, api?: string): void {
+    const cache = storage.getJSON<TranslationCache>('translation-cache', {});
+    setCacheEntry(cache, text, targetLang, translation, api);
     pruneTranslationCache(cache);
     storage.setJSON('translation-cache', cache);
 }
@@ -1027,6 +1061,14 @@ function normalizeGeminiTemperature(value: string | number | undefined): number 
         return 0.3;
     }
     return Math.min(2, Math.max(0, parsed));
+}
+
+function normalizeMaxParallelChunks(value: string | number | undefined): number {
+    const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_PARALLEL_CHUNKS;
+    }
+    return Math.min(MAX_PARALLEL_CHUNKS, Math.max(1, Math.floor(parsed)));
 }
 
 function getGeminiGenerateContentUrl(model: string | undefined): string {
@@ -1548,6 +1590,85 @@ function parseBatchTextFallbacks(translatedText: string, expectedCount: number):
     return null;
 }
 
+function providerSupportsParallelChunking(): boolean {
+    if (preferredApi === 'openai' || preferredApi === 'gemini') {
+        return true;
+    }
+    if (preferredApi === 'custom') {
+        return customApiFormat === 'openai' || customApiFormat === 'gemini';
+    }
+    return false;
+}
+
+function getConfiguredParallelCap(): number {
+    return Math.min(MAX_PARALLEL_CHUNKS, Math.max(1, Math.floor(maxParallelChunks) || 1));
+}
+
+function getParallelChunkCount(lineCount: number): number {
+    const cap = getConfiguredParallelCap();
+    if (cap < 2) {
+        return 1;
+    }
+    return Math.min(cap, Math.max(2, Math.ceil(lineCount / PARALLEL_TARGET_LINES_PER_CHUNK)));
+}
+
+function shouldUseParallelChunking(lineCount: number): boolean {
+    return providerSupportsParallelChunking()
+        && lineCount >= PARALLEL_CHUNK_MIN_LINES
+        && getParallelChunkCount(lineCount) >= 2;
+}
+
+function splitIntoChunks<T>(items: T[], chunkCount: number): T[][] {
+    const chunks: T[][] = [];
+    const baseSize = Math.floor(items.length / chunkCount);
+    let remainder = items.length % chunkCount;
+    let start = 0;
+
+    for (let i = 0; i < chunkCount && start < items.length; i++) {
+        const size = baseSize + (remainder > 0 ? 1 : 0);
+        if (remainder > 0) remainder--;
+        if (size === 0) break;
+        chunks.push(items.slice(start, start + size));
+        start += size;
+    }
+
+    return chunks;
+}
+
+async function translateParallelChunkedBatch(
+    lines: string[],
+    targetLang: string,
+    sourceLang?: string
+): Promise<{ translations: string[]; detectedLang?: string }> {
+    const chunkCount = getParallelChunkCount(lines.length);
+    const chunks = splitIntoChunks(lines, chunkCount);
+
+    const chunkResults = await Promise.all(chunks.map(async chunk => {
+        const { combinedText, markerNonce } = buildMarkedBatchPayload(chunk);
+        const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
+        const parsed =
+            parseMarkedBatchResponse(result.translatedText, chunk.length, markerNonce) ||
+            parseBatchTextFallbacks(result.translatedText, chunk.length);
+
+        if (!parsed || parsed.length !== chunk.length) {
+            throw new Error(`Parallel chunk mismatch: sent ${chunk.length}, got ${parsed?.length ?? 0}`);
+        }
+
+        return { translations: parsed, detectedLang: result.detectedLanguage };
+    }));
+
+    const translations: string[] = [];
+    let detectedLang: string | undefined;
+    for (const chunkResult of chunkResults) {
+        translations.push(...chunkResult.translations);
+        if (!detectedLang && chunkResult.detectedLang) {
+            detectedLang = chunkResult.detectedLang;
+        }
+    }
+
+    return { translations, detectedLang };
+}
+
 async function translateChunkedBatch(
     lines: string[],
     targetLang: string,
@@ -1605,6 +1726,17 @@ async function translateSourceAlignedBatch(lines: string[], targetLang: string, 
                 throw batchArrayError;
             }
             warn('Source-aligned batch-array translation unavailable, falling back to marker batching:', batchArrayError);
+        }
+    }
+
+    if (shouldUseParallelChunking(lines.length)) {
+        try {
+            const parallelResult = await translateParallelChunkedBatch(lines, targetLang, sourceLang);
+            if (parallelResult.translations.length === lines.length) {
+                return parallelResult;
+            }
+        } catch (parallelError) {
+            warn('Source-aligned parallel chunked batch failed, falling back to single marker batch:', parallelError);
         }
     }
 
@@ -1933,7 +2065,8 @@ async function translateLyricsInner(
     const results: TranslationResult[] = [];
     const cachedResults: Map<number, TranslationResult> = new Map();
     const uncachedLines: { index: number; text: string }[] = [];
-    
+    const lineCacheSnapshot = storage.getJSON<TranslationCache>('translation-cache', {});
+
     lines.forEach((line, index) => {
         if (!line.trim()) {
             cachedResults.set(index, {
@@ -1946,9 +2079,8 @@ async function translateLyricsInner(
         } else {
             const cached = getCachedTranslation(line, targetLang);
             if (cached) {
-                const lineCache = storage.getJSON<TranslationCache>('translation-cache', {});
                 const lineKey = `${targetLang}:${line}`;
-                const lineCacheEntry = lineCache[lineKey];
+                const lineCacheEntry = lineCacheSnapshot[lineKey];
                 cachedResults.set(index, {
                     originalText: line,
                     translatedText: cached,
@@ -2006,6 +2138,20 @@ async function translateLyricsInner(
             }
         }
 
+        if (!translatedLines && !hasMixedSourceLanguages && shouldUseParallelChunking(uncachedLines.length)) {
+            try {
+                const parallelResult = await translateParallelChunkedBatch(uncachedLines.map(l => l.text), targetLang, detectedSourceLang);
+                if (parallelResult.translations.length === uncachedLines.length) {
+                    translatedLines = parallelResult.translations;
+                    if (parallelResult.detectedLang) {
+                        detectedLang = parallelResult.detectedLang;
+                    }
+                }
+            } catch (parallelError) {
+                warn('Parallel chunked batch failed, falling back to single marker batch:', parallelError);
+            }
+        }
+
         if (!translatedLines && !hasMixedSourceLanguages) {
             const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map(l => l.text));
             const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
@@ -2044,7 +2190,7 @@ async function translateLyricsInner(
             for (const item of uncachedLines) {
                 try {
                     const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
-                    const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
+                    const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang), 1);
                     perLineResults.push(single.translatedText);
                     if (single.detectedLanguage && !hasMixedSourceLanguages && detectedLang === (detectedSourceLang || 'auto')) {
                         detectedLang = single.detectedLanguage;
@@ -2072,6 +2218,7 @@ async function translateLyricsInner(
             });
         });
 
+        const repairCache = storage.getJSON<TranslationCache>('translation-cache', {});
         for (const item of uncachedLines) {
             const existing = cachedResults.get(item.index);
             const initialTranslation = existing?.translatedText || item.text;
@@ -2088,7 +2235,7 @@ async function translateLyricsInner(
             if (suspiciousOutput) {
                 try {
                     const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
-                    const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang));
+                    const direct = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang), 1);
                     const directNormalized = normalizeTranslatedLine(direct.translatedText || '');
                     if (directNormalized && !looksLikeMarkerDebris(directNormalized) && directNormalized !== item.text) {
                         finalTranslation = directNormalized;
@@ -2105,7 +2252,7 @@ async function translateLyricsInner(
             }
 
             if (finalTranslation !== item.text) {
-                cacheTranslation(item.text, targetLang, finalTranslation, preferredApi);
+                setCacheEntry(repairCache, item.text, targetLang, finalTranslation, preferredApi);
             }
 
             cachedResults.set(item.index, {
@@ -2117,6 +2264,9 @@ async function translateLyricsInner(
                 apiProvider: preferredApi
             });
         }
+
+        pruneTranslationCache(repairCache);
+        storage.setJSON('translation-cache', repairCache);
     } catch (error) {
         logError('Batch translation failed (fallback disabled to prevent rate limits):', error);
         
