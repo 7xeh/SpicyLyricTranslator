@@ -1962,12 +1962,13 @@ export async function translateLyrics(
     lines: string[],
     targetLang: string,
     trackUri?: string,
-    detectedSourceLang?: string
+    detectedSourceLang?: string,
+    skipTrackCache: boolean = false
 ): Promise<TranslationResult[]> {
     const metricsSession = beginMetricsSession();
     const metricsStartedAt = Date.now();
     try {
-        return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt);
+        return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt, skipTrackCache);
     } finally {
         endMetricsSession(metricsSession);
     }
@@ -2003,7 +2004,8 @@ async function translateLyricsInner(
     trackUri: string | undefined,
     detectedSourceLang: string | undefined,
     metricsSession: MetricsSession,
-    metricsStartedAt: number
+    metricsStartedAt: number,
+    skipTrackCache: boolean = false
 ): Promise<TranslationResult[]> {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
@@ -2032,13 +2034,13 @@ async function translateLyricsInner(
     }
 
     if (sameLangFromHint || sameLangFromLines || sameLangFromCorpus) {
-        if (currentTrackUri) {
+        if (currentTrackUri && !skipTrackCache) {
             deleteTrackCache(currentTrackUri, targetLang);
         }
         return buildSameLanguagePassthrough(lines, targetLang, detectedSourceLang || targetLang);
     }
 
-    if (currentTrackUri) {
+    if (currentTrackUri && !skipTrackCache) {
         const trackCache = getTrackCache(currentTrackUri, targetLang);
         if (trackCache && trackCache.lines.length === lines.length) {
             if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
@@ -2099,7 +2101,7 @@ async function translateLyricsInner(
         const finalResults = lines.map((_, index) => cachedResults.get(index)!);
         const someTranslated = finalResults.some(r => r.wasTranslated);
 
-        if (currentTrackUri && someTranslated) {
+        if (currentTrackUri && someTranslated && !skipTrackCache) {
             const translatedLines = finalResults.map(r => r.translatedText);
             setTrackCache(
                 currentTrackUri,
@@ -2300,14 +2302,14 @@ async function translateLyricsInner(
                 wasTranslated: false
             };
         }
-        if (currentTrackUri) {
+        if (currentTrackUri && !skipTrackCache) {
             deleteTrackCache(currentTrackUri, targetLang);
         }
         return results;
     }
 
     const someTranslated = results.some(r => r.wasTranslated);
-    if (currentTrackUri && results.length > 0 && someTranslated) {
+    if (currentTrackUri && results.length > 0 && someTranslated && !skipTrackCache) {
         const translatedLines = results.map(r => r.translatedText);
         setTrackCache(
             currentTrackUri,

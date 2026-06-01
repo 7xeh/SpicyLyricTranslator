@@ -76,12 +76,21 @@ function matchesSkippedTranslation(
     trackUri: string | null,
     targetLanguage: string,
     romanizationOn: boolean,
-    _lyricsKey: string
+    lyricsKey: string
 ): boolean {
     if (!lastSkippedTranslation) return false;
     if (lastSkippedTranslation.trackUri !== trackUri) return false;
     if (lastSkippedTranslation.targetLanguage !== targetLanguage) return false;
     if (lastSkippedTranslation.romanizationOn !== romanizationOn) return false;
+    return lastSkippedTranslation.lyricsKey === lyricsKey || lastSkippedTranslation.domLyricsKey === lyricsKey;
+}
+
+let lastSkipNotifyKey: string | null = null;
+
+function shouldNotifySkip(trackUri: string | null, targetLanguage: string, romanizationOn: boolean): boolean {
+    const key = `${trackUri ?? ''}${targetLanguage}${romanizationOn ? '1' : '0'}`;
+    if (lastSkipNotifyKey === key) return false;
+    lastSkipNotifyKey = key;
     return true;
 }
 
@@ -695,7 +704,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                     domLyricsKey,
                     preApiSkipCheck.detectedLanguage
                 );
-                if (state.showNotifications && Spicetify.showNotification) {
+                if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
                     Spicetify.showNotification(preApiSkipCheck.reason || 'Lyrics already in target language');
                 }
                 return;
@@ -902,7 +911,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                     skipCheck.detectedLanguage
                 );
                 restoreButtonState();
-                if (state.showNotifications && Spicetify.showNotification) {
+                if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
                     Spicetify.showNotification(skipCheck.reason || 'Lyrics already in target language');
                 }
                 return;
@@ -969,6 +978,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
 
         lastSkippedTranslation = null;
+        lastSkipNotifyKey = null;
         
         state.translatedLyrics.clear();
 
@@ -1299,7 +1309,7 @@ async function fillVisibleGaps(): Promise<void> {
     fillGapsInFlight = true;
     try {
         const currentTrackUri = getCurrentTrackUri();
-        const results = await translateLyrics(missing, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined);
+        const results = await translateLyrics(missing, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined, true);
         if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri) return;
 
         let added = false;

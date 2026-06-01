@@ -340,11 +340,20 @@ export function deleteTrackCache(trackUri: string, targetLang?: string): void {
     const index = getCacheIndex();
     
     if (targetLang) {
-        const cacheKey = getCacheKey(trackUri, targetLang);
-        storage.removeItem(cacheKey);
-        
-        const fullKey = `${trackUri}:${targetLang}`;
-        index.trackUris = index.trackUris.filter(k => k !== fullKey);
+        const normWanted = normalizeTrackUri(trackUri);
+        storage.removeItem(getCacheKey(trackUri, targetLang));
+
+        collectNativeCacheKeys(storage).forEach(key => {
+            const parsed = parseCacheKey(key);
+            if (parsed && parsed.targetLang === targetLang && normalizeTrackUri(parsed.trackUri) === normWanted) {
+                storage.removeItem(key);
+            }
+        });
+
+        index.trackUris = index.trackUris.filter(fullKey => {
+            const p = parseFullKey(fullKey);
+            return !(p && p.targetLang === targetLang && normalizeTrackUri(p.trackUri) === normWanted);
+        });
     } else {
         const keysToRemove = index.trackUris.filter(k => k.startsWith(trackUri + ':'));
         keysToRemove.forEach(k => {
@@ -490,6 +499,18 @@ export interface CachedTrackSummary {
     metrics?: TrackCacheMetrics;
 }
 
+function dedupeCachedTracks(tracks: CachedTrackSummary[]): CachedTrackSummary[] {
+    const byKey = new Map<string, CachedTrackSummary>();
+    for (const t of tracks) {
+        const key = `${normalizeTrackUri(t.trackUri)}:${t.targetLang}`;
+        const existing = byKey.get(key);
+        if (!existing || t.timestamp > existing.timestamp) {
+            byKey.set(key, t);
+        }
+    }
+    return Array.from(byKey.values()).sort((a, b) => b.timestamp - a.timestamp);
+}
+
 export function getAllCachedTracks(): CachedTrackSummary[] {
     runCacheSchemaMigration();
     const storage = getStorage();
@@ -531,7 +552,7 @@ export function getAllCachedTracks(): CachedTrackSummary[] {
             }
             
             if (tracks.length > 0) {
-                return tracks.sort((a, b) => b.timestamp - a.timestamp);
+                return dedupeCachedTracks(tracks);
             }
         } catch (e) {
             warn('Failed to iterate native localStorage:', e);
@@ -566,8 +587,8 @@ export function getAllCachedTracks(): CachedTrackSummary[] {
 
         }
     });
-    
-    return tracks.sort((a, b) => b.timestamp - a.timestamp);
+
+    return dedupeCachedTracks(tracks);
 }
 
 export function getCurrentTrackUri(): string | null {

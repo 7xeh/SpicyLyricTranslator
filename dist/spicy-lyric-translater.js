@@ -523,10 +523,18 @@ var SpicyLyricTranslater = (() => {
       return;
     const index = getCacheIndex();
     if (targetLang) {
-      const cacheKey = getCacheKey(trackUri, targetLang);
-      storage2.removeItem(cacheKey);
-      const fullKey = `${trackUri}:${targetLang}`;
-      index.trackUris = index.trackUris.filter((k) => k !== fullKey);
+      const normWanted = normalizeTrackUri(trackUri);
+      storage2.removeItem(getCacheKey(trackUri, targetLang));
+      collectNativeCacheKeys(storage2).forEach((key) => {
+        const parsed = parseCacheKey(key);
+        if (parsed && parsed.targetLang === targetLang && normalizeTrackUri(parsed.trackUri) === normWanted) {
+          storage2.removeItem(key);
+        }
+      });
+      index.trackUris = index.trackUris.filter((fullKey) => {
+        const p = parseFullKey(fullKey);
+        return !(p && p.targetLang === targetLang && normalizeTrackUri(p.trackUri) === normWanted);
+      });
     } else {
       const keysToRemove = index.trackUris.filter((k) => k.startsWith(trackUri + ":"));
       keysToRemove.forEach((k) => {
@@ -636,6 +644,17 @@ var SpicyLyricTranslater = (() => {
       sizeBytes
     };
   }
+  function dedupeCachedTracks(tracks) {
+    const byKey = /* @__PURE__ */ new Map();
+    for (const t of tracks) {
+      const key = `${normalizeTrackUri(t.trackUri)}:${t.targetLang}`;
+      const existing = byKey.get(key);
+      if (!existing || t.timestamp > existing.timestamp) {
+        byKey.set(key, t);
+      }
+    }
+    return Array.from(byKey.values()).sort((a, b) => b.timestamp - a.timestamp);
+  }
   function getAllCachedTracks() {
     runCacheSchemaMigration();
     const storage2 = getStorage();
@@ -673,7 +692,7 @@ var SpicyLyricTranslater = (() => {
           }
         }
         if (tracks.length > 0) {
-          return tracks.sort((a, b) => b.timestamp - a.timestamp);
+          return dedupeCachedTracks(tracks);
         }
       } catch (e) {
         warn("Failed to iterate native localStorage:", e);
@@ -706,7 +725,7 @@ var SpicyLyricTranslater = (() => {
       } catch (e) {
       }
     });
-    return tracks.sort((a, b) => b.timestamp - a.timestamp);
+    return dedupeCachedTracks(tracks);
   }
   function getCurrentTrackUri() {
     try {
@@ -2846,11 +2865,11 @@ ${text}`
       totalTokens: session.totalTokens > 0 ? session.totalTokens : void 0
     };
   }
-  async function translateLyrics(lines, targetLang, trackUri, detectedSourceLang) {
+  async function translateLyrics(lines, targetLang, trackUri, detectedSourceLang, skipTrackCache = false) {
     const metricsSession = beginMetricsSession();
     const metricsStartedAt = Date.now();
     try {
-      return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt);
+      return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt, skipTrackCache);
     } finally {
       endMetricsSession(metricsSession);
     }
@@ -2874,7 +2893,7 @@ ${text}`
       source: "cache"
     }));
   }
-  async function translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt) {
+  async function translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt, skipTrackCache = false) {
     const currentTrackUri = trackUri || getCurrentTrackUri();
     const sourceFingerprint = computeSourceLyricsFingerprint(lines);
     const lineLanguages = getConfidentLineLanguages(lines);
@@ -2899,12 +2918,12 @@ ${text}`
       }
     }
     if (sameLangFromHint || sameLangFromLines || sameLangFromCorpus) {
-      if (currentTrackUri) {
+      if (currentTrackUri && !skipTrackCache) {
         deleteTrackCache(currentTrackUri, targetLang);
       }
       return buildSameLanguagePassthrough(lines, targetLang, detectedSourceLang || targetLang);
     }
-    if (currentTrackUri) {
+    if (currentTrackUri && !skipTrackCache) {
       const trackCache = getTrackCache(currentTrackUri, targetLang);
       if (trackCache && trackCache.lines.length === lines.length) {
         if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
@@ -2960,7 +2979,7 @@ ${text}`
     if (uncachedLines.length === 0) {
       const finalResults = lines.map((_, index) => cachedResults.get(index));
       const someTranslated2 = finalResults.some((r) => r.wasTranslated);
-      if (currentTrackUri && someTranslated2) {
+      if (currentTrackUri && someTranslated2 && !skipTrackCache) {
         const translatedLines = finalResults.map((r) => r.translatedText);
         setTrackCache(
           currentTrackUri,
@@ -3135,13 +3154,13 @@ ${text}`
           wasTranslated: false
         };
       }
-      if (currentTrackUri) {
+      if (currentTrackUri && !skipTrackCache) {
         deleteTrackCache(currentTrackUri, targetLang);
       }
       return results;
     }
     const someTranslated = results.some((r) => r.wasTranslated);
-    if (currentTrackUri && results.length > 0 && someTranslated) {
+    if (currentTrackUri && results.length > 0 && someTranslated && !skipTrackCache) {
       const translatedLines = results.map((r) => r.translatedText);
       setTrackCache(
         currentTrackUri,
@@ -7722,7 +7741,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     return `${count}:${(hash >>> 0).toString(36)}`;
   }
-  function matchesSkippedTranslation(trackUri, targetLanguage, romanizationOn, _lyricsKey) {
+  function matchesSkippedTranslation(trackUri, targetLanguage, romanizationOn, lyricsKey) {
     if (!lastSkippedTranslation)
       return false;
     if (lastSkippedTranslation.trackUri !== trackUri)
@@ -7731,6 +7750,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return false;
     if (lastSkippedTranslation.romanizationOn !== romanizationOn)
       return false;
+    return lastSkippedTranslation.lyricsKey === lyricsKey || lastSkippedTranslation.domLyricsKey === lyricsKey;
+  }
+  var lastSkipNotifyKey = null;
+  function shouldNotifySkip(trackUri, targetLanguage, romanizationOn) {
+    const key = `${trackUri ?? ""}${targetLanguage}${romanizationOn ? "1" : "0"}`;
+    if (lastSkipNotifyKey === key)
+      return false;
+    lastSkipNotifyKey = key;
     return true;
   }
   function rememberSkippedTranslation(trackUri, targetLanguage, romanizationOn, lyricsKey, domLyricsKey, detectedLanguage) {
@@ -8249,7 +8276,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             domLyricsKey,
             preApiSkipCheck.detectedLanguage
           );
-          if (state.showNotifications && Spicetify.showNotification) {
+          if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
             Spicetify.showNotification(preApiSkipCheck.reason || "Lyrics already in target language");
           }
           return;
@@ -8428,7 +8455,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             skipCheck.detectedLanguage
           );
           restoreButtonState();
-          if (state.showNotifications && Spicetify.showNotification) {
+          if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
             Spicetify.showNotification(skipCheck.reason || "Lyrics already in target language");
           }
           return;
@@ -8487,6 +8514,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return;
       }
       lastSkippedTranslation = null;
+      lastSkipNotifyKey = null;
       state.translatedLyrics.clear();
       const translationByContent2 = /* @__PURE__ */ new Map();
       const qualityByContent2 = /* @__PURE__ */ new Map();
@@ -8815,7 +8843,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     fillGapsInFlight = true;
     try {
       const currentTrackUri = getCurrentTrackUri();
-      const results = await translateLyrics(missing, state.targetLanguage, currentTrackUri || void 0, state.detectedLanguage || void 0);
+      const results = await translateLyrics(missing, state.targetLanguage, currentTrackUri || void 0, state.detectedLanguage || void 0, true);
       if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri)
         return;
       let added = false;
