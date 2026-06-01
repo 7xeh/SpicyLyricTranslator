@@ -12,6 +12,7 @@ interface SyllableData {
     StartTime: number;
     EndTime: number;
     IsPartOfWord: boolean;
+    TransliteratedText?: string;
     RomanizedText?: string;
 }
 
@@ -20,6 +21,7 @@ interface VocalGroup {
     Type: 'Vocal' | 'Instrumental';
     OppositeAligned?: boolean;
     Text?: string;
+    TransliteratedText?: string;
     StartTime?: number;
     EndTime?: number;
     Lead?: {
@@ -36,6 +38,7 @@ interface VocalGroup {
 
 interface StaticLine {
     Text: string;
+    TransliteratedText?: string;
 }
 
 interface LyricsData {
@@ -314,8 +317,9 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                     endTime: syllable.EndTime,
                     isPartOfWord: syllable.IsPartOfWord,
                 });
-                const romanSyl = syllable.RomanizedText ?? syllable.Text;
-                if (syllable.RomanizedText && syllable.RomanizedText !== syllable.Text) {
+                const syllableRoman = syllable.TransliteratedText ?? syllable.RomanizedText;
+                const romanSyl = syllableRoman ?? syllable.Text;
+                if (syllableRoman && syllableRoman !== syllable.Text) {
                     anyRomanized = true;
                 }
                 if (syllable.IsPartOfWord) {
@@ -340,11 +344,15 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
         }
 
         if (group.Text !== undefined && group.StartTime !== undefined && group.EndTime !== undefined) {
+            const groupRoman = (group.TransliteratedText && group.TransliteratedText !== group.Text)
+                ? group.TransliteratedText
+                : undefined;
             lineData.push({
                 text: String(group.Text).trim(),
                 startTime: group.StartTime,
                 endTime: group.EndTime,
                 isInstrumental: false,
+                romanizedText: groupRoman,
             });
             continue;
         }
@@ -374,7 +382,10 @@ function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
         text: line.Text?.trim() || '',
         startTime: 0,
         endTime: 0,
-        isInstrumental: false
+        isInstrumental: false,
+        romanizedText: (line.TransliteratedText && line.TransliteratedText !== line.Text)
+            ? line.TransliteratedText
+            : undefined
     }));
 }
 

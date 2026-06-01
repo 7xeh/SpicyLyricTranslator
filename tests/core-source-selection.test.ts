@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import type { LyricLineData } from '../src/utils/lyricsFetcher';
 import type {
     isRomanizationActive as IsRomanizationActive,
-    resolveTranslationSourceLines as ResolveTranslationSourceLines
+    resolveTranslationSourceLines as ResolveTranslationSourceLines,
+    translateCurrentLyrics as TranslateCurrentLyrics
 } from '../src/utils/core';
 
 (globalThis as any).window = {
@@ -17,10 +18,12 @@ import type {
     querySelector: () => null
 };
 
-const { isRomanizationActive, resolveTranslationSourceLines } = require('../src/utils/core') as {
+const { isRomanizationActive, resolveTranslationSourceLines, translateCurrentLyrics } = require('../src/utils/core') as {
     isRomanizationActive: typeof IsRomanizationActive;
     resolveTranslationSourceLines: typeof ResolveTranslationSourceLines;
+    translateCurrentLyrics: typeof TranslateCurrentLyrics;
 };
+const { state } = require('../src/utils/state') as { state: typeof import('../src/utils/state').state };
 
 function vocalLine(text: string, romanizedText?: string): LyricLineData {
     return {
@@ -113,7 +116,7 @@ test('romanization mode rejects cached source lines that are already romanized',
     assert.deepEqual(result.lineTexts, []);
 });
 
-test('romanization mode pads missing API lines with empty text instead of DOM romanized text', () => {
+test('romanization mode uses the full API original list without padding to the visible DOM line count', () => {
     const originalLines = ['\u541b\u306f\u4e16\u754c'];
     const romanizedLines = ['kimi wa sekai', 'ai shiteru'];
     const apiLineData = [vocalLine(originalLines[0], romanizedLines[0])];
@@ -127,7 +130,77 @@ test('romanization mode pads missing API lines with empty text instead of DOM ro
     });
 
     assert.equal(result.canTranslate, true);
-    assert.deepEqual(result.lineTexts, [originalLines[0], '']);
+    assert.deepEqual(result.lineTexts, originalLines);
     assert.deepEqual(result.lineTexts.filter(line => romanizedLines.includes(line)), []);
-    assert.equal(result.apiVocalLineData?.[1]?.text, '');
+    assert.equal(result.apiVocalLineData?.length, 1);
 });
+
+test('same-language skip notification only fires once for repeated lyric refreshes', async () => {
+    const notifications: string[] = [];
+    const lines = [
+        fakeLine('I keep dancing in the moonlight'),
+        fakeLine('Every word is already English'),
+        fakeLine('Nothing here needs translation')
+    ];
+
+    (globalThis as any).Spicetify = {
+        LocalStorage: {
+            get: () => null
+        },
+        Player: {
+            data: {
+                item: {
+                    uri: 'spotify:track:english-only'
+                }
+            }
+        },
+        showNotification: (message: string) => {
+            notifications.push(message);
+        }
+    };
+
+    (globalThis as any).localStorage = {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        key: () => null,
+        length: 0
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+        value: { onLine: true },
+        configurable: true
+    });
+
+    (globalThis as any).document = {
+        body: {
+            classList: {
+                contains: () => false
+            }
+        },
+        querySelector: () => null,
+        querySelectorAll: (selector: string) => selector.includes('.line') ? lines : []
+    };
+
+    state.isEnabled = true;
+    state.isTranslating = false;
+    state.targetLanguage = 'en';
+    state.showNotifications = true;
+    state.translatedLyrics.clear();
+    state.lastTranslatedSongUri = null;
+    state.detectedLanguage = null;
+
+    await translateCurrentLyrics();
+    await translateCurrentLyrics();
+
+    assert.deepEqual(notifications, ['Lyrics already in EN']);
+});
+
+function fakeLine(text: string): Element {
+    return {
+        textContent: text,
+        classList: {
+            contains: (className: string) => className === 'line'
+        },
+        querySelectorAll: () => []
+    } as unknown as Element;
+}

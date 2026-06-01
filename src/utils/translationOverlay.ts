@@ -26,8 +26,135 @@ let originalTextMap: Map<number, string> = new Map();
 let lineTimingData: LyricLineData[] = [];
 let qualityMap: Map<number, TranslationQualityMeta> = new Map();
 
+let translationByContent: Map<string, string> = new Map();
+let romanizationByContent: Map<string, string> = new Map();
+let originalByContent: Map<string, string> = new Map();
+let qualityByContent: Map<string, TranslationQualityMeta> = new Map();
+let timingByContent: Map<string, LyricLineData> = new Map();
+
 function normalizeCompare(text: string | undefined | null): string {
     return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
+}
+
+function lookupByContent<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
+    if (!text || map.size === 0) return undefined;
+    const norm = normalizeCompare(text);
+    if (norm) {
+        const direct = map.get(norm);
+        if (direct !== undefined) return direct;
+    }
+
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (nonLatinOnly && nonLatinOnly !== text) {
+        const nNorm = normalizeCompare(nonLatinOnly);
+        if (nNorm) {
+            const match = map.get(nNorm);
+            if (match !== undefined) return match;
+        }
+    }
+
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (latinOnly && latinOnly !== text) {
+        const lNorm = normalizeCompare(latinOnly);
+        if (lNorm) {
+            const match = map.get(lNorm);
+            if (match !== undefined) return match;
+        }
+    }
+
+    if (norm && norm.length >= 4) {
+        let best: { key: string; value: V } | null = null;
+        for (const [key, value] of map) {
+            if (key.length < 4) continue;
+            if (norm.includes(key) || key.includes(norm)) {
+                if (!best || key.length > best.key.length) {
+                    best = { key, value };
+                }
+            }
+        }
+        if (best) return best.value;
+    }
+
+    return undefined;
+}
+
+function hasContentData(): boolean {
+    return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
+}
+
+function rebuildPerLineMaps(lines: ArrayLike<Element>): void {
+    if (!hasContentData()) return;
+
+    translationMap = new Map();
+    romanizationMap = new Map();
+    originalTextMap = new Map();
+    qualityMap = new Map();
+    lineTimingData = [];
+
+    for (let index = 0; index < lines.length; index++) {
+        const text = extractLineText(lines[index]);
+        if (!text) continue;
+
+        const t = lookupByContent(translationByContent, text);
+        if (t) translationMap.set(index, t);
+
+        const r = lookupByContent(romanizationByContent, text);
+        if (r) romanizationMap.set(index, r);
+
+        const o = lookupByContent(originalByContent, text);
+        if (o) originalTextMap.set(index, o);
+
+        const q = lookupByContent(qualityByContent, text);
+        if (q) qualityMap.set(index, q);
+
+        const tim = lookupByContent(timingByContent, text);
+        if (tim) lineTimingData[index] = tim;
+    }
+}
+
+export function setTranslationContentData(data: Map<string, string>): void {
+    translationByContent = new Map(data);
+}
+
+export function setRomanizationContentData(data: Map<string, string>): void {
+    romanizationByContent = new Map(data);
+}
+
+export function setOriginalContentData(data: Map<string, string>): void {
+    originalByContent = new Map(data);
+}
+
+export function setQualityContentData(data: Map<string, TranslationQualityMeta>): void {
+    qualityByContent = new Map(data);
+}
+
+export function setTimingContentData(data: Map<string, LyricLineData>): void {
+    timingByContent = new Map(data);
+}
+
+const lastRenderSigMap = new WeakMap<Document, string>();
+
+function computeRenderSignature(lines: ArrayLike<Element>): string {
+    const parts: string[] = [
+        currentConfig.mode,
+        currentConfig.syncWordHighlight ? '1' : '0',
+        storage.get('vocabulary-mode') === 'true' ? '1' : '0'
+    ];
+    for (let i = 0; i < lines.length; i++) {
+        const text = extractLineText(lines[i]);
+        const tr = translationMap.get(i) || '';
+        const rom = romanizationMap.get(i) || '';
+        const orig = originalTextMap.get(i) || '';
+        parts.push(`${text}${tr}${rom}${orig}`);
+    }
+    return parts.join('');
+}
+
+function renderSignatureUnchanged(doc: Document, lines: ArrayLike<Element>): boolean {
+    const sig = computeRenderSignature(lines);
+    if (lastRenderSigMap.get(doc) === sig) return true;
+    lastRenderSigMap.set(doc, sig);
+    return false;
 }
 
 interface DocCache {
@@ -285,65 +412,134 @@ function isLineActive(line: Element): boolean {
            (line as HTMLElement).dataset.active === 'true';
 }
 
+function findOriginalLineForTranslation(transEl: Element): HTMLElement | null {
+    let prev = transEl.previousElementSibling as HTMLElement | null;
+    while (prev && !prev.classList.contains('line')) {
+        prev = prev.previousElementSibling as HTMLElement | null;
+    }
+    return prev;
+}
+
+function adjacentOriginalLine(el: Element): HTMLElement | null {
+    if (el.classList.contains('slt-original-line')) {
+        let next = el.nextElementSibling as HTMLElement | null;
+        while (next && !next.classList.contains('line')) {
+            next = next.nextElementSibling as HTMLElement | null;
+        }
+        return next;
+    }
+    return findOriginalLineForTranslation(el);
+}
+
 function applyReplaceMode(doc: Document): void {
-    resetDocCache(doc);
-
     const lines = getLyricLines(doc);
+    rebuildPerLineMaps(lines);
 
-    doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
-    doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
-    doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
-    doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
-    doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
+    if (renderSignatureUnchanged(doc, lines)) return;
+
+    resetDocCache(doc);
 
     const lyricsContainer = doc.querySelector('.SpicyLyricsScrollContainer');
     const lyricsType = lyricsContainer?.getAttribute('data-lyrics-type') || 'Line';
     const learningMode = isLearningModeActive();
+    const vocabEnabled = storage.get('vocabulary-mode') === 'true';
+
+    const claimed = new Set<Element>();
 
     lines.forEach((line, index) => {
+        const lineEl = line as HTMLElement;
         const translation = translationMap.get(index);
-        if (!translation) return;
-
         const originalText = extractLineText(line);
-        if (translation === originalText) return;
 
-        if (!line.parentNode) return;
+        let existing = line.nextElementSibling as HTMLElement | null;
+        if (existing && !existing.classList.contains('slt-replace-line')) existing = null;
+        let existingOrig = line.previousElementSibling as HTMLElement | null;
+        if (existingOrig && !existingOrig.classList.contains('slt-original-line')) existingOrig = null;
 
-        const timingInfoEarly = lineTimingData[index];
-        const isBreakEarly = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
+        const wants = !!translation && translation !== originalText && !!line.parentNode;
+        if (!wants) {
+            if (existing) existing.remove();
+            if (existingOrig) existingOrig.remove();
+            lineEl.classList.remove('slt-replace-hidden');
+            lineEl.classList.remove('slt-learning-hidden');
+            return;
+        }
+
+        const timingInfo = lineTimingData[index];
+        const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
         const hasRomanization = !!romanizationMap.get(index);
         const hasApiOriginal = !!originalTextMap.get(index);
         const domIsRomanized = domLineIsRomanized(line, index);
-        const learningActive = learningMode && hasRomanization && !(timingInfoEarly?.isInstrumental || isBreakEarly);
+        const learningActive = learningMode && hasRomanization && !(timingInfo?.isInstrumental || isBreak);
         const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
         const keepDomVisible = learningActive && !domIsRomanized;
+        const isInstrumental = timingInfo?.isInstrumental || isBreak;
 
-        if (!keepDomVisible) {
-            line.classList.add('slt-replace-hidden');
+        let pairBelowText = originalText;
+        if (domIsRomanized) {
+            pairBelowText = originalTextMap.get(index) || originalText;
+        } else {
+            pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
         }
-        (line as HTMLElement).dataset.sltIndex = index.toString();
-        
+
+        const sig = [
+            translation,
+            isInstrumental ? 'I' : '',
+            domIsRomanized ? 'R' : '',
+            showInjectedOriginal ? 'O' : '',
+            keepDomVisible ? 'K' : '',
+            vocabEnabled ? 'V' : '',
+            currentConfig.syncWordHighlight ? 'W' : '',
+            pairBelowText
+        ].join('');
+
+        lineEl.classList.toggle('slt-replace-hidden', !keepDomVisible);
+        lineEl.dataset.sltIndex = index.toString();
+
+        const refreshOriginal = () => {
+            if (showInjectedOriginal) {
+                if (existingOrig) {
+                    existingOrig.dataset.lineIndex = index.toString();
+                    existingOrig.dataset.forLine = index.toString();
+                    claimed.add(existingOrig);
+                } else {
+                    const origEl = buildOriginalLine(doc, index, timingInfo, line);
+                    if (origEl) {
+                        line.parentNode!.insertBefore(origEl, line);
+                        claimed.add(origEl);
+                    }
+                }
+            } else if (existingOrig) {
+                existingOrig.remove();
+            }
+        };
+
+        if (existing && existing.dataset.sltSig === sig) {
+            existing.dataset.lineIndex = index.toString();
+            existing.dataset.forLine = index.toString();
+            if (timingInfo) {
+                existing.dataset.startTime = timingInfo.startTime.toString();
+                existing.dataset.endTime = timingInfo.endTime.toString();
+            }
+            claimed.add(existing);
+            refreshOriginal();
+            return;
+        }
+
+        if (existing) existing.remove();
+        if (existingOrig) { existingOrig.remove(); existingOrig = null; }
+
         const replaceEl = doc.createElement('div');
         replaceEl.className = 'slt-replace-line slt-sync-translation';
         replaceEl.dataset.lineIndex = index.toString();
         replaceEl.dataset.forLine = index.toString();
         replaceEl.dataset.lyricsType = lyricsType;
-        
-        const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
-        const timingInfo = lineTimingData[index];
-        const isInstrumental = timingInfo?.isInstrumental || isBreak;
-        
+        replaceEl.dataset.sltSig = sig;
+
         if (isInstrumental) {
             replaceEl.textContent = '♪ ♪ ♪';
             replaceEl.classList.add('slt-replace-instrumental');
         } else {
-            const vocabEnabled = storage.get('vocabulary-mode') === 'true';
-            let pairBelowText = originalText;
-            if (domIsRomanized) {
-                pairBelowText = originalTextMap.get(index) || originalText;
-            } else {
-                pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
-            }
             if (vocabEnabled) {
                 replaceEl.classList.add('slt-vocab-line');
                 appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, 'slt-replace-word');
@@ -353,15 +549,15 @@ function applyReplaceMode(doc: Document): void {
                 replaceEl.textContent = translation;
             }
         }
-        
+
         if (timingInfo) {
             replaceEl.dataset.startTime = timingInfo.startTime.toString();
             replaceEl.dataset.endTime = timingInfo.endTime.toString();
         }
-        
+
         replaceEl.addEventListener('click', (e) => {
             e.preventDefault();
-            
+
             const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word, .slt-vocab-pair');
             if (clickedWord) {
                 const originalIndex = parseInt((clickedWord as HTMLElement).dataset.originalIndex || '-1', 10);
@@ -371,7 +567,7 @@ function applyReplaceMode(doc: Document): void {
                     return;
                 }
             }
-            
+
             const firstClickable = line.querySelector('.word:not(.dot)') || line.querySelector('.letterGroup');
             if (firstClickable) {
                 (firstClickable as HTMLElement).click();
@@ -379,24 +575,24 @@ function applyReplaceMode(doc: Document): void {
                 (line as HTMLElement).click();
             }
         });
-        
+
         if (isLineActive(line)) {
             replaceEl.classList.add('active');
         }
-        
+
         const qualityIndicator = createQualityIndicator(doc, index);
         if (qualityIndicator) {
             replaceEl.appendChild(qualityIndicator);
         }
 
-        line.parentNode.insertBefore(replaceEl, line.nextSibling);
+        line.parentNode!.insertBefore(replaceEl, line.nextSibling);
+        claimed.add(replaceEl);
 
-        if (showInjectedOriginal) {
-            const origEl = buildOriginalLine(doc, index, timingInfo, line);
-            if (origEl) {
-                line.parentNode.insertBefore(origEl, line);
-            }
-        }
+        refreshOriginal();
+    });
+
+    doc.querySelectorAll('.slt-replace-line, .slt-original-line, .slt-romanization-line').forEach(el => {
+        if (!claimed.has(el)) el.remove();
     });
 }
 
@@ -1007,33 +1203,40 @@ function fallbackToContinuousMultilineGradient(
 }
 
 function applyInterleavedMode(doc: Document): void {
-    resetDocCache(doc);
-
     try {
         const lines = getLyricLines(doc);
         if (!lines || lines.length === 0) {
             return;
         }
-        
-        doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
+        rebuildPerLineMaps(lines);
+
+        if (renderSignatureUnchanged(doc, lines)) return;
+
+        resetDocCache(doc);
 
         const learningMode = isLearningModeActive();
+        const isVocabMode = storage.get('vocabulary-mode') === 'true';
+
+        const claimed = new Set<Element>();
 
         lines.forEach((line, index) => {
             try {
+                const lineEl = line as HTMLElement;
                 const translation = translationMap.get(index);
                 const originalText = extractLineText(line);
-
                 const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
 
-                if (!translation && !isBreak) return;
-                if (translation === originalText) return;
+                let existing = line.nextElementSibling as HTMLElement | null;
+                if (existing && !existing.classList.contains('slt-interleaved-translation')) existing = null;
+                let existingOrig = line.previousElementSibling as HTMLElement | null;
+                if (existingOrig && !existingOrig.classList.contains('slt-original-line')) existingOrig = null;
 
-                if (!line.parentNode) {
+                const wants = (!!translation || isBreak) && translation !== originalText && !!line.parentNode;
+                if (!wants) {
+                    if (existing) existing.remove();
+                    if (existingOrig) existingOrig.remove();
+                    lineEl.classList.remove('slt-learning-hidden');
+                    lineEl.classList.remove('slt-overlay-parent');
                     return;
                 }
 
@@ -1042,28 +1245,67 @@ function applyInterleavedMode(doc: Document): void {
                 const domIsRomanized = domLineIsRomanized(line, index);
                 const learningActive = learningMode && hasRomanization && !isBreak;
                 const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
+                const timingInfo = lineTimingData[index];
 
-                line.classList.add('slt-overlay-parent');
-                (line as HTMLElement).dataset.sltIndex = index.toString();
-
-                if (showInjectedOriginal) {
-                    line.classList.add('slt-learning-hidden');
-                } else {
-                    line.classList.remove('slt-learning-hidden');
-                }
-
-                const translationEl = doc.createElement('div');
-                translationEl.className = 'slt-interleaved-translation';
-                translationEl.dataset.forLine = index.toString();
-                translationEl.dataset.lineIndex = index.toString();
-
-                const isVocabMode = storage.get('vocabulary-mode') === 'true';
                 let pairBelowText = originalText;
                 if (domIsRomanized) {
                     pairBelowText = originalTextMap.get(index) || originalText;
                 } else {
                     pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
                 }
+
+                const sig = [
+                    translation || '',
+                    isBreak ? 'B' : '',
+                    isVocabMode ? 'V' : '',
+                    currentConfig.syncWordHighlight ? 'W' : '',
+                    domIsRomanized ? 'R' : '',
+                    showInjectedOriginal ? 'O' : '',
+                    pairBelowText
+                ].join('');
+
+                lineEl.classList.add('slt-overlay-parent');
+                lineEl.dataset.sltIndex = index.toString();
+                lineEl.classList.toggle('slt-learning-hidden', showInjectedOriginal);
+
+                const refreshOriginal = () => {
+                    if (showInjectedOriginal) {
+                        if (existingOrig) {
+                            existingOrig.dataset.lineIndex = index.toString();
+                            existingOrig.dataset.forLine = index.toString();
+                            claimed.add(existingOrig);
+                        } else {
+                            const origEl = buildOriginalLine(doc, index, timingInfo, line);
+                            if (origEl) {
+                                line.parentNode!.insertBefore(origEl, line);
+                                claimed.add(origEl);
+                            }
+                        }
+                    } else if (existingOrig) {
+                        existingOrig.remove();
+                    }
+                };
+
+                if (existing && existing.dataset.sltSig === sig) {
+                    existing.dataset.lineIndex = index.toString();
+                    existing.dataset.forLine = index.toString();
+                    if (timingInfo) {
+                        existing.dataset.startTime = timingInfo.startTime.toString();
+                        existing.dataset.endTime = timingInfo.endTime.toString();
+                    }
+                    claimed.add(existing);
+                    refreshOriginal();
+                    return;
+                }
+
+                if (existing) existing.remove();
+                if (existingOrig) { existingOrig.remove(); existingOrig = null; }
+
+                const translationEl = doc.createElement('div');
+                translationEl.className = 'slt-interleaved-translation';
+                translationEl.dataset.forLine = index.toString();
+                translationEl.dataset.lineIndex = index.toString();
+                translationEl.dataset.sltSig = sig;
 
                 if (isBreak) {
                     translationEl.textContent = '• • •';
@@ -1080,28 +1322,23 @@ function applyInterleavedMode(doc: Document): void {
                         translationEl.textContent = translation || '';
                     }
                 }
-                
-                const timingInfo = lineTimingData[index];
+
                 if (timingInfo) {
                     translationEl.dataset.startTime = timingInfo.startTime.toString();
                     translationEl.dataset.endTime = timingInfo.endTime.toString();
                 }
-                
+
                 if (isLineActive(line)) translationEl.classList.add('active');
-                
+
                 const qualityIndicator = createQualityIndicator(doc, index);
                 if (qualityIndicator) {
                     translationEl.appendChild(qualityIndicator);
                 }
-                
-                line.parentNode.insertBefore(translationEl, line.nextSibling);
 
-                if (showInjectedOriginal) {
-                    const origEl = buildOriginalLine(doc, index, timingInfo, line);
-                    if (origEl) {
-                        line.parentNode.insertBefore(origEl, line);
-                    }
-                }
+                line.parentNode!.insertBefore(translationEl, line.nextSibling);
+                claimed.add(translationEl);
+
+                refreshOriginal();
 
                 if (!isBreak && currentConfig.syncWordHighlight && translation) {
                     fallbackToContinuousMultilineGradient(translationEl, translation, line);
@@ -1110,7 +1347,11 @@ function applyInterleavedMode(doc: Document): void {
                 warn('Failed to process line', index, ':', lineErr);
             }
         });
-        
+
+        doc.querySelectorAll('.slt-interleaved-translation, .slt-original-line, .slt-romanization-line').forEach(el => {
+            if (!claimed.has(el)) el.remove();
+        });
+
         setupInterleavedTracking(doc);
     } catch (err) {
         warn('Failed to apply interleaved mode:', err);
@@ -1444,14 +1685,10 @@ function updateWordSyncStates(doc: Document): void {
     const currentTimeMs = Spicetify?.Player?.getProgress?.() || 0;
     const currentTime = currentTimeMs / 1000;
 
-    const lines = getLyricLines(doc);
-
     doc.querySelectorAll('.slt-sync-translation').forEach((transLine) => {
         const transLineEl = transLine as HTMLElement;
-        const lineIndex = parseInt(transLineEl.dataset.lineIndex || '-1');
-        if (lineIndex < 0 || lineIndex >= lines.length) return;
 
-        const originalLine = lines[lineIndex] as HTMLElement;
+        const originalLine = findOriginalLineForTranslation(transLineEl);
         if (!originalLine) return;
 
         const originalGradient = originalLine.style.getPropertyValue('--gradient-position').trim();
@@ -1530,7 +1767,7 @@ function syncBlurToTranslations(doc: Document): void {
 }
 
 function renderTranslations(doc: Document): void {
-    if (!isOverlayEnabled || translationMap.size === 0) return;
+    if (!isOverlayEnabled || (translationMap.size === 0 && !hasContentData())) return;
     
     switch (currentConfig.mode) {
         case 'replace':
@@ -1573,76 +1810,10 @@ function onActiveLineChanged(doc: Document): void {
     
     try {
         if (currentConfig.mode === 'interleaved' || currentConfig.mode === 'replace') {
-            const cache = getDocCache(doc);
-
-            if (!cache.lines) {
-                cache.lines = getLyricLines(doc);
-            }
-            
-            if (!cache.lines || cache.lines.length === 0) return;
-
-            if (!cache.translationMap) {
-                cache.translationMap = new Map();
-                const selector = currentConfig.mode === 'replace' ? '.slt-replace-line' : '.slt-interleaved-translation';
-                const translationEls = doc.querySelectorAll(selector);
-                translationEls.forEach(el => {
-                    const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
-                    if (idx >= 0) cache.translationMap!.set(idx, el as HTMLElement);
-                });
-            }
-
-            if (!cache.romanizationElMap) {
-                cache.romanizationElMap = new Map();
-                doc.querySelectorAll('.slt-romanization-line').forEach(el => {
-                    const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
-                    if (idx >= 0) cache.romanizationElMap!.set(idx, el as HTMLElement);
-                });
-            }
-
-            if (!cache.originalElMap) {
-                cache.originalElMap = new Map();
-                doc.querySelectorAll('.slt-original-line').forEach(el => {
-                    const idx = parseInt((el as HTMLElement).dataset.forLine || (el as HTMLElement).dataset.lineIndex || '-1', 10);
-                    if (idx >= 0) cache.originalElMap!.set(idx, el as HTMLElement);
-                });
-            }
-
-            let currentActiveIndex = -1;
-            for (let i = 0; i < cache.lines.length; i++) {
-                if (isLineActive(cache.lines[i])) {
-                    currentActiveIndex = i;
-                    break;
-                }
-            }
-
-            if (currentActiveIndex !== cache.lastActiveIndex) {
-                if (cache.lastActiveIndex !== -1) {
-                    const oldEl = cache.translationMap.get(cache.lastActiveIndex);
-                    if (oldEl) oldEl.classList.remove('active');
-                    const oldRom = cache.romanizationElMap.get(cache.lastActiveIndex);
-                    if (oldRom) oldRom.classList.remove('active');
-                    const oldOrig = cache.originalElMap?.get(cache.lastActiveIndex);
-                    if (oldOrig) oldOrig.classList.remove('active');
-                }
-
-                if (currentActiveIndex !== -1) {
-                    const newEl = cache.translationMap.get(currentActiveIndex);
-                    if (newEl) {
-                        newEl.classList.add('active');
-                        if (currentConfig.mode === 'replace') {
-                            try {
-                                newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            } catch (scrollErr) { }
-                        }
-                    }
-                    const newRom = cache.romanizationElMap.get(currentActiveIndex);
-                    if (newRom) newRom.classList.add('active');
-                    const newOrig = cache.originalElMap?.get(currentActiveIndex);
-                    if (newOrig) newOrig.classList.add('active');
-                }
-
-                cache.lastActiveIndex = currentActiveIndex;
-            }
+            doc.querySelectorAll('.slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line').forEach(el => {
+                const orig = adjacentOriginalLine(el);
+                el.classList.toggle('active', !!orig && isLineActive(orig));
+            });
         }
     } catch (err) { }
 }
@@ -1657,7 +1828,7 @@ function syncLoop(): void {
         return;
     }
 
-    if (translationMap.size === 0) {
+    if (translationMap.size === 0 && !hasContentData()) {
         activeSyncRafId = requestAnimationFrame(syncLoop);
         return;
     }
@@ -1835,9 +2006,11 @@ export function disableOverlay(): void {
     activeLineObservers.clear();
     
     const cleanup = (doc: Document) => {
+        lastRenderSigMap.delete(doc);
+
         const overlay = doc.getElementById('spicy-translate-overlay');
         if (overlay) overlay.remove();
-        
+
         const interleavedOverlay = doc.getElementById('slt-interleaved-overlay');
         if (interleavedOverlay) interleavedOverlay.remove();
         
@@ -1902,6 +2075,11 @@ export function disableOverlay(): void {
     translationMap.clear();
     romanizationMap.clear();
     originalTextMap.clear();
+    translationByContent.clear();
+    romanizationByContent.clear();
+    originalByContent.clear();
+    qualityByContent.clear();
+    timingByContent.clear();
     document.body.classList.remove('slt-overlay-active');
 
 }
@@ -1923,9 +2101,16 @@ export function clearOverlayContent(): void {
     translationMap.clear();
     romanizationMap.clear();
     originalTextMap.clear();
+    translationByContent.clear();
+    romanizationByContent.clear();
+    originalByContent.clear();
+    qualityByContent.clear();
+    timingByContent.clear();
     lineTimingData = [];
 
     const clearDoc = (doc: Document) => {
+        lastRenderSigMap.delete(doc);
+
         const container = doc.getElementById('spicy-translate-overlay');
         if (container) container.innerHTML = '';
 
