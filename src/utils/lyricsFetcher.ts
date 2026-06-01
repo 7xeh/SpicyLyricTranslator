@@ -4,7 +4,7 @@ import { normalizeLanguageCode } from './languageDetection';
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
 const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
-const SPICY_LYRICS_CACHE_VERSION = 12;
+const SPICY_LYRICS_CACHE_VERSION = 13;
 const MAX_CAPTURE_CACHE_ENTRIES = 50;
 
 interface SyllableData {
