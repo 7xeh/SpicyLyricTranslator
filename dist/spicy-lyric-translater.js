@@ -6569,7 +6569,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.7" : "0.0.0";
+    return true ? "2.0.8" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -7711,6 +7711,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   // src/utils/core.ts
   var lyricsObserver = null;
   var translateDebounceTimer = null;
+  var rerenderDebounceTimer = null;
   var viewModeIntervalId = null;
   var romanizationToggleListener = null;
   var romanizationToggleButton = null;
@@ -8879,6 +8880,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       fillGapsInFlight = false;
     }
   }
+  function forceRetranslate() {
+    lastSkippedTranslation = null;
+    lastSkipNotifyKey = null;
+    lastTranslatedRomanizationState = null;
+    state.lastTranslatedSongUri = null;
+    state.translatedLyrics.clear();
+    state._translationsByIndex = void 0;
+    state._qualityByIndex = void 0;
+    removeTranslations();
+    if (state.isEnabled) {
+      translateCurrentLyrics();
+    }
+  }
   function reapplyTranslations() {
     if (state.translatedLyrics.size === 0)
       return;
@@ -8966,7 +8980,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         const hasNewContent = mutations.some(
           (m) => m.type === "childList" && m.addedNodes.length > 0 && Array.from(m.addedNodes).some(hasLyricLineNode)
         );
-        if (hasNewContent && state.autoTranslate && !state.isTranslating) {
+        if (!hasNewContent || state.isTranslating)
+          return;
+        const alreadyTranslated = state.translatedLyrics.size > 0 && state.lastTranslatedSongUri === getCurrentTrackUri();
+        if (alreadyTranslated) {
+          if (rerenderDebounceTimer)
+            clearTimeout(rerenderDebounceTimer);
+          rerenderDebounceTimer = setTimeout(() => {
+            rerenderDebounceTimer = null;
+            if (state.isTranslating)
+              return;
+            const lines = getLyricsLines();
+            if (lines.length > 0)
+              applyTranslations(lines);
+            void fillVisibleGaps();
+          }, 200);
+        } else if (state.autoTranslate) {
           if (translateDebounceTimer)
             clearTimeout(translateDebounceTimer);
           translateDebounceTimer = setTimeout(() => {
@@ -9022,6 +9051,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (translateDebounceTimer) {
       clearTimeout(translateDebounceTimer);
       translateDebounceTimer = null;
+    }
+    if (rerenderDebounceTimer) {
+      clearTimeout(rerenderDebounceTimer);
+      rerenderDebounceTimer = null;
     }
     state.isTranslating = false;
     if (lyricsObserver) {
@@ -9147,7 +9180,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       type: "select",
       storageKey: "target-language",
       defaultValue: "en",
-      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name }))
+      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name })),
+      effects: ["retranslate"]
     },
     {
       id: "overlay-mode",
@@ -9635,6 +9669,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     if (effects.includes("reapplyTranslations")) {
       reapplyTranslations();
+    }
+    if (effects.includes("retranslate")) {
+      forceRetranslate();
     }
   }
   function updateSettingFieldVisibility(root, visibleDisplay) {

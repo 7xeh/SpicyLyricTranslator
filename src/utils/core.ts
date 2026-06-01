@@ -26,6 +26,7 @@ import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFet
 let viewControlsObserver: MutationObserver | null = null;
 let lyricsObserver: MutationObserver | null = null;
 let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let rerenderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let viewModeIntervalId: ReturnType<typeof setInterval> | null = null;
 let romanizationToggleListener: (() => void) | null = null;
 let romanizationToggleButton: Element | null = null;
@@ -1344,6 +1345,22 @@ async function fillVisibleGaps(): Promise<void> {
     }
 }
 
+export function forceRetranslate(): void {
+    lastSkippedTranslation = null;
+    lastSkipNotifyKey = null;
+    lastTranslatedRomanizationState = null;
+    state.lastTranslatedSongUri = null;
+    state.translatedLyrics.clear();
+    state._translationsByIndex = undefined;
+    state._qualityByIndex = undefined;
+
+    removeTranslations();
+
+    if (state.isEnabled) {
+        translateCurrentLyrics();
+    }
+}
+
 export function reapplyTranslations(): void {
     if (state.translatedLyrics.size === 0) return;
     
@@ -1447,7 +1464,20 @@ export function setupLyricsObserver(): void {
                 Array.from(m.addedNodes).some(hasLyricLineNode)
             );
             
-            if (hasNewContent && state.autoTranslate && !state.isTranslating) {
+            if (!hasNewContent || state.isTranslating) return;
+
+            const alreadyTranslated = state.translatedLyrics.size > 0 && state.lastTranslatedSongUri === getCurrentTrackUri();
+
+            if (alreadyTranslated) {
+                if (rerenderDebounceTimer) clearTimeout(rerenderDebounceTimer);
+                rerenderDebounceTimer = setTimeout(() => {
+                    rerenderDebounceTimer = null;
+                    if (state.isTranslating) return;
+                    const lines = getLyricsLines();
+                    if (lines.length > 0) applyTranslations(lines);
+                    void fillVisibleGaps();
+                }, 200);
+            } else if (state.autoTranslate) {
                 if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
                 translateDebounceTimer = setTimeout(() => {
                     translateDebounceTimer = null;
@@ -1506,6 +1536,10 @@ export function onSpicyLyricsClose(): void {
     if (translateDebounceTimer) {
         clearTimeout(translateDebounceTimer);
         translateDebounceTimer = null;
+    }
+    if (rerenderDebounceTimer) {
+        clearTimeout(rerenderDebounceTimer);
+        rerenderDebounceTimer = null;
     }
     state.isTranslating = false;
     if (lyricsObserver) {

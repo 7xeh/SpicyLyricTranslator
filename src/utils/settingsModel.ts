@@ -5,7 +5,7 @@ import { SUPPORTED_LANGUAGES, setPreferredApi } from './translator';
 import type { ApiPreference, CustomApiFormat } from './translator';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
-export type SettingsEffect = 'reapplyTranslations' | 'providerVisibility' | 'qualityIndicatorClass' | 'vocabularyModeClass' | 'connectionIndicatorClass';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'qualityIndicatorClass' | 'vocabularyModeClass' | 'connectionIndicatorClass';
 
 export interface SettingsOption {
     value: string;
@@ -55,7 +55,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'target-language',
         defaultValue: 'en',
-        options: SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name }))
+        options: SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name })),
+        effects: ['retranslate']
     },
     {
         id: 'overlay-mode',

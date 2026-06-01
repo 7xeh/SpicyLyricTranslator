@@ -3,7 +3,7 @@ import { state } from './state';
 import { clearTranslationCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
-import { reapplyTranslations } from './core';
+import { reapplyTranslations, forceRetranslate } from './core';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
@@ -174,6 +174,9 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
     }
     if (effects.includes('reapplyTranslations')) {
         reapplyTranslations();
+    }
+    if (effects.includes('retranslate')) {
+        forceRetranslate();
     }
 }
 
