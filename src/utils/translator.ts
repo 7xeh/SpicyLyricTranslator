@@ -2021,7 +2021,14 @@ async function translateLyricsInner(
 
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== 'auto' && detectedSourceLang !== 'unknown' && isSameLanguage(detectedSourceLang, targetLang);
     const confidentLineLangs = Array.from(lineLanguages);
-    const hasConfidentNonTargetLine = confidentLineLangs.some(lang => lang && !isSameLanguage(lang, targetLang));
+    const NON_LATIN_SCRIPT_RE = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿЀ-ӿ؀-ۿ֐-׿฀-๿ऀ-ॿͰ-Ͽ]/;
+    const targetBase = targetLang.toLowerCase().split('-')[0].split('_')[0];
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ru', 'uk', 'bg', 'sr', 'mk', 'be', 'ar', 'he', 'th', 'hi', 'el'].includes(targetBase);
+    const hasConfidentNonTargetLine = lines.some(line => {
+        if (!line || !line.trim()) return false;
+        const hasNonLatin = NON_LATIN_SCRIPT_RE.test(line);
+        return targetIsLatin ? hasNonLatin : (!hasNonLatin && /[A-Za-z]/.test(line));
+    });
     const sameLangFromLines = !hasMixedSourceLanguages && confidentLineLangs.length > 0 && confidentLineLangs.every(lang => isSameLanguage(lang, targetLang));
     let sameLangFromCorpus = false;
     if (!sameLangFromHint && !sameLangFromLines) {

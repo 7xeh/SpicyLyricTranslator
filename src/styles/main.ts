@@ -1,4 +1,21 @@
 export const styles = `
+:root {
+    --slt-radius: 16px;
+    --slt-radius-sm: 11px;
+    --slt-hairline: rgba(255, 255, 255, 0.07);
+    --slt-hairline-strong: rgba(255, 255, 255, 0.14);
+    --slt-surface: rgba(255, 255, 255, 0.04);
+    --slt-surface-hover: rgba(255, 255, 255, 0.07);
+    --slt-text: hsla(0, 0%, 100%, 0.92);
+    --slt-text-2: hsla(0, 0%, 100%, 0.58);
+    --slt-text-3: hsla(0, 0%, 100%, 0.4);
+    --slt-accent: var(--spice-button-active, #1db954);
+    --slt-ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --slt-gloss:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
 @keyframes spicy-translate-spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }

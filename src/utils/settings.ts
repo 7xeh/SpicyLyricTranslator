@@ -4,6 +4,7 @@ import { clearTranslationCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
 import { reapplyTranslations, forceRetranslate } from './core';
+import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
@@ -51,7 +52,7 @@ export function bindModalCacheActions(container: ParentNode): void {
     const translationCacheButton = container.querySelector('#slt-clear-translation-cache') as HTMLButtonElement | null;
 
     viewSpicyLyricsCacheButton?.addEventListener('click', () => {
-        Spicetify.PopupModal?.hide();
+        hideModal();
         setTimeout(() => openSpicyLyricsCacheViewer(), 150);
     });
 
@@ -521,31 +522,70 @@ function createSettingsUI(): HTMLElement {
     container.innerHTML = `
         <style>
             .slt-settings-container {
-                padding: 18px 22px 22px;
+                --slt-radius: 16px;
+                --slt-radius-sm: 11px;
+                --slt-hairline: rgba(255, 255, 255, 0.07);
+                --slt-hairline-strong: rgba(255, 255, 255, 0.14);
+                --slt-surface: rgba(255, 255, 255, 0.035);
+                --slt-surface-hover: rgba(255, 255, 255, 0.06);
+                --slt-text: hsla(0, 0%, 100%, 0.92);
+                --slt-text-2: hsla(0, 0%, 100%, 0.58);
+                --slt-text-3: hsla(0, 0%, 100%, 0.4);
+                --slt-accent: var(--spice-button-active, #1db954);
+                --slt-ease: cubic-bezier(0.32, 0.72, 0, 1);
+                --slt-gloss:
+                    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+                padding: 2px 2px 4px;
                 display: flex;
                 flex-direction: column;
-                gap: 10px;
-                width: min(680px, 90vw);
+                gap: 2px;
+                width: 100%;
                 max-width: 100%;
-                max-height: 72vh;
                 box-sizing: border-box;
-                overflow-x: hidden;
-                overflow-y: auto;
+                color: var(--slt-text);
+                -webkit-font-smoothing: antialiased;
             }
+            @keyframes slt-modal-rise {
+                from { opacity: 0; transform: translateY(8px) scale(0.992); }
+                to { opacity: 1; transform: none; }
+            }
+            .slt-settings-container::-webkit-scrollbar { width: 9px; }
+            .slt-settings-container::-webkit-scrollbar-track { background: transparent; }
+            .slt-settings-container::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 999px;
+                border: 2px solid transparent;
+                background-clip: padding-box;
+            }
+            .slt-settings-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
             .slt-modal-field {
                 grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
                 align-items: center;
                 gap: 18px;
-                padding: 9px 0;
+                padding: 13px 14px;
+                border-radius: var(--slt-radius-sm);
+                position: relative;
+                transition: background 0.2s var(--slt-ease);
             }
+            .slt-modal-field:hover { background: var(--slt-surface); }
+            .slt-modal-field::after {
+                content: '';
+                position: absolute;
+                left: 14px; right: 14px; bottom: 0;
+                height: 1px;
+                background: var(--slt-hairline);
+            }
+            .slt-modal-field:hover::after { opacity: 0; }
             .slt-modal-field-copy {
                 min-width: 0;
             }
             .slt-modal-field-copy label {
                 display: block;
                 font-size: 14px;
-                font-weight: 500;
-                color: var(--spice-text);
+                font-weight: 600;
+                letter-spacing: 0.005em;
+                color: var(--slt-text);
                 line-height: 1.35;
             }
             .slt-modal-field-control {
@@ -558,24 +598,50 @@ function createSettingsUI(): HTMLElement {
             .slt-modal-field input[type="password"] {
                 width: 100%;
                 min-height: 40px;
-                padding: 8px 12px;
-                border-radius: 4px;
-                border: 1px solid var(--spice-button-disabled);
-                background: var(--spice-card);
-                color: var(--spice-text);
+                padding: 9px 13px;
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
+                background-color: var(--slt-surface);
+                color: var(--slt-text);
                 font-size: 14px;
+                font-weight: 500;
                 box-sizing: border-box;
+                transition: border-color 0.2s var(--slt-ease), background-color 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease);
+                cursor: pointer;
+            }
+            .slt-modal-field select {
+                appearance: none;
+                -webkit-appearance: none;
+                padding-right: 38px;
+                background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+                background-repeat: no-repeat;
+                background-position: right 13px center;
+                background-size: 14px 14px;
+            }
+            .slt-modal-field select option,
+            .slt-modal-field select optgroup {
+                background-color: #1c1c20;
+                color: var(--slt-text);
+                font-weight: 500;
+            }
+            .slt-modal-field select:hover,
+            .slt-modal-field input[type="text"]:hover,
+            .slt-modal-field input[type="password"]:hover {
+                background-color: var(--slt-surface-hover);
+                border-color: rgba(255, 255, 255, 0.22);
             }
             .slt-modal-field select:focus,
             .slt-modal-field input[type="text"]:focus,
             .slt-modal-field input[type="password"]:focus {
                 outline: none;
-                border-color: var(--spice-button);
+                border-color: rgba(255, 255, 255, 0.4);
+                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
             }
             .slt-toggle {
                 position: relative;
-                width: 40px;
-                height: 20px;
+                width: 46px;
+                height: 27px;
+                flex-shrink: 0;
             }
             .slt-toggle input {
                 opacity: 0;
@@ -589,70 +655,85 @@ function createSettingsUI(): HTMLElement {
                 left: 0;
                 right: 0;
                 bottom: 0;
-                background-color: var(--spice-button-disabled);
-                transition: .3s;
-                border-radius: 20px;
+                background-color: rgba(255, 255, 255, 0.1);
+                box-shadow: var(--slt-gloss);
+                transition: background-color 0.28s var(--slt-ease);
+                border-radius: 999px;
             }
             .slt-toggle-slider:before {
                 position: absolute;
                 content: "";
-                height: 16px;
-                width: 16px;
-                left: 2px;
-                bottom: 2px;
-                background-color: white;
-                transition: .3s;
+                height: 21px;
+                width: 21px;
+                left: 3px;
+                bottom: 3px;
+                background-color: #fff;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+                transition: transform 0.28s var(--slt-ease);
                 border-radius: 50%;
             }
             .slt-toggle input:checked + .slt-toggle-slider {
-                background-color: var(--spice-button);
+                background-color: var(--slt-accent);
             }
             .slt-toggle input:checked + .slt-toggle-slider:before {
-                transform: translateX(20px);
+                transform: translateX(19px);
             }
             .slt-button {
-                padding: 9px 18px;
-                border-radius: 500px;
-                border: none;
-                background: var(--spice-button);
-                color: var(--spice-text);
+                padding: 10px 20px;
+                border-radius: 999px;
+                border: 1px solid transparent;
+                background: rgba(255, 255, 255, 0.92);
+                color: #000;
                 font-size: 13px;
                 font-weight: 700;
+                letter-spacing: 0.01em;
                 cursor: pointer;
-                transition: transform 0.1s, background 0.2s;
+                transition: transform 0.18s var(--slt-ease), background 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
                 white-space: nowrap;
+                box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
             }
             .slt-button:hover {
-                transform: scale(1.02);
-                background: var(--spice-button-active);
+                transform: translateY(-1px);
+                background: #fff;
+                box-shadow: 0 6px 18px -4px rgba(0, 0, 0, 0.5);
             }
             .slt-button:active {
-                transform: scale(0.98);
+                transform: translateY(0) scale(0.985);
             }
             .slt-button.secondary {
-                background: var(--spice-card);
-                border: 1px solid var(--spice-button-disabled);
+                background: var(--slt-surface);
+                border: 1px solid var(--slt-hairline-strong);
+                color: var(--slt-text);
+                box-shadow: var(--slt-gloss);
+            }
+            .slt-button.secondary:hover {
+                background: var(--slt-surface-hover);
+                border-color: rgba(255, 255, 255, 0.28);
+                box-shadow: var(--slt-gloss), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
             }
             .slt-button.danger {
-                background: rgba(255, 80, 80, 0.18);
-                border: 1px solid rgba(255, 80, 80, 0.35);
-                color: #ff7373;
+                background: rgba(255, 90, 90, 0.14);
+                border: 1px solid rgba(255, 90, 90, 0.32);
+                color: #ff8a8a;
+                box-shadow: none;
             }
             .slt-button.danger:hover {
-                background: rgba(255, 80, 80, 0.3);
+                background: rgba(255, 90, 90, 0.26);
+                border-color: rgba(255, 90, 90, 0.5);
                 color: #fff;
             }
             .slt-button:disabled {
                 cursor: default;
-                opacity: 0.65;
+                opacity: 0.5;
                 transform: none;
+                box-shadow: none;
             }
             .slt-description {
                 display: block;
-                font-size: 12px;
-                color: var(--spice-subtext);
+                font-size: 12.5px;
+                color: var(--slt-text-3);
                 margin-top: 3px;
-                line-height: 1.35;
+                line-height: 1.4;
             }
             .slt-modal-actions,
             .slt-modal-footer {
@@ -661,12 +742,14 @@ function createSettingsUI(): HTMLElement {
                 justify-content: space-between;
                 gap: 12px;
                 flex-wrap: wrap;
-                padding-top: 12px;
+                padding-top: 16px;
             }
             .slt-modal-actions {
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
-                margin-top: 4px;
+                border-top: 1px solid var(--slt-hairline);
+                margin-top: 10px;
+                padding: 16px 6px 4px;
             }
+            .slt-modal-footer { padding: 4px 6px 0; }
             .slt-modal-cache-actions {
                 display: flex;
                 gap: 8px;
@@ -743,14 +826,14 @@ function createSettingsUI(): HTMLElement {
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
 
         viewCacheButton?.addEventListener('click', () => {
-            Spicetify.PopupModal?.hide();
+            hideModal();
             setTimeout(() => openCacheViewer(), 150);
         });
         
         viewChangelogPopupButton?.addEventListener('click', async () => {
             viewChangelogPopupButton.textContent = 'Loading...';
             viewChangelogPopupButton.disabled = true;
-            Spicetify.PopupModal?.hide();
+            hideModal();
             try {
                 await showCurrentChangelog();
             } catch (e) {
@@ -770,7 +853,7 @@ function createSettingsUI(): HTMLElement {
             try {
                 const updateInfo = await getUpdateInfo();
                 if (updateInfo?.hasUpdate) {
-                    Spicetify.PopupModal?.hide();
+                    hideModal();
                     setTimeout(() => checkForUpdates(true), 150);
                 } else {
                     try {
@@ -1018,7 +1101,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
-                padding: 18px 22px 22px;
+                padding: 2px 2px 4px;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: hidden;
@@ -1033,9 +1116,9 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                 gap: 8px;
                 padding: 12px 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
             }
             .slt-lyrics-info-cell {
                 display: flex;
@@ -1103,11 +1186,11 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 flex-direction: column;
                 gap: 1px;
                 background: rgba(255, 255, 255, 0.04);
-                border-radius: 8px;
+                border-radius: var(--slt-radius-sm);
                 overflow-y: auto;
                 overflow-x: hidden;
                 max-height: min(54vh, 560px);
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                border: 1px solid var(--slt-hairline-strong);
             }
             #slt-lyrics-rows {
                 display: flex;
@@ -1121,7 +1204,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             }
             .slt-lyrics-col {
                 padding: 10px 12px;
-                background: var(--spice-card);
+                background: rgba(255, 255, 255, 0.045);
                 color: var(--spice-text);
                 font-size: 13px;
                 line-height: 1.4;
@@ -1180,7 +1263,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
     if (backToCacheButton) backToCacheButton.textContent = backToCacheLabel;
 
     if (Spicetify.PopupModal) {
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Cached Lyrics Viewer',
             content,
             isLarge: true
@@ -1189,7 +1272,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
 
     const backToCacheBtn = content.querySelector('#slt-lyrics-back-to-cache') as HTMLButtonElement;
     backToCacheBtn?.addEventListener('click', () => {
-        Spicetify.PopupModal?.hide();
+        hideModal();
         setTimeout(() => openCacheViewer(), 120);
     });
 
@@ -1273,11 +1356,11 @@ function createCacheViewerUI(): HTMLElement {
     container.innerHTML = `
         <style>
             .slt-cache-viewer {
-                padding: 18px 22px 22px;
+                padding: 2px 2px 4px;
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
-                width: min(680px, 90vw);
+                width: 100%;
                 max-width: 100%;
                 max-height: 72vh;
                 box-sizing: border-box;
@@ -1288,9 +1371,9 @@ function createCacheViewerUI(): HTMLElement {
                 grid-template-columns: repeat(2, 1fr);
                 gap: 12px;
                 padding: 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
             }
             .slt-stat {
                 display: flex;
@@ -1323,9 +1406,9 @@ function createCacheViewerUI(): HTMLElement {
                 grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
                 padding: 12px 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
                 gap: 12px;
                 min-width: 0;
             }
@@ -1454,8 +1537,8 @@ function createCacheViewerUI(): HTMLElement {
                 padding: 24px;
                 color: var(--spice-subtext);
                 font-size: 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
             }
             .slt-cache-actions {
                 display: flex;
@@ -1574,7 +1657,7 @@ function createCacheViewerUI(): HTMLElement {
     setTimeout(() => {
         const backToSettingsBtn = container.querySelector('#slt-cache-back-to-settings') as HTMLButtonElement;
         backToSettingsBtn?.addEventListener('click', () => {
-            Spicetify.PopupModal?.hide();
+            hideModal();
             setTimeout(() => openSettingsModal(), 120);
         });
 
@@ -1615,7 +1698,7 @@ function createCacheViewerUI(): HTMLElement {
                 button.textContent = 'Loading...';
 
                 try {
-                    Spicetify.PopupModal?.hide();
+                    hideModal();
                     await new Promise(resolve => setTimeout(resolve, 120));
                     await openCachedLyricsViewer(uri, lang, sourceLang);
                 } catch (error) {
@@ -1682,7 +1765,7 @@ function createCacheViewerUI(): HTMLElement {
 
 function openCacheViewer(): void {
     if (Spicetify.PopupModal) {
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Translation Cache',
             content: createCacheViewerUI(),
             isLarge: true
@@ -1784,9 +1867,9 @@ function openCacheViewer(): void {
                 grid-template-columns: repeat(2, 1fr);
                 gap: 12px;
                 padding: 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
             }
             .slt-stat {
                 display: flex;
@@ -1819,9 +1902,9 @@ function openCacheViewer(): void {
                 grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
                 padding: 12px 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
                 gap: 12px;
                 min-width: 0;
             }
@@ -1942,8 +2025,8 @@ function openCacheViewer(): void {
                 padding: 24px;
                 color: var(--spice-subtext);
                 font-size: 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
             }
             .slt-cache-actions {
                 display: flex;
@@ -2050,7 +2133,7 @@ function openCacheViewer(): void {
     setTimeout(() => {
         const backToSettingsBtn = container.querySelector('#slt-sl-cache-back-to-settings') as HTMLButtonElement;
         backToSettingsBtn?.addEventListener('click', () => {
-            Spicetify.PopupModal?.hide();
+            hideModal();
             setTimeout(() => openSettingsModal(), 120);
         });
 
@@ -2085,7 +2168,7 @@ function openCacheViewer(): void {
                 const idxAttr = itemEl?.dataset.index;
                 const idx = idxAttr ? parseInt(idxAttr, 10) : -1;
                 if (idx < 0 || idx >= cacheItems.length) return;
-                Spicetify.PopupModal?.hide();
+                hideModal();
                 setTimeout(() => openSpicyLyricsEntryInspector(cacheItems[idx]), 120);
             });
         });
@@ -2206,7 +2289,7 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
-                padding: 18px 22px 22px;
+                padding: 2px 2px 4px;
                 box-sizing: border-box;
                 overflow-x: hidden;
                 overflow-y: hidden;
@@ -2216,9 +2299,9 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
                 grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                 gap: 8px;
                 padding: 12px 14px;
-                background: var(--spice-card);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.045);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
             }
             .slt-lyrics-info-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
             .slt-lyrics-info-label {
@@ -2246,8 +2329,8 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
                 max-height: 48vh;
                 overflow: auto;
                 background: rgba(0, 0, 0, 0.35);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
                 padding: 12px 14px;
                 font-family: 'JetBrains Mono', 'Consolas', monospace;
                 font-size: 12px;
@@ -2259,9 +2342,9 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
             .slt-lyrics-sample {
                 font-size: 13px;
                 color: var(--spice-text);
-                background: var(--spice-card);
-                border: 1px solid rgba(255, 255, 255, 0.06);
-                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.045);
+                border: 1px solid var(--slt-hairline-strong);
+                border-radius: var(--slt-radius-sm);
                 padding: 10px 12px;
                 line-height: 1.4;
             }
@@ -2290,7 +2373,7 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
     `;
 
     if (Spicetify.PopupModal) {
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Spicy Lyrics Entry',
             content,
             isLarge: true
@@ -2299,7 +2382,7 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
 
     const backBtn = content.querySelector('#slt-sl-entry-back') as HTMLButtonElement | null;
     backBtn?.addEventListener('click', () => {
-        Spicetify.PopupModal?.hide();
+        hideModal();
         setTimeout(() => openSpicyLyricsCacheViewer(), 120);
     });
 
@@ -2328,7 +2411,7 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
 
 async function openSpicyLyricsCacheViewer(): Promise<void> {
     if (Spicetify.PopupModal) {
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Spicy Lyrics Cache',
             content: (() => {
                 const div = document.createElement('div');
@@ -2342,7 +2425,7 @@ async function openSpicyLyricsCacheViewer(): Promise<void> {
         
         const ui = await createSpicyLyricsCacheViewerUI();
         
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Spicy Lyrics Cache',
             content: ui,
             isLarge: true
@@ -2352,7 +2435,7 @@ async function openSpicyLyricsCacheViewer(): Promise<void> {
 
 export function openSettingsModal(): void {
     if (Spicetify.PopupModal) {
-        Spicetify.PopupModal.display({
+        displayModal({
             title: 'Spicy Lyric Translator Settings',
             content: createSettingsUI(),
             isLarge: true
