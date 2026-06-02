@@ -1273,16 +1273,27 @@ async function fetchChangelogForVersion(version: string): Promise<string> {
 
 export async function showPostUpdateChangelog(): Promise<void> {
     const currentVersion = CURRENT_VERSION;
+    const currentHash = getContentHash();
     let targetVersion: string | null = null;
     let changelog: string | null = null;
 
-    const hotfixDetected = storage.get('hotfix-detected');
-    if (hotfixDetected) {
-        storage.remove('hotfix-detected');
+    const persistKnown = (): void => {
+        storage.set('last-known-version', currentVersion);
+        if (currentHash) storage.set('last-known-hash', currentHash);
+    };
+
+    const showHotfix = async (): Promise<void> => {
+        persistKnown();
         await new Promise(r => setTimeout(r, 2000));
         const hashShort = getContentHashShort();
         const hotfixChangelog = await fetchChangelogForVersion(currentVersion);
         showChangelogModal(currentVersion, hotfixChangelog || '', { isHotfix: true, hashShort });
+    };
+
+    const hotfixDetected = storage.get('hotfix-detected');
+    if (hotfixDetected) {
+        storage.remove('hotfix-detected');
+        await showHotfix();
         return;
     }
 
@@ -1297,7 +1308,7 @@ export async function showPostUpdateChangelog(): Promise<void> {
             const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
             if (elapsed > 60 * 60 * 1000) {
                 storage.remove('pending-update-changelog');
-                storage.set('last-known-version', currentVersion);
+                persistKnown();
                 return;
             }
         }
@@ -1307,19 +1318,26 @@ export async function showPostUpdateChangelog(): Promise<void> {
         targetVersion = pendingVersion;
     } else {
         const lastKnownVersion = storage.get('last-known-version');
-        if (lastKnownVersion && lastKnownVersion !== currentVersion) {
+        const lastKnownHash = storage.get('last-known-hash');
+
+        if (!lastKnownVersion) {
+            persistKnown();
+            return;
+        }
+
+        if (lastKnownVersion !== currentVersion) {
             const lastParsed = parseVersion(lastKnownVersion);
             const currentParsed = parseVersion(currentVersion);
             if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
                 targetVersion = currentVersion;
             }
-        } else if (!lastKnownVersion) {
-            storage.set('last-known-version', currentVersion);
+        } else if (currentHash && lastKnownHash && lastKnownHash !== currentHash) {
+            await showHotfix();
             return;
         }
     }
 
-    storage.set('last-known-version', currentVersion);
+    persistKnown();
 
     if (!targetVersion) return;
 
