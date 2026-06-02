@@ -67,6 +67,8 @@ function lookupByContent<V>(map: Map<string, V>, text: string | undefined | null
         for (const [key, value] of map) {
             if (key.length < 4) continue;
             if (norm.includes(key) || key.includes(norm)) {
+                const ratio = Math.min(key.length, norm.length) / Math.max(key.length, norm.length);
+                if (ratio < 0.8) continue;
                 if (!best || key.length > best.key.length) {
                     best = { key, value };
                 }
@@ -611,7 +613,7 @@ function appendTranslationWordSpans(
 
     const originalWords = getWordUnits(originalLine);
     const ratio = translatedWords.length / Math.max(originalWords.length, 1);
-    const shouldAnimateLetters = wordClassName === 'slt-sync-word' && lineHasSyllableStructure(originalLine);
+    const shouldAnimateLetters = wordClassName === 'slt-sync-word' && lineHasLetterStructure(originalLine);
 
     translatedWords.forEach((word, wordIndex) => {
         const span = doc.createElement('span');
@@ -896,6 +898,18 @@ export function buildVocabularyPairs(originalText: string, translatedText: strin
         return alignJapaneseVocabularyPairs(sourceUnits, translatedWords, original, translated);
     }
 
+    const ratio = translatedWords.length / Math.max(sourceUnits.length, 1);
+    const NON_LATIN_REGEX = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/;
+    if (ratio < 0.7 || ratio > 1.45 || NON_LATIN_REGEX.test(original)) {
+        return [{
+            original,
+            translated,
+            confidence: 'low',
+            sourceIndex: 0,
+            translatedStart: 0
+        }];
+    }
+
     const pairCount = Math.min(sourceUnits.length, translatedWords.length);
     const originalChunks = distributeWords(sourceUnits, pairCount);
     const translatedChunks = distributeWords(translatedWords, pairCount);
@@ -987,8 +1001,12 @@ function distributeWords(words: string[], buckets: number): string[] {
     return result;
 }
 
-function lineHasSyllableStructure(line: Element): boolean {
-    return !!line.querySelector('.syllable, .letterGroup .letter, .word-group .syllable');
+function lineHasWordStructure(line: Element): boolean {
+    return !!line.querySelector('.word:not(.dot), .letterGroup, .word-group, .syllable');
+}
+
+function lineHasLetterStructure(line: Element): boolean {
+    return !!line.querySelector('.letterGroup .letter, .syllable .letter, .syllable');
 }
 
 function splitIntoGraphemes(text: string): string[] {
@@ -1194,7 +1212,7 @@ function fallbackToContinuousMultilineGradient(
     translationText: string,
     originalLine: Element
 ): void {
-    if (lineHasSyllableStructure(originalLine)) return;
+    if (lineHasWordStructure(originalLine)) return;
     if (!translationEl.querySelector(':scope > .slt-sync-word')) return;
     if (!hasWrappedSyncWords(translationEl)) return;
 
@@ -1522,6 +1540,12 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
     const isNotSung = originalLine.classList.contains('NotSung');
     const originalWordGradients = getOriginalWordGradients(originalLine);
     const overallProgress = getOverallWordGradientProgress(originalLine);
+
+    const originalText = originalLine.textContent || '';
+    const originalHasNonLatin = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/.test(originalText);
+    const wordRatio = translatedWords.length / Math.max(originalWordGradients.length, 1);
+    const useSmoothFill = originalHasNonLatin || wordRatio < 0.7 || wordRatio > 1.45;
+
     const PROGRESSION_SMOOTHING = 0.68;
     const PROGRESSION_SNAP_DELTA = 8;
     const LATCH_WHITE_THRESHOLD = 96;
@@ -1581,7 +1605,7 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
         } else {
             const mappedIndex = parseInt(wordEl.dataset.originalIndex || '-1', 10);
             const mappedGradient =
-                mappedIndex >= 0 && mappedIndex < originalWordGradients.length
+                !useSmoothFill && mappedIndex >= 0 && mappedIndex < originalWordGradients.length
                     ? originalWordGradients[mappedIndex]
                     : NaN;
 

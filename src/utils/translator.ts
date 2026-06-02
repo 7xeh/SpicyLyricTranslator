@@ -2021,6 +2021,7 @@ async function translateLyricsInner(
 
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== 'auto' && detectedSourceLang !== 'unknown' && isSameLanguage(detectedSourceLang, targetLang);
     const confidentLineLangs = Array.from(lineLanguages);
+    const hasConfidentNonTargetLine = confidentLineLangs.some(lang => lang && !isSameLanguage(lang, targetLang));
     const sameLangFromLines = !hasMixedSourceLanguages && confidentLineLangs.length > 0 && confidentLineLangs.every(lang => isSameLanguage(lang, targetLang));
     let sameLangFromCorpus = false;
     if (!sameLangFromHint && !sameLangFromLines) {
@@ -2033,11 +2034,15 @@ async function translateLyricsInner(
         }
     }
 
-    if (sameLangFromHint || sameLangFromLines || sameLangFromCorpus) {
+    if ((sameLangFromHint || sameLangFromLines || sameLangFromCorpus) && !hasConfidentNonTargetLine) {
         if (currentTrackUri && !skipTrackCache) {
             deleteTrackCache(currentTrackUri, targetLang);
         }
         return buildSameLanguagePassthrough(lines, targetLang, detectedSourceLang || targetLang);
+    }
+
+    if (hasConfidentNonTargetLine && detectedSourceLang && isSameLanguage(detectedSourceLang, targetLang)) {
+        detectedSourceLang = undefined;
     }
 
     if (currentTrackUri && !skipTrackCache) {
