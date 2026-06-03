@@ -1171,7 +1171,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 padding: 8px 14px;
                 border-radius: 500px;
                 border: none;
-                background: var(--spice-main-elevated);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss);
                 color: var(--spice-text);
                 font-size: 13px;
                 font-weight: 700;
@@ -1479,10 +1479,10 @@ function createCacheViewerUI(): HTMLElement {
             .slt-cache-delete {
                 min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 4px;
+                border-radius: 999px;
                 border: none;
-                background: rgba(255, 80, 80, 0.2);
-                color: #ff5050;
+                background: rgba(255, 90, 90, 0.14); border: 1px solid rgba(255, 90, 90, 0.32);
+                color: #ff8a8a;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
@@ -1491,7 +1491,7 @@ function createCacheViewerUI(): HTMLElement {
                 white-space: nowrap;
             }
             .slt-cache-delete:hover {
-                background: rgba(255, 80, 80, 0.4);
+                background: rgba(255, 90, 90, 0.26);
             }
             .slt-cache-item-actions {
                 display: flex;
@@ -1502,14 +1502,14 @@ function createCacheViewerUI(): HTMLElement {
             .slt-cache-action {
                 min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 4px;
+                border-radius: 999px;
                 border: none;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
                 transition: opacity 0.2s, background 0.2s;
                 color: var(--spice-text);
-                background: var(--spice-main-elevated);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss);
                 white-space: nowrap;
             }
             .slt-cache-action:hover {
@@ -1520,8 +1520,8 @@ function createCacheViewerUI(): HTMLElement {
                 padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
-                background: rgba(255, 80, 80, 0.2);
-                color: #ff5050;
+                background: rgba(255, 90, 90, 0.14); border: 1px solid rgba(255, 90, 90, 0.32);
+                color: #ff8a8a;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
@@ -1530,7 +1530,7 @@ function createCacheViewerUI(): HTMLElement {
                 text-align: center;
             }
             .slt-cache-delete-all:hover {
-                background: rgba(255, 80, 80, 0.4);
+                background: rgba(255, 90, 90, 0.26);
             }
             .slt-empty-cache {
                 text-align: center;
@@ -1554,7 +1554,7 @@ function createCacheViewerUI(): HTMLElement {
                 padding: 8px 14px;
                 border-radius: 500px;
                 border: none;
-                background: var(--spice-main-elevated);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss);
                 color: var(--spice-text);
                 font-size: 13px;
                 font-weight: 700;
@@ -1967,10 +1967,10 @@ function openCacheViewer(): void {
             .slt-cache-delete {
                 min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 4px;
+                border-radius: 999px;
                 border: none;
-                background: rgba(255, 80, 80, 0.2);
-                color: #ff5050;
+                background: rgba(255, 90, 90, 0.14); border: 1px solid rgba(255, 90, 90, 0.32);
+                color: #ff8a8a;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
@@ -1979,7 +1979,7 @@ function openCacheViewer(): void {
                 white-space: nowrap;
             }
             .slt-cache-delete:hover {
-                background: rgba(255, 80, 80, 0.4);
+                background: rgba(255, 90, 90, 0.26);
             }
             .slt-cache-item-actions {
                 display: flex;
@@ -1990,14 +1990,14 @@ function openCacheViewer(): void {
             .slt-cache-action {
                 min-height: 36px;
                 padding: 8px 14px;
-                border-radius: 4px;
+                border-radius: 999px;
                 border: none;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
                 transition: opacity 0.2s, background 0.2s;
                 color: var(--spice-text);
-                background: var(--spice-main-elevated);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss);
                 white-space: nowrap;
             }
             .slt-cache-action:hover {
@@ -2008,8 +2008,8 @@ function openCacheViewer(): void {
                 padding: 9px 18px;
                 border-radius: 500px;
                 border: none;
-                background: rgba(255, 80, 80, 0.2);
-                color: #ff5050;
+                background: rgba(255, 90, 90, 0.14); border: 1px solid rgba(255, 90, 90, 0.32);
+                color: #ff8a8a;
                 font-size: 13px;
                 font-weight: 700;
                 cursor: pointer;
@@ -2018,7 +2018,7 @@ function openCacheViewer(): void {
                 text-align: center;
             }
             .slt-cache-delete-all:hover {
-                background: rgba(255, 80, 80, 0.4);
+                background: rgba(255, 90, 90, 0.26);
             }
             .slt-empty-cache {
                 text-align: center;
@@ -2042,7 +2042,7 @@ function openCacheViewer(): void {
                 padding: 8px 14px;
                 border-radius: 500px;
                 border: none;
-                background: var(--spice-main-elevated);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss);
                 color: var(--spice-text);
                 font-size: 13px;
                 font-weight: 700;
@@ -2313,7 +2313,7 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
             .slt-lyrics-toolbar { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
             .slt-lyrics-back {
                 min-height: 36px; padding: 8px 14px; border-radius: 500px; border: none;
-                background: var(--spice-main-elevated); color: var(--spice-text);
+                background: var(--slt-surface); border: 1px solid var(--slt-hairline-strong); box-shadow: var(--slt-gloss); color: var(--spice-text);
                 font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
             }
             .slt-lyrics-back:hover { opacity: 0.85; }

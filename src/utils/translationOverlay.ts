@@ -613,7 +613,7 @@ function appendTranslationWordSpans(
 
     const originalWords = getWordUnits(originalLine);
     const ratio = translatedWords.length / Math.max(originalWords.length, 1);
-    const shouldAnimateLetters = wordClassName === 'slt-sync-word' && lineHasLetterStructure(originalLine);
+    const shouldAnimateLetters = false;
 
     translatedWords.forEach((word, wordIndex) => {
         const span = doc.createElement('span');
