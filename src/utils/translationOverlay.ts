@@ -274,32 +274,32 @@ function getPIPWindow(): Window | null {
 function getLyricLines(doc: Document): NodeListOf<Element> {
     const isPipDoc = !!doc.querySelector('.spicy-pip-wrapper');
     const excludeSelector = ':not(.musical-line):not(.bg-line)';
-    
+
     if (isPipDoc) {
         const pipLines = doc.querySelectorAll(`.spicy-pip-wrapper #SpicyLyricsPage .SpicyLyricsScrollContainer .line${excludeSelector}`);
         if (pipLines.length > 0) return pipLines;
-        
+
         const pipLinesAlt = doc.querySelectorAll(`.spicy-pip-wrapper .SpicyLyricsScrollContainer .line${excludeSelector}`);
         if (pipLinesAlt.length > 0) return pipLinesAlt;
-        
+
         const pipLinesFallback = doc.querySelectorAll(`.spicy-pip-wrapper .line${excludeSelector}`);
         if (pipLinesFallback.length > 0) return pipLinesFallback;
     }
-    
+
     const scrollContainerLines = doc.querySelectorAll(`#SpicyLyricsPage .SpicyLyricsScrollContainer .line${excludeSelector}`);
     if (scrollContainerLines.length > 0) return scrollContainerLines;
-    
+
     if (doc.body?.classList?.contains('SpicySidebarLyrics__Active')) {
         const sidebarLines = doc.querySelectorAll(`.Root__right-sidebar #SpicyLyricsPage .line${excludeSelector}`);
         if (sidebarLines.length > 0) return sidebarLines;
     }
-    
+
     const compactLines = doc.querySelectorAll(`#SpicyLyricsPage.ForcedCompactMode .line${excludeSelector}`);
     if (compactLines.length > 0) return compactLines;
 
     const lyricsContentLines = doc.querySelectorAll(`#SpicyLyricsPage .LyricsContent .line${excludeSelector}`);
     if (lyricsContentLines.length > 0) return lyricsContentLines;
-    
+
     return doc.querySelectorAll(`.SpicyLyricsScrollContainer .line${excludeSelector}, .LyricsContent .line${excludeSelector}, .LyricsContainer .line${excludeSelector}`);
 }
 
@@ -308,34 +308,34 @@ function findLyricsContainer(doc: Document): Element | null {
     if (pipWrapper) {
         const pipScrollContainer = pipWrapper.querySelector('#SpicyLyricsPage .SpicyLyricsScrollContainer');
         if (pipScrollContainer) return pipScrollContainer;
-        
+
         const pipLyricsContent = pipWrapper.querySelector('#SpicyLyricsPage .LyricsContent');
         if (pipLyricsContent) return pipLyricsContent;
-        
+
         const pipPage = pipWrapper.querySelector('#SpicyLyricsPage');
         if (pipPage) return pipPage;
-        
+
         return pipWrapper;
     }
-    
+
     const scrollContainer = doc.querySelector('#SpicyLyricsPage .SpicyLyricsScrollContainer');
     if (scrollContainer) return scrollContainer;
-    
+
     if (doc.body?.classList?.contains('SpicySidebarLyrics__Active')) {
         const sidebarContainer = doc.querySelector('.Root__right-sidebar #SpicyLyricsPage .SpicyLyricsScrollContainer') ||
                                  doc.querySelector('.Root__right-sidebar #SpicyLyricsPage .LyricsContent');
         if (sidebarContainer) return sidebarContainer;
     }
-    
-    return doc.querySelector('#SpicyLyricsPage .LyricsContent') || 
-           doc.querySelector('.LyricsContent') || 
+
+    return doc.querySelector('#SpicyLyricsPage .LyricsContent') ||
+           doc.querySelector('.LyricsContent') ||
            doc.querySelector('.LyricsContainer');
 }
 
 function extractLineText(line: Element): string {
     const wordGroups = line.querySelectorAll(':scope > .word-group');
     const directWords = line.querySelectorAll(':scope > .word:not(.dot), :scope > .letterGroup');
-    
+
     if (wordGroups.length > 0 || directWords.length > 0) {
         const parts: string[] = [];
         const children = line.children;
@@ -354,12 +354,12 @@ function extractLineText(line: Element): string {
                 continue;
             }
         }
-        
+
         if (parts.length > 0) {
             return parts.join(' ').replace(/\s+/g, ' ').trim();
         }
     }
-    
+
     const words = line.querySelectorAll('.word:not(.dot), .letterGroup');
     if (words.length > 0) {
         const wordUnits = Array.from(words).filter(w => {
@@ -369,14 +369,14 @@ function extractLineText(line: Element): string {
         });
         return wordUnits.map(w => w.textContent?.trim() || '').join(' ').replace(/\s+/g, ' ').trim();
     }
-    
+
     return line.textContent?.trim() || '';
 }
 
 function getWordUnits(line: Element): Element[] {
     const units: Element[] = [];
     const allElements = line.querySelectorAll('.word:not(.dot), .letterGroup, .syllable');
-    
+
     for (const el of Array.from(allElements)) {
         if (el.closest('.letterGroup') && !el.classList.contains('letterGroup')) {
             continue;
@@ -392,7 +392,7 @@ function getWordUnits(line: Element): Element[] {
             units.push(el);
         }
     }
-    
+
     return units;
 }
 
@@ -403,11 +403,11 @@ function isLineActive(line: Element): boolean {
     if (classList.contains('active')) return true;
     if (classList.contains('current')) return true;
     if (classList.contains('is-active')) return true;
-    
+
     if (!classList.contains('Sung') && !classList.contains('NotSung') && !classList.contains('musical-line')) {
         return true;
     }
-    
+
     return line.classList.contains('Active') ||
            line.classList.contains('playing') ||
            line.getAttribute('data-active') === 'true' ||
@@ -961,7 +961,6 @@ function appendVocabularyPairs(
         pair.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
         pair.dataset.wordIndex = globalWordIndex.toString();
 
-        // Translated word(s) — gradient-synced span
         const chunkWords = splitTranslatedWords(vocabPair.translated);
         const transSpan = doc.createElement('span');
         transSpan.className = 'slt-vocab-translated';
@@ -970,7 +969,6 @@ function appendVocabularyPairs(
 
         globalWordIndex += chunkWords.length;
 
-        // Original annotation — blurred below
         const origSpan = doc.createElement('span');
         origSpan.className = 'slt-vocab-original';
         origSpan.textContent = vocabPair.original;
@@ -983,12 +981,10 @@ function appendVocabularyPairs(
 
 function distributeWords(words: string[], buckets: number): string[] {
     if (buckets >= words.length) {
-        // More buckets than words: pad with empty at the end (shouldn't happen with our logic)
         const result = words.map(w => w);
         while (result.length < buckets) result.push('');
         return result;
     }
-    // Fewer buckets than words: distribute extras across the first N buckets
     const base = Math.floor(words.length / buckets);
     const extra = words.length % buckets;
     const result: string[] = [];
@@ -1103,7 +1099,6 @@ function updateSyncWordLetterStates(
     });
 }
 
-
 function getClickableWordElements(line: Element): Element[] {
     const words = Array.from(line.querySelectorAll('.word:not(.dot)'));
     return words.length > 0 ? words : Array.from(line.querySelectorAll('.letterGroup'));
@@ -1113,15 +1108,15 @@ export function distributeTranslationText(translationText: string, wordElements:
     const translationWords = translationText.split(/\s+/).filter(w => w.length > 0);
     const numElements = wordElements.length;
     const numTranslation = translationWords.length;
-    
+
     if (numElements === 0) return;
-    
+
     wordElements.forEach(el => {
         if ((el as HTMLElement).dataset.sltOriginalHtml === undefined) {
             (el as HTMLElement).dataset.sltOriginalHtml = el.innerHTML;
         }
     });
-    
+
     if (numTranslation <= numElements) {
         for (let i = 0; i < numElements; i++) {
             if (i < numTranslation) {
@@ -1134,7 +1129,7 @@ export function distributeTranslationText(translationText: string, wordElements:
         const wordsPerElement = Math.floor(numTranslation / numElements);
         const extraWords = numTranslation % numElements;
         let wordIdx = 0;
-        
+
         for (let i = 0; i < numElements; i++) {
             const count = wordsPerElement + (i < extraWords ? 1 : 0);
             const chunk = translationWords.slice(wordIdx, wordIdx + count);
@@ -1153,13 +1148,13 @@ export function restoreReplacedLine(line: Element): void {
             delete (el as HTMLElement).dataset.sltOriginalHtml;
         }
     });
-    
+
     const originalText = (line as HTMLElement).dataset.sltOriginalText;
     if (originalText !== undefined) {
         line.textContent = originalText;
         delete (line as HTMLElement).dataset.sltOriginalText;
     }
-    
+
     delete (line as HTMLElement).dataset.sltReplacedWith;
     line.classList.remove('spicy-translated');
 }
@@ -1177,12 +1172,12 @@ function cleanupInterleavedTracking(): void {
         cancelAnimationFrame(interleavedAnimationFrame);
         interleavedAnimationFrame = null;
     }
-    
+
     if (interleavedScrollHandler) {
         const docs = [document];
         const pipWin = getPIPWindow();
         if (pipWin) docs.push(pipWin.document);
-        
+
         docs.forEach(doc => {
             const container = findLyricsContainer(doc);
             if (container) {
@@ -1192,7 +1187,7 @@ function cleanupInterleavedTracking(): void {
         window.removeEventListener('resize', interleavedScrollHandler);
         interleavedScrollHandler = null;
     }
-    
+
     if (interleavedResizeObserver) {
         interleavedResizeObserver.disconnect();
         interleavedResizeObserver = null;
@@ -1378,21 +1373,19 @@ function applyInterleavedMode(doc: Document): void {
 
 function initOverlayContainer(doc: Document): HTMLElement | null {
     let container = doc.getElementById('spicy-translate-overlay');
-    
+
     if (!container) {
         container = doc.createElement('div');
         container.id = 'spicy-translate-overlay';
         container.className = 'spicy-translate-overlay';
     }
-    
+
     container.className = `spicy-translate-overlay overlay-mode-${currentConfig.mode}`;
     container.style.setProperty('--slt-overlay-opacity', currentConfig.opacity.toString());
     container.style.setProperty('--slt-overlay-font-scale', currentConfig.fontSize.toString());
-    
+
     return container;
 }
-
-
 
 const MIRRORED_LINE_STYLE_PROPS = [
     '--gradient-position',
@@ -1698,8 +1691,6 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
     return true;
 }
 
-
-
 function updateWordSyncStates(doc: Document): void {
     if (!isOverlayEnabled) return;
 
@@ -1792,7 +1783,7 @@ function syncBlurToTranslations(doc: Document): void {
 
 function renderTranslations(doc: Document): void {
     if (!isOverlayEnabled || (translationMap.size === 0 && !hasContentData())) return;
-    
+
     switch (currentConfig.mode) {
         case 'replace':
             applyReplaceMode(doc);
@@ -1816,7 +1807,7 @@ function isDocumentValid(doc: Document): boolean {
 
 function onActiveLineChanged(doc: Document): void {
     if (!isOverlayEnabled) return;
-    
+
     if (!isDocumentValid(doc)) {
         const observer = activeLineObservers.get(doc);
         if (observer) {
@@ -1825,13 +1816,13 @@ function onActiveLineChanged(doc: Document): void {
         }
         return;
     }
-    
+
     const now = Date.now();
     if (now - lastActiveLineUpdate < ACTIVE_LINE_THROTTLE_MS) {
         return;
     }
     lastActiveLineUpdate = now;
-    
+
     try {
         if (currentConfig.mode === 'interleaved' || currentConfig.mode === 'replace') {
             doc.querySelectorAll('.slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line').forEach(el => {
@@ -1861,7 +1852,7 @@ function syncLoop(): void {
         onActiveLineChanged(document);
         updateWordSyncStates(document);
         syncBlurToTranslations(document);
-        
+
         const pipWindow = getPIPWindow();
         if (pipWindow) {
             try {
@@ -1879,7 +1870,7 @@ function syncLoop(): void {
                     onActiveLineChanged(pipDoc);
                     updateWordSyncStates(pipDoc);
                     syncBlurToTranslations(pipDoc);
-                    
+
                     if (!activeLineObservers.has(pipDoc)) {
                         setupActiveLineObserver(pipDoc);
                     }
@@ -1888,7 +1879,7 @@ function syncLoop(): void {
             }
         }
     } catch (e) { }
-    
+
     activeSyncRafId = requestAnimationFrame(syncLoop);
 }
 
@@ -1913,37 +1904,37 @@ function setupActiveLineObserver(doc: Document): void {
         if (!isDocumentValid(doc)) {
             return;
         }
-        
+
         const existingObserver = activeLineObservers.get(doc);
         if (existingObserver) {
             existingObserver.disconnect();
             activeLineObservers.delete(doc);
         }
-        
+
         let lyricsContainer = findLyricsContainer(doc);
-        
+
         if (!lyricsContainer && doc.body.classList.contains('SpicySidebarLyrics__Active')) {
             lyricsContainer = doc.querySelector('.Root__right-sidebar #SpicyLyricsPage');
         }
-        
+
         if (!lyricsContainer) {
             lyricsContainer = doc.querySelector('.spicy-pip-wrapper #SpicyLyricsPage');
         }
-        
+
         if (!lyricsContainer) {
             lyricsContainer = doc.querySelector('#SpicyLyricsPage');
         }
-        
+
         if (!lyricsContainer) {
             startActiveSyncInterval();
             return;
         }
-        
+
         const observer = new MutationObserver((mutations) => {
             try {
                 let activeChanged = false;
                 let structureChanged = false;
-                
+
                 for (const mutation of mutations) {
                     if (mutation.type === 'childList') {
                         structureChanged = true;
@@ -1959,26 +1950,26 @@ function setupActiveLineObserver(doc: Document): void {
                 if (structureChanged) {
                     resetDocCache(doc);
                 }
-                
+
                 if (activeChanged) {
                     onActiveLineChanged(doc);
                 }
             } catch (e) { }
         });
-        
+
         observer.observe(lyricsContainer, {
             attributes: true,
             attributeFilter: ['class', 'data-active', 'style'],
             subtree: true,
             childList: true
         });
-        
+
         activeLineObservers.set(doc, observer);
-        
+
         startActiveSyncInterval();
 
         setTimeout(() => onActiveLineChanged(doc), 50);
-        
+
     } catch (err) {
         warn('Failed to setup active line observer:', err);
         startActiveSyncInterval();
@@ -1989,23 +1980,23 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
     if (config) {
         currentConfig = { ...currentConfig, ...config };
     }
-    
+
     isOverlayEnabled = true;
-    
+
     initOverlayContainer(document);
     setupActiveLineObserver(document);
-    
+
     if (translationMap.size > 0) {
         renderTranslations(document);
     }
-    
+
     document.body.classList.add('slt-overlay-active');
 
     try {
         const qiVal = localStorage.getItem('spicy-lyric-translator:show-quality-indicator');
         document.body.classList.toggle('slt-hide-quality-indicator', qiVal === 'false');
     } catch {}
-    
+
     const pipWindow = getPIPWindow();
     if (pipWindow) {
         ensurePIPStyles(pipWindow.document);
@@ -2015,20 +2006,20 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
             renderTranslations(pipWindow.document);
         }
     }
-    
+
 }
 
 export function disableOverlay(): void {
     isOverlayEnabled = false;
-    
+
     cleanupInterleavedTracking();
     stopActiveSyncInterval();
-    
+
     activeLineObservers.forEach((observer, doc) => {
         observer.disconnect();
     });
     activeLineObservers.clear();
-    
+
     const cleanup = (doc: Document) => {
         lastRenderSigMap.delete(doc);
 
@@ -2037,7 +2028,7 @@ export function disableOverlay(): void {
 
         const interleavedOverlay = doc.getElementById('slt-interleaved-overlay');
         if (interleavedOverlay) interleavedOverlay.remove();
-        
+
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
@@ -2064,7 +2055,7 @@ export function disableOverlay(): void {
         doc.querySelectorAll('[data-slt-replaced-with]').forEach(el => {
             delete (el as HTMLElement).dataset.sltReplacedWith;
         });
-        
+
         doc.querySelectorAll('.spicy-translation-container').forEach(el => el.remove());
         doc.querySelectorAll('.spicy-hidden-original').forEach(el => {
             el.classList.remove('spicy-hidden-original');
@@ -2079,23 +2070,23 @@ export function disableOverlay(): void {
                 }
             }
         });
-        
+
         doc.querySelectorAll('.slt-overlay-parent, .spicy-translated').forEach(el => {
             el.classList.remove('slt-overlay-parent', 'spicy-translated');
         });
-        
+
         doc.querySelectorAll('.slt-sync-word').forEach(el => {
             el.classList.remove('slt-word-past', 'slt-word-active', 'slt-word-future');
         });
     };
-    
+
     cleanup(document);
-    
+
     const pipWindow = getPIPWindow();
     if (pipWindow) {
         cleanup(pipWindow.document);
     }
-    
+
     translationMap.clear();
     romanizationMap.clear();
     originalTextMap.clear();
@@ -2110,10 +2101,10 @@ export function disableOverlay(): void {
 
 export function updateOverlayContent(translations: Map<number, string>): void {
     translationMap = new Map(translations);
-    
+
     if (isOverlayEnabled) {
         renderTranslations(document);
-        
+
         const pipWindow = getPIPWindow();
         if (pipWindow) {
             renderTranslations(pipWindow.document);
@@ -2142,10 +2133,10 @@ export function clearOverlayContent(): void {
         doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
-        
+
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
-        
+
         doc.querySelectorAll('[data-slt-original-html]').forEach(el => {
             const original = (el as HTMLElement).dataset.sltOriginalHtml;
             if (original !== undefined) {
@@ -2163,15 +2154,15 @@ export function clearOverlayContent(): void {
         doc.querySelectorAll('[data-slt-replaced-with]').forEach(el => {
             delete (el as HTMLElement).dataset.sltReplacedWith;
         });
-        
+
         doc.querySelectorAll('.spicy-translation-container').forEach(el => el.remove());
         doc.querySelectorAll('.spicy-hidden-original').forEach(el => {
             el.classList.remove('spicy-hidden-original');
         });
     };
-    
+
     clearDoc(document);
-    
+
     const pipWindow = getPIPWindow();
     if (pipWindow) {
         clearDoc(pipWindow.document);
@@ -2188,22 +2179,21 @@ export function getOverlayConfig(): OverlayConfig {
 
 export function setOverlayConfig(config: Partial<OverlayConfig>): void {
     const wasEnabled = isOverlayEnabled;
-    
+
     const savedTranslations = new Map(translationMap);
-    
+
     if (wasEnabled) {
         disableOverlay();
     }
-    
+
     currentConfig = { ...currentConfig, ...config };
-    
+
     translationMap = savedTranslations;
-    
+
     if (wasEnabled) {
         enableOverlay();
     }
 }
-
 
 export function setLineTimingData(data: LyricLineData[]): void {
     lineTimingData = data;
@@ -2269,14 +2259,14 @@ function ensurePIPStyles(pipDoc: Document): void {
 
 export function initPIPOverlay(): void {
     if (!isOverlayEnabled) return;
-    
+
     const pipWindow = getPIPWindow();
     if (!pipWindow) return;
-    
+
     ensurePIPStyles(pipWindow.document);
     initOverlayContainer(pipWindow.document);
     setupActiveLineObserver(pipWindow.document);
-    
+
     if (translationMap.size > 0) {
         renderTranslations(pipWindow.document);
     }
@@ -2292,7 +2282,6 @@ body.slt-overlay-active .LyricsContent {}
     user-select: none;
     z-index: 10;
 }
-
 
 .spicy-pip-wrapper .slt-interleaved-translation {
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
@@ -2310,7 +2299,6 @@ body.slt-overlay-active .LyricsContent {}
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
 }
-
 
 .slt-interleaved-translation.slt-music-break {
     color: rgba(255, 255, 255, 0.35) !important;

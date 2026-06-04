@@ -80,26 +80,39 @@ function getLatencyClass(latencyMs: number): string {
     return 'slt-ci-horrible';
 }
 
+function formatUserCount(count: number): string {
+    if (!count || count < 0) return '0';
+    if (count < 1000) return String(count);
+    if (count < 1_000_000) {
+        const k = count / 1000;
+        return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}K`;
+    }
+    return `${Math.round((count / 1_000_000) * 10) / 10}M`;
+}
+
+function setLabel(button: Element, text: string): void {
+    button.setAttribute('aria-label', text);
+    button.setAttribute('title', text);
+}
+
 function createIndicatorElement(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'SLT_ConnectionIndicator';
     container.innerHTML = `
         <div class="slt-ci-button" aria-label="Connection Status">
-            <div class="slt-ci-dot"></div>
-            <div class="slt-ci-expanded">
-                <div class="slt-ci-stats-row">
-                    <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
-                    <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                        <span class="slt-ci-total-count">0</span>
-                    </span>
-                </div>
+            <span class="slt-ci-dot"></span>
+            <div class="slt-ci-meta">
+                <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
+                <span class="slt-ci-sep"></span>
+                <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <span class="slt-ci-total-count">0</span>
+                </span>
             </div>
         </div>
     `;
@@ -119,36 +132,39 @@ function updateUI(): void {
     dot.classList.remove('slt-ci-connecting', 'slt-ci-connected', 'slt-ci-error', 'slt-ci-great', 'slt-ci-ok', 'slt-ci-bad', 'slt-ci-horrible');
 
     switch (indicatorState.state) {
-        case 'connected':
+        case 'connected': {
             dot.classList.add('slt-ci-connected');
+            const latencyClass = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : '';
             if (indicatorState.latencyMs !== null) {
-                dot.classList.add(getLatencyClass(indicatorState.latencyMs));
+                dot.classList.add(latencyClass);
                 if (pingEl) {
                     pingEl.textContent = `${indicatorState.latencyMs}ms`;
-                    pingEl.className = `slt-ci-ping ${getLatencyClass(indicatorState.latencyMs)}`;
+                    pingEl.className = `slt-ci-ping ${latencyClass}`;
                 }
             }
-            if (totalCountEl) totalCountEl.textContent = `${indicatorState.totalUsers}`;
-            button.setAttribute('aria-label', `Connected · ${indicatorState.latencyMs}ms · ${indicatorState.totalUsers} installed`);
+            if (totalCountEl) totalCountEl.textContent = formatUserCount(indicatorState.totalUsers);
+            const ping = indicatorState.latencyMs !== null ? `${indicatorState.latencyMs}ms` : 'measuring…';
+            setLabel(button, `Connected · ${ping} · ${indicatorState.totalUsers.toLocaleString()} users installed`);
             break;
+        }
 
         case 'connecting':
         case 'reconnecting':
             dot.classList.add('slt-ci-connecting');
             if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
-            button.setAttribute('aria-label', 'Connecting...');
+            setLabel(button, indicatorState.state === 'reconnecting' ? 'Reconnecting…' : 'Connecting…');
             break;
 
         case 'error':
             dot.classList.add('slt-ci-error');
             if (pingEl) { pingEl.textContent = 'ERR'; pingEl.className = 'slt-ci-ping slt-ci-horrible'; }
-            button.setAttribute('aria-label', 'Connection error — retrying...');
+            setLabel(button, 'Connection error — retrying…');
             break;
 
         case 'disconnected':
         default:
             if (pingEl) { pingEl.textContent = '--ms'; pingEl.className = 'slt-ci-ping'; }
-            button.setAttribute('aria-label', 'Disconnected');
+            setLabel(button, 'Disconnected');
             break;
     }
 }

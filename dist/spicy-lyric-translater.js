@@ -3461,7 +3461,10 @@ ${text}`
         let lineText = "";
         let romanizedText = "";
         let anyRomanized = false;
-        for (const syllable of group.Lead.Syllables) {
+        const syllables = group.Lead.Syllables;
+        for (let i = 0; i < syllables.length; i++) {
+          const syllable = syllables[i];
+          const prev = i > 0 ? syllables[i - 1] : null;
           wordTimings.push({
             text: syllable.Text,
             startTime: syllable.StartTime,
@@ -3473,17 +3476,14 @@ ${text}`
           if (syllableRoman && syllableRoman !== syllable.Text) {
             anyRomanized = true;
           }
-          if (syllable.IsPartOfWord) {
-            lineText += syllable.Text;
-            romanizedText += romanSyl;
-          } else {
-            if (lineText.length > 0)
-              lineText += " ";
-            lineText += syllable.Text;
+          const startsNewWord = prev !== null && !prev.IsPartOfWord;
+          if (startsNewWord) {
+            lineText += " ";
             if (romanizedText.length > 0)
               romanizedText += " ";
-            romanizedText += romanSyl;
           }
+          lineText += syllable.Text;
+          romanizedText += romanSyl;
         }
         lineData.push({
           text: lineText.trim(),
@@ -5364,7 +5364,6 @@ body.slt-overlay-active .LyricsContent {}
     z-index: 10;
 }
 
-
 .spicy-pip-wrapper .slt-interleaved-translation {
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
 }
@@ -5381,7 +5380,6 @@ body.slt-overlay-active .LyricsContent {}
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
     font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
 }
-
 
 .slt-interleaved-translation.slt-music-break {
     color: rgba(255, 255, 255, 0.35) !important;
@@ -5881,127 +5879,149 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
 }
 
 .SLT_ConnectionIndicator {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     margin-right: 8px;
     position: relative;
     z-index: 100;
+    -webkit-font-smoothing: antialiased;
 }
 
 .slt-ci-button {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    background: transparent;
-    cursor: pointer;
-    transition: background 0.25s ease;
-    overflow: visible;
+    gap: 9px;
+    padding: 5px 11px 5px 10px;
+    border-radius: 999px;
+    background: var(--slt-surface, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--slt-hairline, rgba(255, 255, 255, 0.07));
+    box-shadow: var(--slt-gloss);
+    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+    backdrop-filter: blur(8px) saturate(1.2);
     white-space: nowrap;
+    cursor: default;
+    transition: background 0.25s var(--slt-ease, ease), border-color 0.25s var(--slt-ease, ease);
 }
 
 .slt-ci-button:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--slt-surface-hover, rgba(255, 255, 255, 0.07));
+    border-color: var(--slt-hairline-strong, rgba(255, 255, 255, 0.14));
 }
 
 .slt-ci-dot {
-    width: 8px;
-    height: 8px;
-    min-width: 8px;
+    position: relative;
+    width: 7px;
+    height: 7px;
+    min-width: 7px;
     border-radius: 50%;
-    background: #555;
-    transition: background 0.3s ease, box-shadow 0.3s ease;
+    background: var(--slt-ci-c, #5b5b5b);
     flex-shrink: 0;
+    transition: background 0.3s var(--slt-ease, ease), box-shadow 0.3s ease;
+}
+
+.slt-ci-dot::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 var(--slt-ci-c, transparent);
+    opacity: 0;
+    pointer-events: none;
 }
 
 .slt-ci-dot.slt-ci-connecting {
-    background: #888;
-    animation: slt-ci-pulse 1.5s ease-in-out infinite;
+    --slt-ci-c: #9aa0a6;
+    animation: slt-ci-pulse 1.4s ease-in-out infinite;
 }
 
-.slt-ci-dot.slt-ci-connected {
-    background: #1db954;
-    box-shadow: 0 0 6px rgba(29, 185, 84, 0.4);
-}
+.slt-ci-dot.slt-ci-connected,
+.slt-ci-dot.slt-ci-great { --slt-ci-c: #1ed760; }
+.slt-ci-dot.slt-ci-ok { --slt-ci-c: #ffd35c; }
+.slt-ci-dot.slt-ci-bad { --slt-ci-c: #ff9f45; }
+.slt-ci-dot.slt-ci-error,
+.slt-ci-dot.slt-ci-horrible { --slt-ci-c: #f1556c; }
 
-.slt-ci-dot.slt-ci-error {
-    background: #e74c3c;
-    box-shadow: 0 0 6px rgba(231, 76, 60, 0.4);
-}
-
-.slt-ci-dot.slt-ci-great {
-    background: #1db954;
-    box-shadow: 0 0 6px rgba(29, 185, 84, 0.4);
-}
-
-.slt-ci-dot.slt-ci-ok {
-    background: #ffe666;
-    box-shadow: 0 0 6px rgba(255, 230, 102, 0.35);
-}
-
-.slt-ci-dot.slt-ci-bad {
-    background: #ff944d;
-    box-shadow: 0 0 6px rgba(255, 148, 77, 0.35);
-}
-
+.slt-ci-dot.slt-ci-connected,
+.slt-ci-dot.slt-ci-great,
+.slt-ci-dot.slt-ci-ok,
+.slt-ci-dot.slt-ci-bad,
 .slt-ci-dot.slt-ci-horrible {
-    background: #e74c3c;
-    box-shadow: 0 0 6px rgba(231, 76, 60, 0.4);
+    box-shadow: 0 0 7px -1px var(--slt-ci-c);
+}
+
+.slt-ci-dot.slt-ci-connected::after,
+.slt-ci-dot.slt-ci-great::after,
+.slt-ci-dot.slt-ci-ok::after,
+.slt-ci-dot.slt-ci-bad::after,
+.slt-ci-dot.slt-ci-horrible::after {
+    animation: slt-ci-ring 2.4s var(--slt-ease, ease-out) infinite;
+}
+
+@keyframes slt-ci-ring {
+    0% { box-shadow: 0 0 0 0 var(--slt-ci-c); opacity: 0.5; }
+    70% { box-shadow: 0 0 0 5px var(--slt-ci-c); opacity: 0; }
+    100% { box-shadow: 0 0 0 5px var(--slt-ci-c); opacity: 0; }
 }
 
 @keyframes slt-ci-pulse {
-    0%, 100% { opacity: 0.4; transform: scale(0.9); }
-    50% { opacity: 1; transform: scale(1.1); }
+    0%, 100% { opacity: 0.45; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.05); }
 }
 
-.slt-ci-expanded {
-    display: flex;
+.slt-ci-meta {
+    display: inline-flex;
     align-items: center;
-    opacity: 1;
+    gap: 9px;
     white-space: nowrap;
 }
 
-.slt-ci-stats-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.65rem;
-    color: var(--spice-subtext, #b3b3b3);
-}
-
 .slt-ci-ping {
-    font-family: 'JetBrains Mono', 'Consolas', monospace;
-    font-size: 0.62rem;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    font-size: 0.64rem;
     font-weight: 600;
-    color: var(--spice-text, #fff);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--slt-text, hsla(0, 0%, 100%, 0.92));
     transition: color 0.3s ease;
 }
 
-.slt-ci-ping.slt-ci-great { color: #1db954; }
-.slt-ci-ping.slt-ci-ok { color: #ffe666; }
-.slt-ci-ping.slt-ci-bad { color: #ff944d; }
-.slt-ci-ping.slt-ci-horrible { color: #e74c3c; }
+.slt-ci-ping.slt-ci-great { color: #1ed760; }
+.slt-ci-ping.slt-ci-ok { color: #ffd35c; }
+.slt-ci-ping.slt-ci-bad { color: #ff9f45; }
+.slt-ci-ping.slt-ci-horrible { color: #f1556c; }
 
 .slt-ci-sep {
     width: 1px;
-    height: 10px;
-    background: rgba(255, 255, 255, 0.12);
+    height: 11px;
+    border-radius: 1px;
+    background: var(--slt-hairline-strong, rgba(255, 255, 255, 0.14));
     flex-shrink: 0;
 }
 
 .slt-ci-users-count {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
-    color: var(--spice-subtext, #b3b3b3);
-    font-size: 0.62rem;
-    font-weight: 500;
+    gap: 5px;
+    color: var(--slt-text-2, hsla(0, 0%, 100%, 0.58));
+    font-size: 0.64rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .slt-ci-users-count svg {
-    opacity: 0.55;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.slt-ci-total-count {
+    letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .slt-ci-dot,
+    .slt-ci-dot::after {
+        animation: none !important;
+    }
 }
 
 body.slt-overlay-active .LyricsContent {}
@@ -6578,6 +6598,35 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
 #SpicyLyricsPage.ForcedCompactMode .simplebar-content::before,
 #SpicyLyricsPage.ForcedCompactMode .simplebar-content::after {
     min-height: 100% !important;
+}
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-original-line:has(+ .line.Sung:not(.musical-line)),
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-romanization-line:has(+ .line.Sung:not(.musical-line)) {
+    opacity: 0 !important;
+}
+
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-original-line:has(+ .line.NotSung:not(.musical-line)),
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-romanization-line:has(+ .line.NotSung:not(.musical-line)) {
+    opacity: 0.5 !important;
 }
 `;
   function injectStyles() {
@@ -12097,26 +12146,39 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return "slt-ci-bad";
     return "slt-ci-horrible";
   }
+  function formatUserCount(count) {
+    if (!count || count < 0)
+      return "0";
+    if (count < 1e3)
+      return String(count);
+    if (count < 1e6) {
+      const k = count / 1e3;
+      return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}K`;
+    }
+    return `${Math.round(count / 1e6 * 10) / 10}M`;
+  }
+  function setLabel(button, text) {
+    button.setAttribute("aria-label", text);
+    button.setAttribute("title", text);
+  }
   function createIndicatorElement() {
     const container = document.createElement("div");
     container.className = "SLT_ConnectionIndicator";
     container.innerHTML = `
         <div class="slt-ci-button" aria-label="Connection Status">
-            <div class="slt-ci-dot"></div>
-            <div class="slt-ci-expanded">
-                <div class="slt-ci-stats-row">
-                    <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
-                    <span class="slt-ci-sep"></span>
-                    <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                        <span class="slt-ci-total-count">0</span>
-                    </span>
-                </div>
+            <span class="slt-ci-dot"></span>
+            <div class="slt-ci-meta">
+                <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
+                <span class="slt-ci-sep"></span>
+                <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <span class="slt-ci-total-count">0</span>
+                </span>
             </div>
         </div>
     `;
@@ -12133,19 +12195,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return;
     dot.classList.remove("slt-ci-connecting", "slt-ci-connected", "slt-ci-error", "slt-ci-great", "slt-ci-ok", "slt-ci-bad", "slt-ci-horrible");
     switch (indicatorState.state) {
-      case "connected":
+      case "connected": {
         dot.classList.add("slt-ci-connected");
+        const latencyClass = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : "";
         if (indicatorState.latencyMs !== null) {
-          dot.classList.add(getLatencyClass(indicatorState.latencyMs));
+          dot.classList.add(latencyClass);
           if (pingEl) {
             pingEl.textContent = `${indicatorState.latencyMs}ms`;
-            pingEl.className = `slt-ci-ping ${getLatencyClass(indicatorState.latencyMs)}`;
+            pingEl.className = `slt-ci-ping ${latencyClass}`;
           }
         }
         if (totalCountEl)
-          totalCountEl.textContent = `${indicatorState.totalUsers}`;
-        button.setAttribute("aria-label", `Connected \xB7 ${indicatorState.latencyMs}ms \xB7 ${indicatorState.totalUsers} installed`);
+          totalCountEl.textContent = formatUserCount(indicatorState.totalUsers);
+        const ping = indicatorState.latencyMs !== null ? `${indicatorState.latencyMs}ms` : "measuring\u2026";
+        setLabel(button, `Connected \xB7 ${ping} \xB7 ${indicatorState.totalUsers.toLocaleString()} users installed`);
         break;
+      }
       case "connecting":
       case "reconnecting":
         dot.classList.add("slt-ci-connecting");
@@ -12153,7 +12218,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           pingEl.textContent = "--ms";
           pingEl.className = "slt-ci-ping";
         }
-        button.setAttribute("aria-label", "Connecting...");
+        setLabel(button, indicatorState.state === "reconnecting" ? "Reconnecting\u2026" : "Connecting\u2026");
         break;
       case "error":
         dot.classList.add("slt-ci-error");
@@ -12161,7 +12226,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           pingEl.textContent = "ERR";
           pingEl.className = "slt-ci-ping slt-ci-horrible";
         }
-        button.setAttribute("aria-label", "Connection error \u2014 retrying...");
+        setLabel(button, "Connection error \u2014 retrying\u2026");
         break;
       case "disconnected":
       default:
@@ -12169,7 +12234,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           pingEl.textContent = "--ms";
           pingEl.className = "slt-ci-ping";
         }
-        button.setAttribute("aria-label", "Disconnected");
+        setLabel(button, "Disconnected");
         break;
     }
   }

@@ -16,7 +16,6 @@ interface SyllableData {
     RomanizedText?: string;
 }
 
-
 interface VocalGroup {
     Type: 'Vocal' | 'Instrumental';
     OppositeAligned?: boolean;
@@ -266,7 +265,6 @@ async function waitForCapture(trackId: string, timeoutMs: number = 8000, pollMs:
     return getStoredLyricsData(trackId);
 }
 
-
 function getCurrentTrackId(): string | null {
     try {
         const uri = (globalThis as any).Spicetify?.Player?.data?.item?.uri;
@@ -286,7 +284,6 @@ function getTrackIdFromUri(trackUri: string): string | null {
     const parts = trackUri.split(':');
     return parts[parts.length - 1] || null;
 }
-
 
 function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
     const lineData: LyricLineData[] = [];
@@ -310,7 +307,10 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             let lineText = '';
             let romanizedText = '';
             let anyRomanized = false;
-            for (const syllable of group.Lead.Syllables) {
+            const syllables = group.Lead.Syllables;
+            for (let i = 0; i < syllables.length; i++) {
+                const syllable = syllables[i];
+                const prev = i > 0 ? syllables[i - 1] : null;
                 wordTimings.push({
                     text: syllable.Text,
                     startTime: syllable.StartTime,
@@ -322,15 +322,13 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 if (syllableRoman && syllableRoman !== syllable.Text) {
                     anyRomanized = true;
                 }
-                if (syllable.IsPartOfWord) {
-                    lineText += syllable.Text;
-                    romanizedText += romanSyl;
-                } else {
-                    if (lineText.length > 0) lineText += ' ';
-                    lineText += syllable.Text;
+                const startsNewWord = prev !== null && !prev.IsPartOfWord;
+                if (startsNewWord) {
+                    lineText += ' ';
                     if (romanizedText.length > 0) romanizedText += ' ';
-                    romanizedText += romanSyl;
                 }
+                lineText += syllable.Text;
+                romanizedText += romanSyl;
             }
             lineData.push({
                 text: lineText.trim(),
@@ -375,7 +373,6 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
     return lineData;
 }
 
-
 function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
     if (!lyrics.Lines) return [];
     return lyrics.Lines.map(line => ({
@@ -388,7 +385,6 @@ function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
             : undefined
     }));
 }
-
 
 function extractLinesData(lyrics: LyricsData): LyricLineData[] {
     switch (lyrics.Type) {
@@ -409,7 +405,6 @@ function extractLinesData(lyrics: LyricsData): LyricLineData[] {
 let cachedTrackId: string | null = null;
 let cachedLineData: LyricLineData[] | null = null;
 let cachedLanguage: string | null = null;
-
 
 function getLyricsLanguage(lyrics: LyricsData): string | undefined {
     const iso = normalizeLanguageCode(lyrics.LanguageISO2);
@@ -495,7 +490,6 @@ export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines:
         return null;
     }
 }
-
 
 export function clearLyricsCache(): void {
     cachedTrackId = null;
