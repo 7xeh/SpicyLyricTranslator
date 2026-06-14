@@ -898,6 +898,64 @@ test('mixed-language songs translate each language group with parallel chunks', 
     assert.deepEqual(result.map(item => item.translatedText), expected);
 });
 
+test('mostly-English song with stray non-Latin lines does not show EN->EN passthrough lines', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite',
+        geminiTemperature: '0.3'
+    } as any);
+
+    const sourceLines = [
+        'Lost in time',
+        // Pure-English line the model returns near-identical (apostrophe dropped).
+        "They're calling your name, but you're walking 'round the mist",
+        // The only line with non-Latin script — should be translated and shown.
+        '底にある plans, I like to keep it to myself',
+        'It\'s all in your head, we talk about it'
+    ];
+
+    const translationMap = new Map<string, string>([
+        ['Lost in time', 'Lost in time'],
+        [
+            "They're calling your name, but you're walking 'round the mist",
+            "They're calling your name, but you're walking round the mist"
+        ],
+        [
+            '底にある plans, I like to keep it to myself',
+            'The plans deep down, I like to keep it to myself'
+        ],
+        ['It\'s all in your head, we talk about it', 'It\'s all in your head, we talk about it']
+    ]);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const translated = promptText.split('\n')
+            .filter(line => line.includes('[[SLT_BATCH_'))
+            .map(line => {
+                const source = line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '');
+                return translationMap.get(source) ?? source;
+            });
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translated.join('\n') }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const results = await translateLyrics(sourceLines, 'en');
+
+    // English lines (including the near-identical one) must not be marked translated.
+    assert.equal(results[0].wasTranslated, false);
+    assert.equal(results[1].wasTranslated, false, 'pure-English line must not show an EN->EN translation');
+    assert.equal(results[1].translatedText, sourceLines[1]);
+    assert.equal(results[3].wasTranslated, false);
+
+    // The line containing Japanese must still be translated and shown.
+    assert.equal(results[2].wasTranslated, true);
+    assert.equal(results[2].translatedText, 'The plans deep down, I like to keep it to myself');
+});
+
 test('Gemini uses CosmosAsync when available instead of raw browser fetch', async () => {
     resetState();
     setPreferredApi('gemini', undefined, {

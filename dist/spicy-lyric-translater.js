@@ -3125,7 +3125,8 @@ ${text}`
             warn("Direct re-translation failed for suspicious line:", item.index, directError);
           }
         }
-        if (sourceAndTargetMatch && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
+        const latinLineInMixedScriptTrack = targetWantsLatin && hasConfidentNonTargetLine && !sourceIsNonLatin;
+        if ((sourceAndTargetMatch || latinLineInMixedScriptTrack) && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
           finalTranslation = item.text;
         }
         if (finalTranslation !== item.text) {

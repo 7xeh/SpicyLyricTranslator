@@ -2262,7 +2262,13 @@ async function translateLyricsInner(
                 }
             }
 
-            if (sourceAndTargetMatch && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
+            // A pure-Latin line inside a track that also contains non-Latin lines
+            // (e.g. the English lines of a mostly-English song with the odd Japanese
+            // phrase) is already in a Latin target language. The batch is hinted with
+            // the non-Latin source, so Google "translates" these lines into a
+            // near-identical copy — leave the original so no redundant EN→EN line shows.
+            const latinLineInMixedScriptTrack = targetWantsLatin && hasConfidentNonTargetLine && !sourceIsNonLatin;
+            if ((sourceAndTargetMatch || latinLineInMixedScriptTrack) && !hasMeaningfulTranslationDifference(item.text, finalTranslation, targetLang)) {
                 finalTranslation = item.text;
             }
 
