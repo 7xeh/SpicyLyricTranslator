@@ -16,15 +16,16 @@ const trackUri = `spotify:track:${trackId}`;
 
 function installSpicyLyricsCache(content: any): void {
     (globalThis as any).caches = {
+        has: async (name: string) => name === 'SpicyLyrics_LyricsStore_g1',
         open: async (name: string) => {
-            assert.equal(name, 'SpicyLyrics_LyricsStore');
+            assert.equal(name, 'SpicyLyrics_LyricsStore_g1');
             return {
                 match: async (key: string) => {
                     assert.equal(key, `/${trackId}`);
                     return {
                         json: async () => ({
                             ExpiresAt: Date.now() + 60_000,
-                            CacheVersion: 12,
+                            CacheVersion: 1,
                             Content: content
                         })
                     };

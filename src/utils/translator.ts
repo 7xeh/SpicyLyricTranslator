@@ -870,8 +870,9 @@ async function translateWithGoogle(text: string, targetLang: string, sourceLang?
     }
 
     const data = await response.json();
-    const detectedLang = data[2] || 'unknown';
-    
+    const rawDetectedLang = data[2] || 'unknown';
+    const detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
+
     if (data && data[0]) {
         let translation = '';
         for (const sentence of data[0]) {

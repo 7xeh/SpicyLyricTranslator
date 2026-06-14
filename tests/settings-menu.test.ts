@@ -83,10 +83,10 @@ test('settings menu registers quick actions for clearing translation and Spicy L
     const notifications: string[] = [];
     installSpicetifyMock(registered, notifications);
 
-    let deletedCacheName = '';
+    const deletedCacheNames: string[] = [];
     (globalThis as any).caches = {
         delete: async (cacheName: string) => {
-            deletedCacheName = cacheName;
+            deletedCacheNames.push(cacheName);
             return true;
         }
     };
@@ -110,7 +110,8 @@ test('settings menu registers quick actions for clearing translation and Spicy L
     assert.equal(storageMap.has('slt-track-cache-index'), false);
 
     await getMenuItem(registered, 'Clear Spicy Lyrics Cache').callback();
-    assert.equal(deletedCacheName, 'SpicyLyrics_LyricsStore');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual([...deletedCacheNames].sort(), ['SpicyLyrics_LyricsStore', 'SpicyLyrics_LyricsStore_g1']);
     assert.deepEqual(notifications, [
         'All cached translations deleted!',
         'Spicy Lyrics cached lyrics deleted!'
@@ -122,10 +123,10 @@ test('settings modal exposes cache repair actions for the translate button right
     const notifications: string[] = [];
     installSpicetifyMock([], notifications);
 
-    let deletedCacheName = '';
+    const deletedCacheNames: string[] = [];
     (globalThis as any).caches = {
         delete: async (cacheName: string) => {
-            deletedCacheName = cacheName;
+            deletedCacheNames.push(cacheName);
             return true;
         }
     };
@@ -171,7 +172,7 @@ test('settings modal exposes cache repair actions for the translate button right
     const clearSpicyLyrics = handlers.get('#slt-clear-spicy-lyrics-cache') as EventListener;
     await clearSpicyLyrics(new Event('click'));
 
-    assert.equal(deletedCacheName, 'SpicyLyrics_LyricsStore');
+    assert.deepEqual([...deletedCacheNames].sort(), ['SpicyLyrics_LyricsStore', 'SpicyLyrics_LyricsStore_g1']);
     assert.deepEqual(notifications, [
         'All cached translations deleted!',
         'Spicy Lyrics cached lyrics deleted!'

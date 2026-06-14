@@ -59,6 +59,8 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
     greek: 'el'
 };
 
+const ENGLISH_EQUIVALENT_CODES = new Set(['pcm', 'sco', 'jam', 'cpe']);
+
 export function normalizeLanguageCode(code?: string | null): string {
     if (!code) return 'unknown';
     const value = code.trim().toLowerCase();
@@ -72,7 +74,10 @@ export function normalizeLanguageCode(code?: string | null): string {
 
     if (LANGUAGE_NAME_TO_CODE[nameKey]) return LANGUAGE_NAME_TO_CODE[nameKey];
     if (LANGUAGE_NAME_TO_CODE[value]) return LANGUAGE_NAME_TO_CODE[value];
-    return value.replace(/_/g, '-').split('-')[0];
+
+    const base = value.replace(/_/g, '-').split('-')[0];
+    if (ENGLISH_EQUIVALENT_CODES.has(base)) return 'en';
+    return base;
 }
 
 function getSampleIndices(length: number): number[] {
@@ -304,9 +309,10 @@ async function detectLanguageViaAPI(text: string): Promise<{ code: string; confi
     }
     
     const data = await response.json();
-    const detectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
+    const rawDetectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
+    const detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
     const confidence = detectedLang !== 'unknown' ? 0.9 : 0.5;
-    
+
     return { code: detectedLang, confidence };
 }
 

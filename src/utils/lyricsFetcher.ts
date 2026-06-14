@@ -3,8 +3,7 @@ import { normalizeLanguageCode } from './languageDetection';
 
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
-const SPICY_LYRICS_CACHE_NAME = 'SpicyLyrics_LyricsStore';
-const SPICY_LYRICS_CACHE_VERSION = 13;
+const SPICY_LYRICS_CACHE_NAMES = ['SpicyLyrics_LyricsStore_g1', 'SpicyLyrics_LyricsStore'];
 const MAX_CAPTURE_CACHE_ENTRIES = 50;
 
 interface SyllableData {
@@ -155,31 +154,41 @@ async function readSpicyLyricsCache(trackId: string): Promise<LyricsData | null>
             return null;
         }
 
-        const cache = await caches.open(SPICY_LYRICS_CACHE_NAME);
-        const response = await cache.match(`/${trackId}`);
-        if (!response || typeof response.json !== 'function') {
-            return null;
+        for (const cacheName of SPICY_LYRICS_CACHE_NAMES) {
+            if (typeof caches.has === 'function' && !(await caches.has(cacheName))) {
+                continue;
+            }
+
+            const cache = await caches.open(cacheName);
+            const response = await cache.match(`/${trackId}`);
+            if (!response || typeof response.json !== 'function') {
+                continue;
+            }
+
+            const item = await response.json() as SpicyLyricsCacheItem | LyricsData;
+            if (isLyricsData(item)) {
+                return item;
+            }
+
+            if (!item || typeof item !== 'object' || item.Value === 'NO_LYRICS') {
+                continue;
+            }
+
+            if (typeof item.ExpiresAt === 'number' && item.ExpiresAt < Date.now()) {
+                continue;
+            }
+
+            const content = item.Content;
+            if (!content || content.Value === 'NO_LYRICS') {
+                continue;
+            }
+
+            if (isLyricsData(content)) {
+                return content;
+            }
         }
 
-        const item = await response.json() as SpicyLyricsCacheItem | LyricsData;
-        if (isLyricsData(item)) {
-            return item;
-        }
-
-        if (!item || typeof item !== 'object' || item.Value === 'NO_LYRICS') {
-            return null;
-        }
-
-        if (typeof item.ExpiresAt === 'number' && item.ExpiresAt < Date.now()) {
-            return null;
-        }
-
-        const content = item.Content;
-        if (!content || content.Value === 'NO_LYRICS') {
-            return null;
-        }
-
-        return isLyricsData(content) ? content : null;
+        return null;
     } catch (err) {
         warn('Failed to read Spicy Lyrics cache:', err);
         return null;
