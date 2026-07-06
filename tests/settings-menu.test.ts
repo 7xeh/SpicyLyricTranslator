@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 type RegisteredMenuItem = {
     label: string;
     callback: () => unknown | Promise<unknown>;
+    icon?: string;
 };
 
 const storageMap = new Map<string, string>();
@@ -54,13 +55,15 @@ function installSpicetifyMock(registered: RegisteredMenuItem[], notifications: s
                 constructor(
                     private readonly label: string,
                     _isEnabled: boolean,
-                    private readonly callback: () => unknown | Promise<unknown>
+                    private readonly callback: () => unknown | Promise<unknown>,
+                    private readonly icon?: string
                 ) {}
 
                 register(): void {
                     registered.push({
                         label: this.label,
-                        callback: this.callback
+                        callback: this.callback,
+                        icon: this.icon
                     });
                 }
             }
@@ -77,45 +80,19 @@ function getMenuItem(registered: RegisteredMenuItem[], label: string): Registere
     return item;
 }
 
-test('settings menu registers quick actions for clearing translation and Spicy Lyrics caches', async () => {
+test('settings menu registers a single SLT Settings entry with an icon', async () => {
     storageMap.clear();
     const registered: RegisteredMenuItem[] = [];
-    const notifications: string[] = [];
-    installSpicetifyMock(registered, notifications);
-
-    const deletedCacheNames: string[] = [];
-    (globalThis as any).caches = {
-        delete: async (cacheName: string) => {
-            deletedCacheNames.push(cacheName);
-            return true;
-        }
-    };
+    installSpicetifyMock(registered);
 
     const { registerSettings } = require('../src/utils/settings') as { registerSettings: () => Promise<void> };
     await registerSettings();
 
-    assert.deepEqual(registered.map(item => item.label), [
-        'Spicy Lyric Translator Settings',
-        'Clear Spicy Lyrics Cache',
-        'Clear SLT Translation Cache'
-    ]);
+    assert.deepEqual(registered.map(item => item.label), ['SLT Settings']);
 
-    storageMap.set('spicy-lyric-translator:translation-cache', '{"vi:hello":{"translation":"xin chao","timestamp":1}}');
-    storageMap.set('slt-track-cache:spotify:track:abc:vi', '{"lines":["xin chao"],"timestamp":1}');
-    storageMap.set('slt-track-cache-index', '{"trackUris":["spotify:track:abc:vi"]}');
-
-    await getMenuItem(registered, 'Clear SLT Translation Cache').callback();
-    assert.equal(storageMap.has('spicy-lyric-translator:translation-cache'), false);
-    assert.equal(storageMap.has('slt-track-cache:spotify:track:abc:vi'), false);
-    assert.equal(storageMap.has('slt-track-cache-index'), false);
-
-    await getMenuItem(registered, 'Clear Spicy Lyrics Cache').callback();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual([...deletedCacheNames].sort(), ['SpicyLyrics_LyricsStore', 'SpicyLyrics_LyricsStore_g1']);
-    assert.deepEqual(notifications, [
-        'All cached translations deleted!',
-        'Spicy Lyrics cached lyrics deleted!'
-    ]);
+    const settingsItem = getMenuItem(registered, 'SLT Settings');
+    assert.ok(settingsItem.icon, 'SLT Settings menu item should have an icon');
+    assert.match(settingsItem.icon!, /^<svg/);
 });
 
 test('settings modal exposes cache repair actions for the translate button right-click flow', async () => {
