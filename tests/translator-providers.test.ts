@@ -211,6 +211,79 @@ test('LibreTranslate does not send internal batch markers to Google fallback', a
     );
 });
 
+test('a blank cell in a marker batch is re-translated instead of left in the source language', async () => {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: 'gemini-key',
+        geminiModel: 'gemini-3.1-flash-lite'
+    } as any);
+
+    const sourceLines = ['こんにちは', 'さようなら', 'ありがとう'];
+    const translationMap = new Map<string, string>([
+        ['こんにちは', 'Hello'],
+        ['さようなら', 'Goodbye'],
+        ['ありがとう', 'Thank you']
+    ]);
+
+    const markerCalls: string[] = [];
+    const singleCalls: string[] = [];
+    (globalThis as any).fetch = async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const promptText: string = body.contents[0].parts[0].text;
+        const markedLines = promptText.split('\n').filter(line => line.includes('[[SLT_BATCH_'));
+
+        if (markedLines.length > 1) {
+            markerCalls.push(promptText);
+            const out = markedLines.map((line, idx) => {
+                const marker = line.match(/\[\[SLT_BATCH_[^\]]*\]\]/)?.[0] ?? '';
+                const source = line.replace(/\[\[SLT_BATCH_[^\]]*\]\]/, '');
+                return idx === 1 ? marker : `${marker}${translationMap.get(source) ?? source}`;
+            });
+            return jsonResponse({ candidates: [{ content: { parts: [{ text: out.join('\n') }] } }] });
+        }
+
+        const source = promptText.split('\n').pop() ?? promptText;
+        singleCalls.push(source);
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: translationMap.get(source) ?? source }] } }] });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(sourceLines, 'en');
+
+    assert.equal(markerCalls.length >= 1, true);
+    assert.deepEqual(result.map(item => item.translatedText), ['Hello', 'Goodbye', 'Thank you']);
+    assert.equal(result.every(item => item.wasTranslated), true);
+    assert.ok(singleCalls.includes('さようなら'));
+});
+
+test('LibreTranslate never receives internal batch markers, even after array batch fails', async () => {
+    resetState();
+    setPreferredApi('libretranslate', undefined, {
+        libreTranslateApiUrl: 'http://localhost:5000/translate'
+    } as any);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = init?.body;
+        const q = body instanceof URLSearchParams ? (body.get('q') || '') : '';
+        if (q.includes('\n')) {
+            return jsonResponse({ message: 'batch unavailable' }, false, 500);
+        }
+        return jsonResponse({ translatedText: `T:${q}` });
+    };
+
+    const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
+    const result = await translateLyrics(['こんにちは', 'さようなら'], 'vi');
+
+    const sawMarkers = calls.some(call => {
+        const b = call.init?.body;
+        return b instanceof URLSearchParams && (b.get('q') || '').includes('SLT_BATCH');
+    });
+    assert.equal(sawMarkers, false, 'LibreTranslate should never be sent internal batch markers');
+    assert.deepEqual(result.map(item => item.translatedText), ['T:こんにちは', 'T:さようなら']);
+});
+
 test('DeepL sends header-based auth instead of deprecated auth_key request body auth', async () => {
     resetState();
     setPreferredApi('deepl', undefined, { deeplApiKey: 'test-key:fx' });
@@ -352,7 +425,7 @@ test('OpenAI uses CosmosAsync when available instead of raw browser fetch', asyn
     assert.equal(cosmosCalls[0].body.model, 'gpt-4o-mini');
     assert.equal(cosmosCalls[0].body.messages[1].content, '\u3053\u3093\u306b\u3061\u306f');
     assert.equal(cosmosCalls[0].body.temperature, 0.3);
-    assert.equal(cosmosCalls[0].body.max_completion_tokens, 500);
+    assert.equal(cosmosCalls[0].body.max_completion_tokens, 2048);
     assert.equal(Object.prototype.hasOwnProperty.call(cosmosCalls[0].body, 'max_tokens'), false);
 });
 
@@ -410,7 +483,7 @@ test('OpenAI uses GPT-5.5 speed mode with no reasoning effort', async () => {
     assert.equal(body.model, 'gpt-5.5');
     assert.equal(body.messages[0].role, 'developer');
     assert.equal(body.reasoning_effort, 'none');
-    assert.equal(body.max_completion_tokens, 500);
+    assert.equal(body.max_completion_tokens, 8000);
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'temperature'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'max_tokens'), false);
 });
@@ -908,9 +981,7 @@ test('mostly-English song with stray non-Latin lines does not show EN->EN passth
 
     const sourceLines = [
         'Lost in time',
-        // Pure-English line the model returns near-identical (apostrophe dropped).
         "They're calling your name, but you're walking 'round the mist",
-        // The only line with non-Latin script — should be translated and shown.
         '底にある plans, I like to keep it to myself',
         'It\'s all in your head, we talk about it'
     ];
@@ -945,13 +1016,11 @@ test('mostly-English song with stray non-Latin lines does not show EN->EN passth
     const { translateLyrics } = require('../src/utils/translator') as { translateLyrics: (lines: string[], targetLang: string) => Promise<any[]> };
     const results = await translateLyrics(sourceLines, 'en');
 
-    // English lines (including the near-identical one) must not be marked translated.
     assert.equal(results[0].wasTranslated, false);
     assert.equal(results[1].wasTranslated, false, 'pure-English line must not show an EN->EN translation');
     assert.equal(results[1].translatedText, sourceLines[1]);
     assert.equal(results[3].wasTranslated, false);
 
-    // The line containing Japanese must still be translated and shown.
     assert.equal(results[2].wasTranslated, true);
     assert.equal(results[2].translatedText, 'The plans deep down, I like to keep it to myself');
 });

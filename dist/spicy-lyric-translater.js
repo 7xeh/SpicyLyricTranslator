@@ -843,10 +843,43 @@ var SpicyLyricTranslater = (() => {
     return indices.map((i) => lines[i]).filter((line) => line && line.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(line.trim())).join(" ");
   }
   function tokenizeWords(text) {
-    const matches = text.toLowerCase().match(/[\p{L}']+/gu);
+    const normalized = text.replace(/[’ʼ‘`´]/g, "'");
+    const matches = normalized.toLowerCase().match(/[\p{L}']+/gu);
     if (!matches)
       return [];
     return matches.filter((word) => word.length > 1);
+  }
+  var ELISION_PREFIX_TO_WORD = {
+    j: "je",
+    l: "le",
+    d: "de",
+    m: "me",
+    t: "te",
+    s: "se",
+    n: "ne",
+    c: "ce",
+    qu: "que",
+    jusqu: "jusque",
+    puisqu: "puisque",
+    lorsqu: "lorsque",
+    quoiqu: "quoique"
+  };
+  function expandElidedWords(words) {
+    const expanded = [];
+    for (const word of words) {
+      expanded.push(word);
+      const apostropheIndex = word.indexOf("'");
+      if (apostropheIndex <= 0)
+        continue;
+      const prefix = word.slice(0, apostropheIndex);
+      const rest = word.slice(apostropheIndex + 1);
+      const mapped = ELISION_PREFIX_TO_WORD[prefix];
+      if (mapped)
+        expanded.push(mapped);
+      if (rest.length > 1)
+        expanded.push(rest);
+    }
+    return expanded;
   }
   var NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
   var JA_ROMAJI_SPECIFIC_TOKENS = /* @__PURE__ */ new Set([
@@ -983,6 +1016,44 @@ var SpicyLyricTranslater = (() => {
     }
     return null;
   }
+  var DISTINCTIVE_LATIN_MARKERS = [
+    { code: "pl", chars: "\u0142\u017C\u017A\u015B\u0144" },
+    { code: "cs", chars: "\u0159\u011B\u016F" },
+    { code: "lt", chars: "\u0117\u012F\u0173" },
+    { code: "lv", chars: "\u0101\u0113\u012B\u0123\u0137\u013C\u0146" },
+    { code: "hr", chars: "\u0111" }
+  ];
+  var DISTINCTIVE_MARKER_SETS = DISTINCTIVE_LATIN_MARKERS.map((entry) => ({
+    code: entry.code,
+    chars: new Set(entry.chars.split(""))
+  }));
+  var VIETNAMESE_MARKER_REGEX = /[ơướờởỡợứừửữự]/i;
+  function detectByDistinctiveLatinMarkers(text) {
+    if (!text)
+      return null;
+    if (VIETNAMESE_MARKER_REGEX.test(text))
+      return null;
+    const lower = text.toLowerCase();
+    const counts = {};
+    for (const char of lower) {
+      for (const marker of DISTINCTIVE_MARKER_SETS) {
+        if (marker.chars.has(char)) {
+          counts[marker.code] = (counts[marker.code] || 0) + 1;
+        }
+      }
+    }
+    const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (ranked.length === 0)
+      return null;
+    const [topCode, topCount] = ranked[0];
+    const runnerUp = ranked[1]?.[1] ?? 0;
+    if (topCount < 2 && !(topCount === 1 && runnerUp === 0))
+      return null;
+    if (topCount <= runnerUp)
+      return null;
+    const confidence = Math.min(0.9, 0.78 + Math.min(topCount, 6) * 0.02);
+    return { code: topCode, confidence };
+  }
   function detectLanguageHeuristic(text) {
     if (!text)
       return null;
@@ -990,6 +1061,10 @@ var SpicyLyricTranslater = (() => {
     const minLength = hasNonLatinScript2 ? 1 : 10;
     if (text.length < minLength) {
       return null;
+    }
+    const distinctive = detectByDistinctiveLatinMarkers(text);
+    if (distinctive) {
+      return distinctive;
     }
     const normalizedText = text.trim();
     let totalChars = 0;
@@ -1029,12 +1104,13 @@ var SpicyLyricTranslater = (() => {
     if (words.length < 3) {
       return null;
     }
+    const matchWords = expandElidedWords(words);
     const wordCounts = {};
     let maxCount = 0;
     let maxLang = "en";
     for (const lang of LATIN_LANGUAGE_WORD_SETS) {
       let count = 0;
-      for (const word of words) {
+      for (const word of matchWords) {
         if (lang.words.has(word)) {
           count++;
         }
@@ -2082,6 +2158,7 @@ var SpicyLyricTranslater = (() => {
     const model = normalizeOpenAIModelName(openaiModel);
     const useSpeedMode = isOpenAISpeedModeModel(model);
     const instruction = `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+    const outputTokenBudget = Math.max(text.length * 4, useSpeedMode ? 8e3 : 2048);
     const body = {
       model,
       messages: [
@@ -2094,7 +2171,7 @@ var SpicyLyricTranslater = (() => {
           content: text
         }
       ],
-      max_completion_tokens: Math.max(text.length * 3, 500)
+      max_completion_tokens: outputTokenBudget
     };
     if (useSpeedMode) {
       body.reasoning_effort = "none";
@@ -2571,6 +2648,15 @@ ${text}`
     }
     return false;
   }
+  function providerHandlesMarkerBatch() {
+    if (preferredApi === "libretranslate" || preferredApi === "deepl") {
+      return false;
+    }
+    if (preferredApi === "custom") {
+      return customApiFormat === "openai" || customApiFormat === "gemini";
+    }
+    return true;
+  }
   function getConfiguredParallelCap() {
     return Math.min(MAX_PARALLEL_CHUNKS, Math.max(1, Math.floor(maxParallelChunks) || 1));
   }
@@ -2674,20 +2760,22 @@ ${text}`
         warn("Source-aligned parallel chunked batch failed, falling back to single marker batch:", parallelError);
       }
     }
-    try {
-      const { combinedText, markerNonce } = buildMarkedBatchPayload(lines);
-      const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
-      const parsed = parseMarkedBatchResponse(result.translatedText, lines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, lines.length);
-      if (parsed && parsed.length === lines.length) {
-        return { translations: parsed, detectedLang: result.detectedLanguage };
+    if (providerHandlesMarkerBatch()) {
+      try {
+        const { combinedText, markerNonce } = buildMarkedBatchPayload(lines);
+        const result = await retryWithBackoff(() => translateText(combinedText, targetLang, sourceLang));
+        const parsed = parseMarkedBatchResponse(result.translatedText, lines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, lines.length);
+        if (parsed && parsed.length === lines.length) {
+          return { translations: parsed, detectedLang: result.detectedLanguage };
+        }
+      } catch (markerBatchError) {
+        warn("Source-aligned marker batch failed, falling back to chunked batch:", markerBatchError);
       }
-    } catch (markerBatchError) {
-      warn("Source-aligned marker batch failed, falling back to chunked batch:", markerBatchError);
-    }
-    try {
-      return await translateChunkedBatch(lines, targetLang, BATCH_CHUNK_SIZE, sourceLang);
-    } catch (chunkedError) {
-      warn("Source-aligned chunked batch failed, falling back to per-line translation:", chunkedError);
+      try {
+        return await translateChunkedBatch(lines, targetLang, BATCH_CHUNK_SIZE, sourceLang);
+      } catch (chunkedError) {
+        warn("Source-aligned chunked batch failed, falling back to per-line translation:", chunkedError);
+      }
     }
     const translations = [];
     let detectedLang;
@@ -3044,7 +3132,7 @@ ${text}`
           warn("Parallel chunked batch failed, falling back to single marker batch:", parallelError);
         }
       }
-      if (!translatedLines && !hasMixedSourceLanguages) {
+      if (!translatedLines && !hasMixedSourceLanguages && providerHandlesMarkerBatch()) {
         const { combinedText, markerNonce } = buildMarkedBatchPayload(uncachedLines.map((l) => l.text));
         const result = await retryWithBackoff(() => translateText(combinedText, targetLang, detectedSourceLang));
         translatedLines = parseMarkedBatchResponse(result.translatedText, uncachedLines.length, markerNonce) || parseBatchTextFallbacks(result.translatedText, uncachedLines.length);
@@ -3052,7 +3140,7 @@ ${text}`
           detectedLang = result.detectedLanguage;
         }
       }
-      if (!hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1) {
+      if (!hasMixedSourceLanguages && (!translatedLines || translatedLines.length !== uncachedLines.length) && uncachedLines.length > 1 && providerHandlesMarkerBatch()) {
         warn(`Primary batch parse failed for ${uncachedLines.length} lines, trying chunked batch mode (${BATCH_CHUNK_SIZE}/request)`);
         try {
           const chunked = await translateChunkedBatch(uncachedLines.map((l) => l.text), targetLang, BATCH_CHUNK_SIZE, detectedSourceLang);
@@ -3090,6 +3178,22 @@ ${text}`
       }
       if (!translatedLines || translatedLines.length !== uncachedLines.length) {
         throw new Error(`Translation mismatch: Sent ${uncachedLines.length} lines, got ${translatedLines?.length ?? 0}.`);
+      }
+      for (let i = 0; i < uncachedLines.length; i++) {
+        const item = uncachedLines[i];
+        if (!item.text.trim())
+          continue;
+        if (normalizeTranslatedLine(translatedLines[i] || ""))
+          continue;
+        try {
+          const lineSourceLang = getLineSourceLangHint(item.text, targetLang, detectedSourceLang, hasMixedSourceLanguages);
+          const single = await retryWithBackoff(() => translateText(item.text, targetLang, lineSourceLang), 1);
+          if (normalizeTranslatedLine(single.translatedText || "")) {
+            translatedLines[i] = single.translatedText;
+          }
+        } catch (blankLineError) {
+          warn("Re-translation of blank batch line failed:", item.index, blankLineError);
+        }
       }
       uncachedLines.forEach((item, i) => {
         cachedResults.set(item.index, {
@@ -6786,7 +6890,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.0.9" : "0.0.0";
+    return true ? "2.1.0" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -7949,6 +8053,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var lyricsObserver = null;
   var translateDebounceTimer = null;
   var rerenderDebounceTimer = null;
+  var reapplyTimers = [];
   var viewModeIntervalId = null;
   var romanizationToggleListener = null;
   var romanizationToggleButton = null;
@@ -8681,7 +8786,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
           return;
         }
         const nonTargetIndexes = getConfidentNonTargetLineIndexes(lineTexts, state.targetLanguage);
-        if (nonTargetIndexes.length === 0) {
+        const classifiableLineCount = lineTexts.filter((line) => {
+          const trimmed = (line || "").trim();
+          return trimmed.length > 0 && !/^[♪♫•\-–—\s]+$/.test(trimmed);
+        }).length;
+        const nonTargetDominates = classifiableLineCount > 0 && nonTargetIndexes.length >= Math.max(2, Math.ceil(classifiableLineCount * 0.35));
+        if (nonTargetDominates) {
+          translations = await translateLyrics(
+            lineTexts,
+            state.targetLanguage,
+            currentTrackUri2 || void 0,
+            void 0
+          );
+        } else if (nonTargetIndexes.length === 0) {
           removeTranslations();
           state.isTranslating = false;
           rememberSkippedTranslation(
@@ -8697,36 +8814,37 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             Spicetify.showNotification(skipCheck.reason || "Lyrics already in target language");
           }
           return;
-        }
-        const partialLines = nonTargetIndexes.map((index) => lineTexts[index]);
-        const partialTranslations = await translateLyrics(
-          partialLines,
-          state.targetLanguage,
-          void 0,
-          void 0
-        );
-        const translatedByIndex = /* @__PURE__ */ new Map();
-        partialTranslations.forEach((result, idx) => {
-          translatedByIndex.set(nonTargetIndexes[idx], {
-            translatedText: result.translatedText,
-            source: result.source,
-            apiProvider: result.apiProvider
+        } else {
+          const partialLines = nonTargetIndexes.map((index) => lineTexts[index]);
+          const partialTranslations = await translateLyrics(
+            partialLines,
+            state.targetLanguage,
+            void 0,
+            void 0
+          );
+          const translatedByIndex = /* @__PURE__ */ new Map();
+          partialTranslations.forEach((result, idx) => {
+            translatedByIndex.set(nonTargetIndexes[idx], {
+              translatedText: result.translatedText,
+              source: result.source,
+              apiProvider: result.apiProvider
+            });
           });
-        });
-        translations = lineTexts.map((line, index) => {
-          const partial = translatedByIndex.get(index);
-          const translatedText = partial?.translatedText || line;
-          const wasTranslated = translatedByIndex.has(index) && translatedText !== line;
-          return {
-            originalText: line,
-            translatedText,
-            targetLanguage: state.targetLanguage,
-            wasTranslated,
-            source: partial?.source,
-            apiProvider: partial?.apiProvider,
-            detectedLanguage: state.detectedLanguage || void 0
-          };
-        });
+          translations = lineTexts.map((line, index) => {
+            const partial = translatedByIndex.get(index);
+            const translatedText = partial?.translatedText || line;
+            const wasTranslated = translatedByIndex.has(index) && translatedText !== line;
+            return {
+              originalText: line,
+              translatedText,
+              targetLanguage: state.targetLanguage,
+              wasTranslated,
+              source: partial?.source,
+              apiProvider: partial?.apiProvider,
+              detectedLanguage: state.detectedLanguage || void 0
+            };
+          });
+        }
       } else {
         translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri2 || void 0, state.detectedLanguage || void 0);
       }
@@ -8931,6 +9049,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       } else {
         applyTranslations(lines);
       }
+      scheduleTranslationReapply(currentTrackUri2);
       void fillVisibleGaps();
       if (state.showNotifications && Spicetify.showNotification) {
         const notif = buildTranslationNotification(translations, currentTrackUri2, state.targetLanguage);
@@ -9052,6 +9171,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
     updateOverlayContent(translationMapByIndex);
   }
+  function clearReapplyTimers() {
+    for (const timer of reapplyTimers) {
+      clearTimeout(timer);
+    }
+    reapplyTimers = [];
+  }
+  function scheduleTranslationReapply(trackUri) {
+    clearReapplyTimers();
+    const reapply = () => {
+      if (!state.isEnabled || state.isTranslating)
+        return;
+      if (trackUri && getCurrentTrackUri() !== trackUri)
+        return;
+      if (state.translatedLyrics.size === 0 && contentTranslation.size === 0)
+        return;
+      const lines = getLyricsLines();
+      if (lines.length === 0)
+        return;
+      applyTranslations(lines);
+    };
+    for (const delay of [120, 400, 900]) {
+      reapplyTimers.push(setTimeout(reapply, delay));
+    }
+  }
   async function fillVisibleGaps() {
     if (!state.isEnabled || state.isTranslating || fillGapsInFlight)
       return;
@@ -9148,6 +9291,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
   }
   function removeTranslations() {
+    clearReapplyTimers();
     if (isOverlayActive())
       disableOverlay();
     contentTranslation = /* @__PURE__ */ new Map();
@@ -9293,6 +9437,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       clearTimeout(rerenderDebounceTimer);
       rerenderDebounceTimer = null;
     }
+    clearReapplyTimers();
     state.isTranslating = false;
     if (lyricsObserver) {
       lyricsObserver.disconnect();
