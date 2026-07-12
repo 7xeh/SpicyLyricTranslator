@@ -193,6 +193,8 @@ var SpicyLyricTranslater = (() => {
   // src/utils/state.ts
   var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
   var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+  var DEFAULT_GROK_MODEL = "grok-4.5";
+  var DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
   var DEFAULT_LIBRETRANSLATE_URL = "https://libretranslate.com/translate";
   function normalizeStoredOpenAIModel(model) {
     const value = (model || "").trim();
@@ -209,6 +211,14 @@ var SpicyLyricTranslater = (() => {
     if (value.includes("flash"))
       return "gemini-3.5-flash";
     return DEFAULT_GEMINI_MODEL;
+  }
+  function normalizeStoredGrokModel(model) {
+    const value = (model || "").trim();
+    return value === "grok-4.5" || value === "grok-4.3" ? value : DEFAULT_GROK_MODEL;
+  }
+  function normalizeStoredAnthropicModel(model) {
+    const value = (model || "").trim();
+    return value === "claude-haiku-4-5" || value === "claude-sonnet-5" || value === "claude-opus-4-8" ? value : DEFAULT_ANTHROPIC_MODEL;
   }
   var state = {
     isEnabled: storage.get("translation-enabled") === "true",
@@ -229,6 +239,10 @@ var SpicyLyricTranslater = (() => {
     geminiApiKey: storage.getSecret("gemini-api-key") || "",
     geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
     geminiTemperature: storage.get("gemini-temperature") || "0.3",
+    grokApiKey: storage.getSecret("grok-api-key") || "",
+    grokModel: normalizeStoredGrokModel(storage.get("grok-model")),
+    anthropicApiKey: storage.getSecret("anthropic-api-key") || "",
+    anthropicModel: normalizeStoredAnthropicModel(storage.get("anthropic-model")),
     maxParallelChunks: storage.get("max-parallel-chunks") || "4",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
@@ -775,6 +789,7 @@ var SpicyLyricTranslater = (() => {
     { code: "nl", words: ["de", "het", "een", "en", "van", "is", "dat", "op", "te", "in", "voor", "niet", "met", "zijn", "maar", "ook", "als", "dit"] },
     { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak", "dalej", "sk\u0105d", "niby", "z\u0142o", "b\xF3l", "n\xF3\u017C", "da\u0107", "gar\u015B\u0107", "nigdy", "we", "nikt", "kolejny", "raz", "boli", "mnie", "wiesz", "dosi\u0119gnie", "moja", "psychika", "zabija", "ostry", "wezm\u0119", "lek\xF3w", "chcia\u0142abym", "nic", "czu\u0107", "b\u0119d\u0119", "pod", "go\u0142ym", "niebem", "gwiazd", "mie\u0107", "ju\u017C", "\u017Cadnych", "ran", "przy", "sko\u0144czysz", "ca\u0142a", "\u0142zach"] },
     { code: "lt", words: ["\u012F", "n\u0117ra", "\u010Dia", "ta\u010Diau", "kod\u0117l", "tod\u0117l", "ka\u017Ekas", "sutrikimas", "\u017Emogus", "\u0161irdis", "meil\u0117", "\u017Emon\u0117s", "gyvenimas", "akys", "rankos", "namuose", "namas", "namai", "namie", "i\u0161", "rytoj", "ryt", "\u0161iandien", "niekada", "visada", "atrodo", "kalb\u0117ti", "nebegaliu", "li\u016Bdna", "li\u016Bdnas", "skausmas", "neb\u0117ra", "kai", "kaip", "bybis", "byb\u012F", "dabar", "\u017Eodis", "\u017Eod\u017Eiai", "noriu"] },
+    { code: "lv", words: ["un", "ir", "nav", "ja", "kas", "k\u0101", "t\u0101", "tas", "\u0161is", "\u0161\u012B", "pa", "uz", "ar", "par", "bet", "vai", "n\u0113", "j\u0101", "man", "mans", "mana", "man\u0101", "tev", "tevs", "tavs", "tava", "tevi", "mani", "mums", "jums", "vi\u0146\u0161", "vi\u0146a", "vi\u0146i", "m\u0113s", "j\u016Bs", "tikai", "ar\u012B", "v\u0113l", "jau", "tagad", "kur", "kad", "k\u0101p\u0113c", "viss", "visi", "labi", "labie", "labs", "esi", "esmu", "b\u016Bt", "b\u016Bs", "biju", "sirds", "m\u012Blu", "dz\u012Bve", "nees", "\u010Doms", "pus\u0113"] },
     { code: "hi", words: ["hai", "hain", "hoon", "tha", "thi", "nahi", "nahin", "kya", "kaise", "kaisa", "kaisi", "kahan", "kyun", "kab", "mera", "meri", "tera", "teri", "tere", "tumhara", "hamara", "apna", "apni", "apne", "tujhe", "mujhe", "mujhko", "tujhko", "tumhe", "hume", "unhe", "isko", "usko", "uski", "iski", "iske", "uske", "dil", "pyar", "ishq", "mohabbat", "zindagi", "duniya", "sapna", "sapne", "raat", "din", "aankh", "aankhein", "ankhiyo", "nazar", "waqt", "gham", "khushi", "dard", "rang", "dhoop", "chand", "sitara", "dekho", "dekh", "dekhna", "suno", "sun", "sunna", "bolo", "bol", "bolna", "chalo", "chal", "chalna", "jao", "jana", "aao", "aaja", "aana", "karo", "karna", "milna", "mila", "milo", "ruk", "ruko", "rukna", "jeena", "jee", "nach", "nachle", "gaana", "gana", "bajao", "baja", "dikha", "dikhao", "dikhaa", "parda", "nakhre", "mein", "pe", "par", "wala", "wali", "wale", "bhi", "aur", "lekin", "magar", "phir", "abhi", "kabhi", "hamesha", "humesha", "sirf", "bas", "bahut", "bohot", "zyada", "kuch", "sab", "koi", "kaun", "yahan", "wahan", "udhar", "idhar", "accha", "acha", "theek", "bilkul", "zaroor", "sach", "jhooth", "alag", "saath", "mann", "mehboob", "dilbar", "sanam", "jannat", "husn", "jaane", "jaana", "toh", "se", "ke", "ka", "ki", "ko", "ne", "tu", "hum", "tum", "main", "yeh", "woh", "ab", "jab", "tab", "agar", "mat", "ya"] },
     { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
   ];
@@ -1337,8 +1352,12 @@ var SpicyLyricTranslater = (() => {
   // src/utils/translator.ts
   var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
   var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
+  var DEFAULT_GROK_MODEL2 = "grok-4.5";
+  var DEFAULT_ANTHROPIC_MODEL2 = "claude-haiku-4-5";
   var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
   var DEFAULT_PARALLEL_CHUNKS = 4;
+  var GROK_MODELS = ["grok-4.5", "grok-4.3"];
+  var ANTHROPIC_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"];
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
@@ -1352,6 +1371,10 @@ var SpicyLyricTranslater = (() => {
   var geminiApiKey = "";
   var geminiModel = DEFAULT_GEMINI_MODEL2;
   var geminiTemperature = 0.3;
+  var grokApiKey = "";
+  var grokModel = DEFAULT_GROK_MODEL2;
+  var anthropicApiKey = "";
+  var anthropicModel = DEFAULT_ANTHROPIC_MODEL2;
   var maxParallelChunks = DEFAULT_PARALLEL_CHUNKS;
   var RATE_LIMIT = {
     minDelayMs: 100,
@@ -1406,12 +1429,26 @@ var SpicyLyricTranslater = (() => {
       total: typeof usage.totalTokenCount === "number" ? usage.totalTokenCount : void 0
     };
   }
+  function extractAnthropicUsage(data) {
+    const usage = data?.usage;
+    if (!usage || typeof usage !== "object")
+      return null;
+    const input = typeof usage.input_tokens === "number" ? usage.input_tokens : void 0;
+    const output = typeof usage.output_tokens === "number" ? usage.output_tokens : void 0;
+    if (input === void 0 && output === void 0)
+      return null;
+    return { input, output };
+  }
   function getActiveModelName() {
     switch (preferredApi) {
       case "gemini":
         return geminiModel || void 0;
       case "openai":
         return openaiModel || void 0;
+      case "grok":
+        return grokModel || void 0;
+      case "anthropic":
+        return anthropicModel || void 0;
       case "custom":
         return customApiModel || void 0;
       default:
@@ -1818,6 +1855,14 @@ var SpicyLyricTranslater = (() => {
         geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
       if (apiKeys.geminiTemperature !== void 0)
         geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
+      if (apiKeys.grokApiKey !== void 0)
+        grokApiKey = apiKeys.grokApiKey;
+      if (apiKeys.grokModel !== void 0)
+        grokModel = normalizeGrokModelName(apiKeys.grokModel);
+      if (apiKeys.anthropicApiKey !== void 0)
+        anthropicApiKey = apiKeys.anthropicApiKey;
+      if (apiKeys.anthropicModel !== void 0)
+        anthropicModel = normalizeAnthropicModelName(apiKeys.anthropicModel);
       if (apiKeys.maxParallelChunks !== void 0)
         maxParallelChunks = normalizeMaxParallelChunks(apiKeys.maxParallelChunks);
     }
@@ -2151,6 +2196,18 @@ var SpicyLyricTranslater = (() => {
       return trimmed;
     return DEFAULT_OPENAI_MODEL2;
   }
+  function normalizeGrokModelName(model) {
+    const trimmed = (model || "").trim();
+    if (!trimmed)
+      return DEFAULT_GROK_MODEL2;
+    return GROK_MODELS.includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL2;
+  }
+  function normalizeAnthropicModelName(model) {
+    const trimmed = (model || "").trim();
+    if (!trimmed)
+      return DEFAULT_ANTHROPIC_MODEL2;
+    return ANTHROPIC_MODELS.includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL2;
+  }
   function isOpenAISpeedModeModel(model) {
     return model === "gpt-5.5";
   }
@@ -2257,6 +2314,84 @@ ${text}`
       }
     }
     throw new Error("Invalid response from Gemini API");
+  }
+  function buildLyricsTranslationInstruction(langName) {
+    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+  }
+  async function translateWithGrok(text, targetLang) {
+    if (!grokApiKey) {
+      throw createProviderConfigError("Grok (xAI) API key not configured. Set it in Settings.");
+    }
+    const langName = getTranslationLanguageName(targetLang);
+    const model = normalizeGrokModelName(grokModel);
+    const data = await postJsonProvider(
+      "https://api.x.ai/v1/chat/completions",
+      {
+        model,
+        messages: [
+          { role: "system", content: buildLyricsTranslationInstruction(langName) },
+          { role: "user", content: text }
+        ],
+        temperature: 0.3,
+        max_tokens: Math.max(text.length * 3, 2048)
+      },
+      {
+        "Authorization": `Bearer ${grokApiKey}`,
+        "Content-Type": "application/json"
+      },
+      "Grok",
+      { preferCosmos: true }
+    );
+    recordApiUsage(extractOpenAIUsage(data));
+    if (data.choices && data.choices.length > 0) {
+      const translation = data.choices[0].message?.content?.trim();
+      if (translation) {
+        return { translation };
+      }
+    }
+    throw new Error("Invalid response from Grok API");
+  }
+  function anthropicModelSupportsThinkingToggle(model) {
+    return model === "claude-sonnet-5" || model === "claude-opus-4-8";
+  }
+  async function translateWithAnthropic(text, targetLang) {
+    if (!anthropicApiKey) {
+      throw createProviderConfigError("Claude (Anthropic) API key not configured. Set it in Settings.");
+    }
+    const langName = getTranslationLanguageName(targetLang);
+    const model = normalizeAnthropicModelName(anthropicModel);
+    const body = {
+      model,
+      max_tokens: Math.min(8192, Math.max(text.length * 2, 1024)),
+      system: buildLyricsTranslationInstruction(langName),
+      messages: [
+        { role: "user", content: text }
+      ]
+    };
+    if (anthropicModelSupportsThinkingToggle(model)) {
+      body.thinking = { type: "disabled" };
+    }
+    const data = await postJsonProvider(
+      "https://api.anthropic.com/v1/messages",
+      body,
+      {
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "Content-Type": "application/json"
+      },
+      "Claude",
+      { preferCosmos: true }
+    );
+    recordApiUsage(extractAnthropicUsage(data));
+    if (Array.isArray(data.content)) {
+      const textBlock = data.content.find((block) => block?.type === "text" && typeof block.text === "string");
+      const translation = textBlock?.text?.trim();
+      if (translation) {
+        return { translation };
+      }
+    }
+    throw new Error("Invalid response from Claude API");
   }
   function validateCustomApiUrl() {
     if (!customApiUrl) {
@@ -2640,7 +2775,7 @@ ${text}`
     return null;
   }
   function providerSupportsParallelChunking() {
-    if (preferredApi === "openai" || preferredApi === "gemini") {
+    if (preferredApi === "openai" || preferredApi === "gemini" || preferredApi === "grok" || preferredApi === "anthropic") {
       return true;
     }
     if (preferredApi === "custom") {
@@ -2852,6 +2987,14 @@ ${text}`
       const result = await translateWithGemini(text, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
+    const tryGrok = async () => {
+      const result = await translateWithGrok(text, targetLang);
+      return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+    const tryAnthropic = async () => {
+      const result = await translateWithAnthropic(text, targetLang);
+      return { translation: result.translation, detectedLang: result.detectedLang };
+    };
     let primaryApi;
     let fallbackApis = [];
     switch (preferredApi) {
@@ -2869,6 +3012,14 @@ ${text}`
         break;
       case "gemini":
         primaryApi = tryGemini;
+        fallbackApis = [{ name: "google", fn: tryGoogle }];
+        break;
+      case "grok":
+        primaryApi = tryGrok;
+        fallbackApis = [{ name: "google", fn: tryGoogle }];
+        break;
+      case "anthropic":
+        primaryApi = tryAnthropic;
         fallbackApis = [{ name: "google", fn: tryGoogle }];
         break;
       case "custom":
@@ -6477,10 +6628,6 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
 }
 
-body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
-    display: none !important;
-}
-
 .slt-replace-line,
 .slt-interleaved-translation,
 .slt-sync-translation {
@@ -6890,7 +7037,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.1.0" : "0.0.0";
+    return true ? "2.1.1" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -9535,6 +9682,434 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     });
   }
 
+  // src/utils/connectivity.ts
+  var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
+  var CLIENT_ID_KEY = "client-id";
+  var CLIENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  function createUuid() {
+    if (crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+    return [
+      hex.slice(0, 4).join(""),
+      hex.slice(4, 6).join(""),
+      hex.slice(6, 8).join(""),
+      hex.slice(8, 10).join(""),
+      hex.slice(10, 16).join("")
+    ].join("-");
+  }
+  function getOrCreateClientId() {
+    let clientId = storage.get(CLIENT_ID_KEY);
+    if (!clientId || !CLIENT_ID_REGEX.test(clientId)) {
+      clientId = createUuid();
+      storage.set(CLIENT_ID_KEY, clientId);
+    }
+    return clientId;
+  }
+  var HEARTBEAT_INTERVAL = 3e4;
+  var LATENCY_CHECK_INTERVAL = 15e3;
+  var CONNECTION_TIMEOUT = 5e3;
+  var INITIAL_DELAY = 3e3;
+  var LATENCY_SAMPLES = 3;
+  var SAMPLE_DELAY = 500;
+  var LATENCY_THRESHOLDS = {
+    GREAT: 150,
+    OK: 300,
+    BAD: 500
+  };
+  var indicatorState = {
+    state: "disconnected",
+    sessionId: null,
+    latencyMs: null,
+    totalUsers: 0,
+    region: "",
+    lastHeartbeat: 0,
+    isInitialized: false
+  };
+  var heartbeatInterval = null;
+  var latencyInterval = null;
+  var containerElement = null;
+  var indicatorHidden = false;
+  function applyIndicatorVisibility() {
+    if (containerElement) {
+      containerElement.style.display = indicatorHidden ? "none" : "";
+    }
+  }
+  function setConnectionIndicatorHidden(hidden) {
+    indicatorHidden = hidden;
+    applyIndicatorVisibility();
+  }
+  function getLatencyClass(latencyMs) {
+    if (latencyMs <= LATENCY_THRESHOLDS.GREAT)
+      return "slt-ci-great";
+    if (latencyMs <= LATENCY_THRESHOLDS.OK)
+      return "slt-ci-ok";
+    if (latencyMs <= LATENCY_THRESHOLDS.BAD)
+      return "slt-ci-bad";
+    return "slt-ci-horrible";
+  }
+  function formatUserCount(count) {
+    if (!count || count < 0)
+      return "0";
+    if (count < 1e3)
+      return String(count);
+    if (count < 1e6) {
+      const k = count / 1e3;
+      return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}K`;
+    }
+    return `${Math.round(count / 1e6 * 10) / 10}M`;
+  }
+  function setLabel(button, text) {
+    button.setAttribute("aria-label", text);
+    button.setAttribute("title", text);
+  }
+  function createIndicatorElement() {
+    const container = document.createElement("div");
+    container.className = "SLT_ConnectionIndicator";
+    container.innerHTML = `
+        <div class="slt-ci-button" aria-label="Connection Status">
+            <span class="slt-ci-dot"></span>
+            <div class="slt-ci-meta">
+                <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
+                <span class="slt-ci-sep"></span>
+                <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <span class="slt-ci-total-count">0</span>
+                </span>
+            </div>
+        </div>
+    `;
+    return container;
+  }
+  function updateUI() {
+    if (!containerElement)
+      return;
+    applyIndicatorVisibility();
+    const button = containerElement.querySelector(".slt-ci-button");
+    const dot = containerElement.querySelector(".slt-ci-dot");
+    const pingEl = containerElement.querySelector(".slt-ci-ping");
+    const totalCountEl = containerElement.querySelector(".slt-ci-total-count");
+    if (!button || !dot)
+      return;
+    dot.classList.remove("slt-ci-connecting", "slt-ci-connected", "slt-ci-error", "slt-ci-great", "slt-ci-ok", "slt-ci-bad", "slt-ci-horrible");
+    switch (indicatorState.state) {
+      case "connected": {
+        dot.classList.add("slt-ci-connected");
+        const latencyClass = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : "";
+        if (indicatorState.latencyMs !== null) {
+          dot.classList.add(latencyClass);
+          if (pingEl) {
+            pingEl.textContent = `${indicatorState.latencyMs}ms`;
+            pingEl.className = `slt-ci-ping ${latencyClass}`;
+          }
+        }
+        if (totalCountEl)
+          totalCountEl.textContent = formatUserCount(indicatorState.totalUsers);
+        const ping = indicatorState.latencyMs !== null ? `${indicatorState.latencyMs}ms` : "measuring\u2026";
+        setLabel(button, `Connected \xB7 ${ping} \xB7 ${indicatorState.totalUsers.toLocaleString()} users installed`);
+        break;
+      }
+      case "connecting":
+      case "reconnecting":
+        dot.classList.add("slt-ci-connecting");
+        if (pingEl) {
+          pingEl.textContent = "--ms";
+          pingEl.className = "slt-ci-ping";
+        }
+        setLabel(button, indicatorState.state === "reconnecting" ? "Reconnecting\u2026" : "Connecting\u2026");
+        break;
+      case "error":
+        dot.classList.add("slt-ci-error");
+        if (pingEl) {
+          pingEl.textContent = "ERR";
+          pingEl.className = "slt-ci-ping slt-ci-horrible";
+        }
+        setLabel(button, "Connection error \u2014 retrying\u2026");
+        break;
+      case "disconnected":
+      default:
+        if (pingEl) {
+          pingEl.textContent = "--ms";
+          pingEl.className = "slt-ci-ping";
+        }
+        setLabel(button, "Disconnected");
+        break;
+    }
+  }
+  async function fetchWithTimeout3(url, options = {}, timeout = CONNECTION_TIMEOUT) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      return response;
+    } catch (error2) {
+      clearTimeout(id);
+      throw error2;
+    }
+  }
+  async function measureLatency() {
+    try {
+      const startTime = performance.now();
+      const response = await fetchWithTimeout3(`${API_BASE}?action=ping&_=${Date.now()}`);
+      if (!response.ok)
+        return null;
+      await response.json();
+      return Math.round(performance.now() - startTime);
+    } catch (error2) {
+      return null;
+    }
+  }
+  async function measureLatencyAccurate() {
+    const samples = [];
+    for (let i = 0; i < LATENCY_SAMPLES; i++) {
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, SAMPLE_DELAY));
+      }
+      const latency = await measureLatency();
+      if (latency !== null) {
+        samples.push(latency);
+      }
+    }
+    if (samples.length === 0)
+      return null;
+    if (samples.length === 1)
+      return samples[0];
+    samples.sort((a, b) => a - b);
+    const trimmed = samples.slice(0, -1);
+    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
+    return Math.round(avg);
+  }
+  async function sendHeartbeat() {
+    try {
+      const params = new URLSearchParams({
+        action: "heartbeat",
+        session: indicatorState.sessionId || "",
+        version: storage.get("extension-version") || "1.0.0",
+        clientId: getOrCreateClientId()
+      });
+      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
+      if (!response.ok)
+        throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.success) {
+        indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
+        indicatorState.totalUsers = data.totalUsers || 0;
+        indicatorState.region = data.region || "";
+        indicatorState.lastHeartbeat = Date.now();
+        if (indicatorState.state !== "connected") {
+          indicatorState.state = "connected";
+          updateUI();
+        }
+        return true;
+      }
+      return false;
+    } catch (error2) {
+      return false;
+    }
+  }
+  async function connect() {
+    indicatorState.state = "connecting";
+    updateUI();
+    try {
+      const params = new URLSearchParams({
+        action: "connect",
+        version: storage.get("extension-version") || "1.0.0",
+        clientId: getOrCreateClientId()
+      });
+      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
+      if (!response.ok)
+        throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.success) {
+        indicatorState.sessionId = data.sessionId;
+        indicatorState.totalUsers = data.totalUsers || 0;
+        indicatorState.region = data.region || "";
+        indicatorState.state = "connected";
+        indicatorState.lastHeartbeat = Date.now();
+        setTimeout(async () => {
+          const latency = await measureLatencyAccurate();
+          if (latency !== null) {
+            indicatorState.latencyMs = latency;
+            updateUI();
+          }
+        }, 1e3);
+        updateUI();
+        return true;
+      }
+      throw new Error("Connection failed");
+    } catch (error2) {
+      const isAbortError = error2 instanceof Error && error2.name === "AbortError";
+      if (!isAbortError) {
+      }
+      indicatorState.state = "error";
+      updateUI();
+      setTimeout(() => {
+        if (indicatorState.state === "error") {
+          indicatorState.state = "reconnecting";
+          updateUI();
+          connect();
+        }
+      }, 5e3);
+      return false;
+    }
+  }
+  async function disconnect() {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    if (latencyInterval) {
+      clearInterval(latencyInterval);
+      latencyInterval = null;
+    }
+    if (indicatorState.sessionId) {
+      try {
+        const params = new URLSearchParams({
+          action: "disconnect",
+          session: indicatorState.sessionId
+        });
+        await fetch(`${API_BASE}?${params}`);
+      } catch (e) {
+      }
+    }
+    indicatorState.state = "disconnected";
+    indicatorState.sessionId = null;
+    indicatorState.latencyMs = null;
+    updateUI();
+  }
+  function startPeriodicChecks() {
+    heartbeatInterval = setInterval(async () => {
+      const success = await sendHeartbeat();
+      if (!success && indicatorState.state === "connected") {
+        indicatorState.state = "reconnecting";
+        updateUI();
+        connect();
+      }
+    }, HEARTBEAT_INTERVAL);
+    latencyInterval = setInterval(async () => {
+      const latency = await measureLatency();
+      if (latency !== null) {
+        indicatorState.latencyMs = latency;
+        updateUI();
+      }
+    }, LATENCY_CHECK_INTERVAL);
+  }
+  function getIndicatorContainer() {
+    const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
+    if (topBarContentRight)
+      return topBarContentRight;
+    const userWidget = document.querySelector(".main-userWidget-box");
+    if (userWidget && userWidget.parentNode)
+      return userWidget.parentNode;
+    const historyButtons = document.querySelector(".main-topBar-historyButtons");
+    if (historyButtons && historyButtons.parentNode)
+      return historyButtons.parentNode;
+    return null;
+  }
+  function waitForElement2(selector, timeout = 1e4) {
+    return new Promise((resolve) => {
+      const element = document.querySelector(selector);
+      if (element) {
+        resolve(element);
+        return;
+      }
+      const observer = new MutationObserver((mutations, obs) => {
+        const el = document.querySelector(selector);
+        if (el) {
+          obs.disconnect();
+          resolve(el);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => {
+        observer.disconnect();
+        resolve(document.querySelector(selector));
+      }, timeout);
+    });
+  }
+  async function appendToDOM() {
+    if (containerElement && containerElement.parentNode) {
+      applyIndicatorVisibility();
+      return true;
+    }
+    const container = getIndicatorContainer();
+    if (container) {
+      containerElement = createIndicatorElement();
+      container.insertBefore(containerElement, container.firstChild);
+      applyIndicatorVisibility();
+      return true;
+    }
+    const topBarContentRight = await waitForElement2(".main-topBar-topbarContentRight");
+    if (topBarContentRight) {
+      containerElement = createIndicatorElement();
+      topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
+      applyIndicatorVisibility();
+      return true;
+    }
+    return false;
+  }
+  async function initConnectionIndicator() {
+    if (indicatorState.isInitialized)
+      return;
+    const appended = await appendToDOM();
+    if (!appended)
+      return;
+    indicatorState.isInitialized = true;
+    await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
+    const connected = await connect();
+    if (connected) {
+      startPeriodicChecks();
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (latencyInterval) {
+          clearInterval(latencyInterval);
+          latencyInterval = null;
+        }
+      } else {
+        if (indicatorState.state === "connected") {
+          latencyInterval = setInterval(async () => {
+            const latency = await measureLatency();
+            if (latency !== null) {
+              indicatorState.latencyMs = latency;
+              updateUI();
+            }
+          }, LATENCY_CHECK_INTERVAL);
+          setTimeout(async () => {
+            const latency = await measureLatencyAccurate();
+            if (latency !== null) {
+              indicatorState.latencyMs = latency;
+              updateUI();
+            }
+          }, 500);
+        }
+      }
+    });
+    window.addEventListener("beforeunload", () => {
+      disconnect();
+    });
+  }
+  function getConnectionState() {
+    return { ...indicatorState };
+  }
+  async function refreshConnection() {
+    await disconnect();
+    await connect();
+    if (indicatorState.state === "connected") {
+      startPeriodicChecks();
+    }
+  }
+
   // src/utils/settingsModel.ts
   var API_OPTIONS = [
     { value: "google", text: "Google Translate" },
@@ -9542,6 +10117,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     { value: "deepl", text: "DeepL" },
     { value: "openai", text: "OpenAI" },
     { value: "gemini", text: "Gemini" },
+    { value: "grok", text: "Grok (xAI)" },
+    { value: "anthropic", text: "Claude (Anthropic)" },
     { value: "custom", text: "Custom API" }
   ];
   var CUSTOM_API_FORMAT_OPTIONS = [
@@ -9713,6 +10290,55 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       visibleForApis: ["gemini"]
     },
     {
+      id: "grok-api-key",
+      label: "Grok (xAI) API Key",
+      type: "password",
+      storageKey: "grok-api-key",
+      defaultValue: "",
+      placeholder: "xai-...",
+      description: "Get a key at console.x.ai",
+      secret: true,
+      visibleForApis: ["grok"]
+    },
+    {
+      id: "grok-model",
+      label: "Grok Model",
+      type: "select",
+      storageKey: "grok-model",
+      defaultValue: "grok-4.5",
+      options: [
+        { value: "grok-4.5", text: "Grok 4.5 (recommended)" },
+        { value: "grok-4.3", text: "Grok 4.3" }
+      ],
+      description: "Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship",
+      visibleForApis: ["grok"]
+    },
+    {
+      id: "anthropic-api-key",
+      label: "Claude (Anthropic) API Key",
+      type: "password",
+      storageKey: "anthropic-api-key",
+      defaultValue: "",
+      placeholder: "sk-ant-...",
+      description: "Get a key at console.anthropic.com",
+      secret: true,
+      visibleForApis: ["anthropic"]
+    },
+    {
+      id: "anthropic-model",
+      label: "Claude Model",
+      type: "select",
+      storageKey: "anthropic-model",
+      defaultValue: "claude-haiku-4-5",
+      options: [
+        { value: "claude-haiku-4-5", text: "Haiku 4.5 (fast & cheap)" },
+        { value: "claude-sonnet-5", text: "Sonnet 5 (balanced)" },
+        { value: "claude-opus-4-8", text: "Opus 4.8 (best quality)" }
+      ],
+      description: "Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics",
+      visibleForApis: ["anthropic"]
+    },
+    {
       id: "max-parallel-chunks",
       label: "Parallel Translation Requests",
       type: "select",
@@ -9727,7 +10353,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         { value: "6", text: "6 requests" }
       ],
       description: "\u26A0 Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.",
-      visibleForApis: ["openai", "gemini", "custom"]
+      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"]
     },
     {
       id: "auto-translate",
@@ -9822,6 +10448,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       geminiApiKey: state.geminiApiKey,
       geminiModel: state.geminiModel,
       geminiTemperature: state.geminiTemperature,
+      grokApiKey: state.grokApiKey,
+      grokModel: state.grokModel,
+      anthropicApiKey: state.anthropicApiKey,
+      anthropicModel: state.anthropicModel,
       maxParallelChunks: state.maxParallelChunks
     });
   }
@@ -9890,6 +10520,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         break;
       case "gemini-temperature":
         state.geminiTemperature = String(value);
+        configureTranslationApi();
+        break;
+      case "grok-api-key":
+        state.grokApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "grok-model":
+        state.grokModel = String(value);
+        configureTranslationApi();
+        break;
+      case "anthropic-api-key":
+        state.anthropicApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "anthropic-model":
+        state.anthropicModel = String(value);
         configureTranslationApi();
         break;
       case "max-parallel-chunks":
@@ -10047,7 +10693,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       document.body.classList.toggle("slt-vocabulary-mode", Boolean(value));
     }
     if (effects.includes("connectionIndicatorClass")) {
-      document.body.classList.toggle("slt-hide-connection-indicator", Boolean(value));
+      setConnectionIndicatorHidden(Boolean(value));
     }
     if (effects.includes("reapplyTranslations")) {
       reapplyTranslations();
@@ -10344,6 +10990,84 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       });
     });
   }
+  function connectionStateLabel(connectionState) {
+    switch (connectionState) {
+      case "connected":
+        return "Connected";
+      case "connecting":
+        return "Connecting\u2026";
+      case "reconnecting":
+        return "Reconnecting\u2026";
+      case "error":
+        return "Connection error";
+      default:
+        return "Disconnected";
+    }
+  }
+  function connectionLatencyClass(latencyMs) {
+    if (latencyMs === null)
+      return "";
+    if (latencyMs <= 150)
+      return "slt-conn-great";
+    if (latencyMs <= 300)
+      return "slt-conn-ok";
+    if (latencyMs <= 500)
+      return "slt-conn-bad";
+    return "slt-conn-horrible";
+  }
+  function renderConnectionStatusMarkup() {
+    return `
+        <div class="slt-conn-card" id="slt-connection-status">
+            <div class="slt-conn-head">
+                <span class="slt-conn-dot"></span>
+                <span class="slt-conn-title">Connection Status</span>
+                <span class="slt-conn-state">Disconnected</span>
+            </div>
+            <div class="slt-conn-metrics">
+                <div class="slt-conn-metric">
+                    <span class="slt-conn-value slt-conn-ping">\u2014</span>
+                    <span class="slt-conn-label">Ping</span>
+                </div>
+                <div class="slt-conn-metric">
+                    <span class="slt-conn-value slt-conn-users">\u2014</span>
+                    <span class="slt-conn-label">Users installed</span>
+                </div>
+            </div>
+        </div>`;
+  }
+  function updateConnectionStatusCard(root) {
+    const card = root.querySelector("#slt-connection-status");
+    if (!card)
+      return;
+    const conn = getConnectionState();
+    const dot = card.querySelector(".slt-conn-dot");
+    const stateEl = card.querySelector(".slt-conn-state");
+    const pingEl = card.querySelector(".slt-conn-ping");
+    const usersEl = card.querySelector(".slt-conn-users");
+    const latencyClass = connectionLatencyClass(conn.latencyMs);
+    const showLatency = conn.state === "connected" && latencyClass;
+    if (dot)
+      dot.className = `slt-conn-dot slt-conn-${conn.state}${showLatency ? " " + latencyClass : ""}`;
+    if (stateEl)
+      stateEl.textContent = connectionStateLabel(conn.state);
+    if (pingEl) {
+      pingEl.textContent = conn.latencyMs !== null ? `${conn.latencyMs} ms` : "\u2014";
+      pingEl.className = `slt-conn-value slt-conn-ping${latencyClass ? " " + latencyClass : ""}`;
+    }
+    if (usersEl)
+      usersEl.textContent = conn.totalUsers > 0 ? conn.totalUsers.toLocaleString() : "\u2014";
+  }
+  function startConnectionStatusUpdates(root) {
+    updateConnectionStatusCard(root);
+    const card = root.querySelector("#slt-connection-status");
+    const interval = setInterval(() => {
+      if (!card || !card.isConnected) {
+        clearInterval(interval);
+        return;
+      }
+      updateConnectionStatusCard(root);
+    }, 2e3);
+  }
   function createSettingsUI() {
     const container = document.createElement("div");
     container.className = "slt-settings-container";
@@ -10606,6 +11330,75 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 opacity: 0.7;
                 padding-top: 2px;
             }
+            .slt-conn-card {
+                margin: 6px 2px 2px;
+                padding: 14px 16px;
+                border-radius: var(--slt-radius-sm);
+                background: var(--slt-surface);
+                box-shadow: inset 0 0 0 1px var(--slt-hairline);
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .slt-conn-head {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+            }
+            .slt-conn-dot {
+                width: 9px;
+                height: 9px;
+                border-radius: 999px;
+                background: var(--slt-text-3);
+                flex-shrink: 0;
+                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+            }
+            .slt-conn-dot.slt-conn-connecting,
+            .slt-conn-dot.slt-conn-reconnecting { background: #ffd35c; }
+            .slt-conn-dot.slt-conn-error { background: #f1556c; }
+            .slt-conn-dot.slt-conn-connected { background: #1ed760; }
+            .slt-conn-dot.slt-conn-great { background: #1ed760; }
+            .slt-conn-dot.slt-conn-ok { background: #ffd35c; }
+            .slt-conn-dot.slt-conn-bad { background: #ff9f45; }
+            .slt-conn-dot.slt-conn-horrible { background: #f1556c; }
+            .slt-conn-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--slt-text);
+            }
+            .slt-conn-state {
+                margin-left: auto;
+                font-size: 12px;
+                color: var(--slt-text-2);
+            }
+            .slt-conn-metrics {
+                display: flex;
+                gap: 10px;
+            }
+            .slt-conn-metric {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                padding: 10px 12px;
+                border-radius: var(--slt-radius-sm);
+                background: rgba(0, 0, 0, 0.18);
+            }
+            .slt-conn-value {
+                font-size: 17px;
+                font-weight: 600;
+                color: var(--slt-text);
+                font-variant-numeric: tabular-nums;
+            }
+            .slt-conn-value.slt-conn-great { color: #1ed760; }
+            .slt-conn-value.slt-conn-ok { color: #ffd35c; }
+            .slt-conn-value.slt-conn-bad { color: #ff9f45; }
+            .slt-conn-value.slt-conn-horrible { color: #f1556c; }
+            .slt-conn-label {
+                font-size: 11px;
+                letter-spacing: 0.02em;
+                color: var(--slt-text-3);
+            }
             @media (max-width: 620px) {
                 .slt-modal-field {
                     grid-template-columns: 1fr;
@@ -10618,6 +11411,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         </style>
         
         ${renderModalSettingsMarkup()}
+
+        ${renderConnectionStatusMarkup()}
 
         <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
             <div style="display: flex; gap: 8px; width: 100%;">
@@ -10651,6 +11446,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     setTimeout(() => {
       bindModalSettingsFields(container);
       bindModalCacheActions(container);
+      startConnectionStatusUpdates(container);
       const viewCacheButton = container.querySelector("#slt-view-cache");
       const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
       const checkUpdatesButton = container.querySelector("#slt-check-updates");
@@ -12236,419 +13032,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     }
   }
 
-  // src/utils/connectivity.ts
-  var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
-  var CLIENT_ID_KEY = "client-id";
-  var CLIENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  function createUuid() {
-    if (crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = bytes[6] & 15 | 64;
-    bytes[8] = bytes[8] & 63 | 128;
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
-    return [
-      hex.slice(0, 4).join(""),
-      hex.slice(4, 6).join(""),
-      hex.slice(6, 8).join(""),
-      hex.slice(8, 10).join(""),
-      hex.slice(10, 16).join("")
-    ].join("-");
-  }
-  function getOrCreateClientId() {
-    let clientId = storage.get(CLIENT_ID_KEY);
-    if (!clientId || !CLIENT_ID_REGEX.test(clientId)) {
-      clientId = createUuid();
-      storage.set(CLIENT_ID_KEY, clientId);
-    }
-    return clientId;
-  }
-  var HEARTBEAT_INTERVAL = 3e4;
-  var LATENCY_CHECK_INTERVAL = 15e3;
-  var CONNECTION_TIMEOUT = 5e3;
-  var INITIAL_DELAY = 3e3;
-  var LATENCY_SAMPLES = 3;
-  var SAMPLE_DELAY = 500;
-  var LATENCY_THRESHOLDS = {
-    GREAT: 150,
-    OK: 300,
-    BAD: 500
-  };
-  var indicatorState = {
-    state: "disconnected",
-    sessionId: null,
-    latencyMs: null,
-    totalUsers: 0,
-    region: "",
-    lastHeartbeat: 0,
-    isInitialized: false
-  };
-  var heartbeatInterval = null;
-  var latencyInterval = null;
-  var containerElement = null;
-  function getLatencyClass(latencyMs) {
-    if (latencyMs <= LATENCY_THRESHOLDS.GREAT)
-      return "slt-ci-great";
-    if (latencyMs <= LATENCY_THRESHOLDS.OK)
-      return "slt-ci-ok";
-    if (latencyMs <= LATENCY_THRESHOLDS.BAD)
-      return "slt-ci-bad";
-    return "slt-ci-horrible";
-  }
-  function formatUserCount(count) {
-    if (!count || count < 0)
-      return "0";
-    if (count < 1e3)
-      return String(count);
-    if (count < 1e6) {
-      const k = count / 1e3;
-      return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}K`;
-    }
-    return `${Math.round(count / 1e6 * 10) / 10}M`;
-  }
-  function setLabel(button, text) {
-    button.setAttribute("aria-label", text);
-    button.setAttribute("title", text);
-  }
-  function createIndicatorElement() {
-    const container = document.createElement("div");
-    container.className = "SLT_ConnectionIndicator";
-    container.innerHTML = `
-        <div class="slt-ci-button" aria-label="Connection Status">
-            <span class="slt-ci-dot"></span>
-            <div class="slt-ci-meta">
-                <span class="slt-ci-ping" aria-label="Round-trip latency to SLT server">--ms</span>
-                <span class="slt-ci-sep"></span>
-                <span class="slt-ci-users-count slt-ci-total" aria-label="Total users with extension installed">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                    </svg>
-                    <span class="slt-ci-total-count">0</span>
-                </span>
-            </div>
-        </div>
-    `;
-    return container;
-  }
-  function updateUI() {
-    if (!containerElement)
-      return;
-    const button = containerElement.querySelector(".slt-ci-button");
-    const dot = containerElement.querySelector(".slt-ci-dot");
-    const pingEl = containerElement.querySelector(".slt-ci-ping");
-    const totalCountEl = containerElement.querySelector(".slt-ci-total-count");
-    if (!button || !dot)
-      return;
-    dot.classList.remove("slt-ci-connecting", "slt-ci-connected", "slt-ci-error", "slt-ci-great", "slt-ci-ok", "slt-ci-bad", "slt-ci-horrible");
-    switch (indicatorState.state) {
-      case "connected": {
-        dot.classList.add("slt-ci-connected");
-        const latencyClass = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : "";
-        if (indicatorState.latencyMs !== null) {
-          dot.classList.add(latencyClass);
-          if (pingEl) {
-            pingEl.textContent = `${indicatorState.latencyMs}ms`;
-            pingEl.className = `slt-ci-ping ${latencyClass}`;
-          }
-        }
-        if (totalCountEl)
-          totalCountEl.textContent = formatUserCount(indicatorState.totalUsers);
-        const ping = indicatorState.latencyMs !== null ? `${indicatorState.latencyMs}ms` : "measuring\u2026";
-        setLabel(button, `Connected \xB7 ${ping} \xB7 ${indicatorState.totalUsers.toLocaleString()} users installed`);
-        break;
-      }
-      case "connecting":
-      case "reconnecting":
-        dot.classList.add("slt-ci-connecting");
-        if (pingEl) {
-          pingEl.textContent = "--ms";
-          pingEl.className = "slt-ci-ping";
-        }
-        setLabel(button, indicatorState.state === "reconnecting" ? "Reconnecting\u2026" : "Connecting\u2026");
-        break;
-      case "error":
-        dot.classList.add("slt-ci-error");
-        if (pingEl) {
-          pingEl.textContent = "ERR";
-          pingEl.className = "slt-ci-ping slt-ci-horrible";
-        }
-        setLabel(button, "Connection error \u2014 retrying\u2026");
-        break;
-      case "disconnected":
-      default:
-        if (pingEl) {
-          pingEl.textContent = "--ms";
-          pingEl.className = "slt-ci-ping";
-        }
-        setLabel(button, "Disconnected");
-        break;
-    }
-  }
-  async function fetchWithTimeout3(url, options = {}, timeout = CONNECTION_TIMEOUT) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(id);
-      return response;
-    } catch (error2) {
-      clearTimeout(id);
-      throw error2;
-    }
-  }
-  async function measureLatency() {
-    try {
-      const startTime = performance.now();
-      const response = await fetchWithTimeout3(`${API_BASE}?action=ping&_=${Date.now()}`);
-      if (!response.ok)
-        return null;
-      await response.json();
-      return Math.round(performance.now() - startTime);
-    } catch (error2) {
-      return null;
-    }
-  }
-  async function measureLatencyAccurate() {
-    const samples = [];
-    for (let i = 0; i < LATENCY_SAMPLES; i++) {
-      if (i > 0) {
-        await new Promise((resolve) => setTimeout(resolve, SAMPLE_DELAY));
-      }
-      const latency = await measureLatency();
-      if (latency !== null) {
-        samples.push(latency);
-      }
-    }
-    if (samples.length === 0)
-      return null;
-    if (samples.length === 1)
-      return samples[0];
-    samples.sort((a, b) => a - b);
-    const trimmed = samples.slice(0, -1);
-    const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
-    return Math.round(avg);
-  }
-  async function sendHeartbeat() {
-    try {
-      const params = new URLSearchParams({
-        action: "heartbeat",
-        session: indicatorState.sessionId || "",
-        version: storage.get("extension-version") || "1.0.0",
-        clientId: getOrCreateClientId()
-      });
-      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
-      if (!response.ok)
-        throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (data.success) {
-        indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
-        indicatorState.totalUsers = data.totalUsers || 0;
-        indicatorState.region = data.region || "";
-        indicatorState.lastHeartbeat = Date.now();
-        if (indicatorState.state !== "connected") {
-          indicatorState.state = "connected";
-          updateUI();
-        }
-        return true;
-      }
-      return false;
-    } catch (error2) {
-      return false;
-    }
-  }
-  async function connect() {
-    indicatorState.state = "connecting";
-    updateUI();
-    try {
-      const params = new URLSearchParams({
-        action: "connect",
-        version: storage.get("extension-version") || "1.0.0",
-        clientId: getOrCreateClientId()
-      });
-      const response = await fetchWithTimeout3(`${API_BASE}?${params}`);
-      if (!response.ok)
-        throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (data.success) {
-        indicatorState.sessionId = data.sessionId;
-        indicatorState.totalUsers = data.totalUsers || 0;
-        indicatorState.region = data.region || "";
-        indicatorState.state = "connected";
-        indicatorState.lastHeartbeat = Date.now();
-        setTimeout(async () => {
-          const latency = await measureLatencyAccurate();
-          if (latency !== null) {
-            indicatorState.latencyMs = latency;
-            updateUI();
-          }
-        }, 1e3);
-        updateUI();
-        return true;
-      }
-      throw new Error("Connection failed");
-    } catch (error2) {
-      const isAbortError = error2 instanceof Error && error2.name === "AbortError";
-      if (!isAbortError) {
-      }
-      indicatorState.state = "error";
-      updateUI();
-      setTimeout(() => {
-        if (indicatorState.state === "error") {
-          indicatorState.state = "reconnecting";
-          updateUI();
-          connect();
-        }
-      }, 5e3);
-      return false;
-    }
-  }
-  async function disconnect() {
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
-    if (latencyInterval) {
-      clearInterval(latencyInterval);
-      latencyInterval = null;
-    }
-    if (indicatorState.sessionId) {
-      try {
-        const params = new URLSearchParams({
-          action: "disconnect",
-          session: indicatorState.sessionId
-        });
-        await fetch(`${API_BASE}?${params}`);
-      } catch (e) {
-      }
-    }
-    indicatorState.state = "disconnected";
-    indicatorState.sessionId = null;
-    indicatorState.latencyMs = null;
-    updateUI();
-  }
-  function startPeriodicChecks() {
-    heartbeatInterval = setInterval(async () => {
-      const success = await sendHeartbeat();
-      if (!success && indicatorState.state === "connected") {
-        indicatorState.state = "reconnecting";
-        updateUI();
-        connect();
-      }
-    }, HEARTBEAT_INTERVAL);
-    latencyInterval = setInterval(async () => {
-      const latency = await measureLatency();
-      if (latency !== null) {
-        indicatorState.latencyMs = latency;
-        updateUI();
-      }
-    }, LATENCY_CHECK_INTERVAL);
-  }
-  function getIndicatorContainer() {
-    const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
-    if (topBarContentRight)
-      return topBarContentRight;
-    const userWidget = document.querySelector(".main-userWidget-box");
-    if (userWidget && userWidget.parentNode)
-      return userWidget.parentNode;
-    const historyButtons = document.querySelector(".main-topBar-historyButtons");
-    if (historyButtons && historyButtons.parentNode)
-      return historyButtons.parentNode;
-    return null;
-  }
-  function waitForElement2(selector, timeout = 1e4) {
-    return new Promise((resolve) => {
-      const element = document.querySelector(selector);
-      if (element) {
-        resolve(element);
-        return;
-      }
-      const observer = new MutationObserver((mutations, obs) => {
-        const el = document.querySelector(selector);
-        if (el) {
-          obs.disconnect();
-          resolve(el);
-        }
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(document.querySelector(selector));
-      }, timeout);
-    });
-  }
-  async function appendToDOM() {
-    if (containerElement && containerElement.parentNode)
-      return true;
-    const container = getIndicatorContainer();
-    if (container) {
-      containerElement = createIndicatorElement();
-      container.insertBefore(containerElement, container.firstChild);
-      return true;
-    }
-    const topBarContentRight = await waitForElement2(".main-topBar-topbarContentRight");
-    if (topBarContentRight) {
-      containerElement = createIndicatorElement();
-      topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
-      return true;
-    }
-    return false;
-  }
-  async function initConnectionIndicator() {
-    if (indicatorState.isInitialized)
-      return;
-    const appended = await appendToDOM();
-    if (!appended)
-      return;
-    indicatorState.isInitialized = true;
-    await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
-    const connected = await connect();
-    if (connected) {
-      startPeriodicChecks();
-    }
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        if (latencyInterval) {
-          clearInterval(latencyInterval);
-          latencyInterval = null;
-        }
-      } else {
-        if (indicatorState.state === "connected") {
-          latencyInterval = setInterval(async () => {
-            const latency = await measureLatency();
-            if (latency !== null) {
-              indicatorState.latencyMs = latency;
-              updateUI();
-            }
-          }, LATENCY_CHECK_INTERVAL);
-          setTimeout(async () => {
-            const latency = await measureLatencyAccurate();
-            if (latency !== null) {
-              indicatorState.latencyMs = latency;
-              updateUI();
-            }
-          }, 500);
-        }
-      }
-    });
-    window.addEventListener("beforeunload", () => {
-      disconnect();
-    });
-  }
-  function getConnectionState() {
-    return { ...indicatorState };
-  }
-  async function refreshConnection() {
-    await disconnect();
-    await connect();
-    if (indicatorState.state === "connected") {
-      startPeriodicChecks();
-    }
-  }
-
   // src/utils/initialize.ts
   var initialized = false;
   async function initialize() {
@@ -12670,13 +13053,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       geminiApiKey: state.geminiApiKey,
       geminiModel: state.geminiModel,
       geminiTemperature: state.geminiTemperature,
+      grokApiKey: state.grokApiKey,
+      grokModel: state.grokModel,
+      anthropicApiKey: state.anthropicApiKey,
+      anthropicModel: state.anthropicModel,
       maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
+    setConnectionIndicatorHidden(state.hideConnectionIndicator);
     initConnectionIndicator();
-    if (state.hideConnectionIndicator) {
-      document.body.classList.add("slt-hide-connection-indicator");
-    }
     await registerSettings();
     startUpdateChecker(30 * 60 * 1e3);
     setupKeyboardShortcut();

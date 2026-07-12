@@ -30,13 +30,18 @@ export interface TranslationCache {
     };
 }
 
-export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
+export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom';
 export type CustomApiFormat = 'generic' | 'libretranslate' | 'openai' | 'gemini' | 'deepl';
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GROK_MODEL = 'grok-4.5';
+const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
 const DEFAULT_LIBRETRANSLATE_URL = 'https://libretranslate.com/translate';
 const DEFAULT_PARALLEL_CHUNKS = 4;
+
+const GROK_MODELS = ['grok-4.5', 'grok-4.3'] as const;
+const ANTHROPIC_MODELS = ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-4-8'] as const;
 
 let preferredApi: ApiPreference = 'google';
 let customApiUrl: string = '';
@@ -51,6 +56,10 @@ let openaiModel: string = DEFAULT_OPENAI_MODEL;
 let geminiApiKey: string = '';
 let geminiModel: string = DEFAULT_GEMINI_MODEL;
 let geminiTemperature: number = 0.3;
+let grokApiKey: string = '';
+let grokModel: string = DEFAULT_GROK_MODEL;
+let anthropicApiKey: string = '';
+let anthropicModel: string = DEFAULT_ANTHROPIC_MODEL;
 let maxParallelChunks: number = DEFAULT_PARALLEL_CHUNKS;
 
 const RATE_LIMIT = {
@@ -115,12 +124,25 @@ function extractGeminiUsage(data: any): { input?: number; output?: number; total
     };
 }
 
+function extractAnthropicUsage(data: any): { input?: number; output?: number; total?: number } | null {
+    const usage = data?.usage;
+    if (!usage || typeof usage !== 'object') return null;
+    const input = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
+    const output = typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined;
+    if (input === undefined && output === undefined) return null;
+    return { input, output };
+}
+
 function getActiveModelName(): string | undefined {
     switch (preferredApi) {
         case 'gemini':
             return geminiModel || undefined;
         case 'openai':
             return openaiModel || undefined;
+        case 'grok':
+            return grokModel || undefined;
+        case 'anthropic':
+            return anthropicModel || undefined;
         case 'custom':
             return customApiModel || undefined;
         default:
@@ -382,6 +404,10 @@ type ApiKeyConfig = {
     geminiApiKey?: string;
     geminiModel?: string;
     geminiTemperature?: string | number;
+    grokApiKey?: string;
+    grokModel?: string;
+    anthropicApiKey?: string;
+    anthropicModel?: string;
     maxParallelChunks?: string | number;
 };
 
@@ -634,6 +660,10 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
         if (apiKeys.geminiModel !== undefined) geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
         if (apiKeys.geminiTemperature !== undefined) geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
+        if (apiKeys.grokApiKey !== undefined) grokApiKey = apiKeys.grokApiKey;
+        if (apiKeys.grokModel !== undefined) grokModel = normalizeGrokModelName(apiKeys.grokModel);
+        if (apiKeys.anthropicApiKey !== undefined) anthropicApiKey = apiKeys.anthropicApiKey;
+        if (apiKeys.anthropicModel !== undefined) anthropicModel = normalizeAnthropicModelName(apiKeys.anthropicModel);
         if (apiKeys.maxParallelChunks !== undefined) maxParallelChunks = normalizeMaxParallelChunks(apiKeys.maxParallelChunks);
     }
 }
@@ -1012,6 +1042,18 @@ function normalizeOpenAIModelName(model: string | undefined): string {
     return DEFAULT_OPENAI_MODEL;
 }
 
+function normalizeGrokModelName(model: string | undefined): string {
+    const trimmed = (model || '').trim();
+    if (!trimmed) return DEFAULT_GROK_MODEL;
+    return (GROK_MODELS as readonly string[]).includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL;
+}
+
+function normalizeAnthropicModelName(model: string | undefined): string {
+    const trimmed = (model || '').trim();
+    if (!trimmed) return DEFAULT_ANTHROPIC_MODEL;
+    return (ANTHROPIC_MODELS as readonly string[]).includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL;
+}
+
 function isOpenAISpeedModeModel(model: string): boolean {
     return model === 'gpt-5.5';
 }
@@ -1126,6 +1168,100 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
     }
 
     throw new Error('Invalid response from Gemini API');
+}
+
+function buildLyricsTranslationInstruction(langName: string): string {
+    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+}
+
+async function translateWithGrok(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
+    if (!grokApiKey) {
+        throw createProviderConfigError('Grok (xAI) API key not configured. Set it in Settings.');
+    }
+
+    const langName = getTranslationLanguageName(targetLang);
+    const model = normalizeGrokModelName(grokModel);
+
+    const data = await postJsonProvider(
+        'https://api.x.ai/v1/chat/completions',
+        {
+            model,
+            messages: [
+                { role: 'system', content: buildLyricsTranslationInstruction(langName) },
+                { role: 'user', content: text }
+            ],
+            temperature: 0.3,
+            max_tokens: Math.max(text.length * 3, 2048)
+        },
+        {
+            'Authorization': `Bearer ${grokApiKey}`,
+            'Content-Type': 'application/json'
+        },
+        'Grok',
+        { preferCosmos: true }
+    );
+
+    recordApiUsage(extractOpenAIUsage(data));
+
+    if (data.choices && data.choices.length > 0) {
+        const translation = data.choices[0].message?.content?.trim();
+        if (translation) {
+            return { translation };
+        }
+    }
+
+    throw new Error('Invalid response from Grok API');
+}
+
+function anthropicModelSupportsThinkingToggle(model: string): boolean {
+    return model === 'claude-sonnet-5' || model === 'claude-opus-4-8';
+}
+
+async function translateWithAnthropic(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
+    if (!anthropicApiKey) {
+        throw createProviderConfigError('Claude (Anthropic) API key not configured. Set it in Settings.');
+    }
+
+    const langName = getTranslationLanguageName(targetLang);
+    const model = normalizeAnthropicModelName(anthropicModel);
+
+    const body: Record<string, unknown> = {
+        model,
+        max_tokens: Math.min(8192, Math.max(text.length * 2, 1024)),
+        system: buildLyricsTranslationInstruction(langName),
+        messages: [
+            { role: 'user', content: text }
+        ]
+    };
+
+    if (anthropicModelSupportsThinkingToggle(model)) {
+        body.thinking = { type: 'disabled' };
+    }
+
+    const data = await postJsonProvider(
+        'https://api.anthropic.com/v1/messages',
+        body,
+        {
+            'x-api-key': anthropicApiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+            'Content-Type': 'application/json'
+        },
+        'Claude',
+        { preferCosmos: true }
+    );
+
+    recordApiUsage(extractAnthropicUsage(data));
+
+    if (Array.isArray(data.content)) {
+        const textBlock = data.content.find((block: any) => block?.type === 'text' && typeof block.text === 'string');
+        const translation = textBlock?.text?.trim();
+        if (translation) {
+            return { translation };
+        }
+    }
+
+    throw new Error('Invalid response from Claude API');
 }
 
 function validateCustomApiUrl(): string {
@@ -1594,7 +1730,7 @@ function parseBatchTextFallbacks(translatedText: string, expectedCount: number):
 }
 
 function providerSupportsParallelChunking(): boolean {
-    if (preferredApi === 'openai' || preferredApi === 'gemini') {
+    if (preferredApi === 'openai' || preferredApi === 'gemini' || preferredApi === 'grok' || preferredApi === 'anthropic') {
         return true;
     }
     if (preferredApi === 'custom') {
@@ -1870,7 +2006,17 @@ export async function translateText(text: string, targetLang: string, sourceLang
         const result = await translateWithGemini(text, targetLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
-    
+
+    const tryGrok = async () => {
+        const result = await translateWithGrok(text, targetLang);
+        return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+
+    const tryAnthropic = async () => {
+        const result = await translateWithAnthropic(text, targetLang);
+        return { translation: result.translation, detectedLang: result.detectedLang };
+    };
+
     let primaryApi: () => Promise<{ translation: string; detectedLang?: string }>;
     let fallbackApis: { name: string, fn: () => Promise<{ translation: string; detectedLang?: string }> }[] = [];
     
@@ -1889,6 +2035,14 @@ export async function translateText(text: string, targetLang: string, sourceLang
             break;
         case 'gemini':
             primaryApi = tryGemini;
+            fallbackApis = [{ name: 'google', fn: tryGoogle }];
+            break;
+        case 'grok':
+            primaryApi = tryGrok;
+            fallbackApis = [{ name: 'google', fn: tryGoogle }];
+            break;
+        case 'anthropic':
+            primaryApi = tryAnthropic;
             fallbackApis = [{ name: 'google', fn: tryGoogle }];
             break;
         case 'custom':

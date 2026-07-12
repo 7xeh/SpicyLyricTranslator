@@ -32,6 +32,8 @@ export const API_OPTIONS: SettingsOption[] = [
     { value: 'deepl', text: 'DeepL' },
     { value: 'openai', text: 'OpenAI' },
     { value: 'gemini', text: 'Gemini' },
+    { value: 'grok', text: 'Grok (xAI)' },
+    { value: 'anthropic', text: 'Claude (Anthropic)' },
     { value: 'custom', text: 'Custom API' }
 ];
 
@@ -206,6 +208,55 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         visibleForApis: ['gemini']
     },
     {
+        id: 'grok-api-key',
+        label: 'Grok (xAI) API Key',
+        type: 'password',
+        storageKey: 'grok-api-key',
+        defaultValue: '',
+        placeholder: 'xai-...',
+        description: 'Get a key at console.x.ai',
+        secret: true,
+        visibleForApis: ['grok']
+    },
+    {
+        id: 'grok-model',
+        label: 'Grok Model',
+        type: 'select',
+        storageKey: 'grok-model',
+        defaultValue: 'grok-4.5',
+        options: [
+            { value: 'grok-4.5', text: 'Grok 4.5 (recommended)' },
+            { value: 'grok-4.3', text: 'Grok 4.3' }
+        ],
+        description: 'Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship',
+        visibleForApis: ['grok']
+    },
+    {
+        id: 'anthropic-api-key',
+        label: 'Claude (Anthropic) API Key',
+        type: 'password',
+        storageKey: 'anthropic-api-key',
+        defaultValue: '',
+        placeholder: 'sk-ant-...',
+        description: 'Get a key at console.anthropic.com',
+        secret: true,
+        visibleForApis: ['anthropic']
+    },
+    {
+        id: 'anthropic-model',
+        label: 'Claude Model',
+        type: 'select',
+        storageKey: 'anthropic-model',
+        defaultValue: 'claude-haiku-4-5',
+        options: [
+            { value: 'claude-haiku-4-5', text: 'Haiku 4.5 (fast & cheap)' },
+            { value: 'claude-sonnet-5', text: 'Sonnet 5 (balanced)' },
+            { value: 'claude-opus-4-8', text: 'Opus 4.8 (best quality)' }
+        ],
+        description: 'Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics',
+        visibleForApis: ['anthropic']
+    },
+    {
         id: 'max-parallel-chunks',
         label: 'Parallel Translation Requests',
         type: 'select',
@@ -220,7 +271,7 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
             { value: '6', text: '6 requests' }
         ],
         description: '⚠ Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.',
-        visibleForApis: ['openai', 'gemini', 'custom']
+        visibleForApis: ['openai', 'gemini', 'grok', 'anthropic', 'custom']
     },
     {
         id: 'auto-translate',
@@ -320,6 +371,10 @@ function configureTranslationApi(): void {
         geminiApiKey: state.geminiApiKey,
         geminiModel: state.geminiModel,
         geminiTemperature: state.geminiTemperature,
+        grokApiKey: state.grokApiKey,
+        grokModel: state.grokModel,
+        anthropicApiKey: state.anthropicApiKey,
+        anthropicModel: state.anthropicModel,
         maxParallelChunks: state.maxParallelChunks
     });
 }
@@ -390,6 +445,22 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'gemini-temperature':
             state.geminiTemperature = String(value);
+            configureTranslationApi();
+            break;
+        case 'grok-api-key':
+            state.grokApiKey = String(value);
+            configureTranslationApi();
+            break;
+        case 'grok-model':
+            state.grokModel = String(value);
+            configureTranslationApi();
+            break;
+        case 'anthropic-api-key':
+            state.anthropicApiKey = String(value);
+            configureTranslationApi();
+            break;
+        case 'anthropic-model':
+            state.anthropicModel = String(value);
             configureTranslationApi();
             break;
         case 'max-parallel-chunks':

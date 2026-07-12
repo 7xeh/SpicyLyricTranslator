@@ -4,6 +4,8 @@ import type { CustomApiFormat } from './translator';
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GROK_MODEL = 'grok-4.5';
+const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
 const DEFAULT_LIBRETRANSLATE_URL = 'https://libretranslate.com/translate';
 
 function normalizeStoredOpenAIModel(model: string | null): string {
@@ -20,6 +22,16 @@ function normalizeStoredGeminiModel(model: string | null): string {
     return DEFAULT_GEMINI_MODEL;
 }
 
+function normalizeStoredGrokModel(model: string | null): string {
+    const value = (model || '').trim();
+    return value === 'grok-4.5' || value === 'grok-4.3' ? value : DEFAULT_GROK_MODEL;
+}
+
+function normalizeStoredAnthropicModel(model: string | null): string {
+    const value = (model || '').trim();
+    return value === 'claude-haiku-4-5' || value === 'claude-sonnet-5' || value === 'claude-opus-4-8' ? value : DEFAULT_ANTHROPIC_MODEL;
+}
+
 export interface TranslationQualityMeta {
     source: 'cache' | 'api';
     api?: string;
@@ -34,7 +46,7 @@ export interface ExtensionState {
     targetLanguage: string;
     autoTranslate: boolean;
     showNotifications: boolean;
-    preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom';
+    preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom';
     customApiUrl: string;
     customApiKey: string;
     customApiFormat: CustomApiFormat;
@@ -47,6 +59,10 @@ export interface ExtensionState {
     geminiApiKey: string;
     geminiModel: string;
     geminiTemperature: string;
+    grokApiKey: string;
+    grokModel: string;
+    anthropicApiKey: string;
+    anthropicModel: string;
     maxParallelChunks: string;
     lastTranslatedSongUri: string | null;
     translatedLyrics: Map<string, string>;
@@ -68,7 +84,7 @@ export const state: ExtensionState = {
     targetLanguage: storage.get('target-language') || 'en',
     autoTranslate: storage.get('auto-translate') === 'true',
     showNotifications: storage.get('show-notifications') !== 'false',
-    preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'custom') || 'google',
+    preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom') || 'google',
     customApiUrl: storage.get('custom-api-url') || '',
     customApiKey: storage.getSecret('custom-api-key') || '',
     customApiFormat: (storage.get('custom-api-format') as CustomApiFormat) || 'generic',
@@ -81,6 +97,10 @@ export const state: ExtensionState = {
     geminiApiKey: storage.getSecret('gemini-api-key') || '',
     geminiModel: normalizeStoredGeminiModel(storage.get('gemini-model')),
     geminiTemperature: storage.get('gemini-temperature') || '0.3',
+    grokApiKey: storage.getSecret('grok-api-key') || '',
+    grokModel: normalizeStoredGrokModel(storage.get('grok-model')),
+    anthropicApiKey: storage.getSecret('anthropic-api-key') || '',
+    anthropicModel: normalizeStoredAnthropicModel(storage.get('anthropic-model')),
     maxParallelChunks: storage.get('max-parallel-chunks') || '4',
     lastTranslatedSongUri: null,
     translatedLyrics: new Map(),

@@ -848,10 +848,6 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
 }
 
-body.slt-hide-connection-indicator .SLT_ConnectionIndicator {
-    display: none !important;
-}
-
 .slt-replace-line,
 .slt-interleaved-translation,
 .slt-sync-translation {

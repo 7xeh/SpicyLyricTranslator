@@ -5,7 +5,7 @@ import { clearLyricsCache } from './lyricsFetcher';
 import { getCurrentTrackUri } from './trackCache';
 import { injectStyles } from '../styles/main';
 import { registerSettings } from './settings';
-import { initConnectionIndicator, getConnectionState, refreshConnection } from './connectivity';
+import { initConnectionIndicator, getConnectionState, refreshConnection, setConnectionIndicatorHidden } from './connectivity';
 import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
 
 
@@ -44,15 +44,16 @@ export async function initialize(): Promise<void> {
         geminiApiKey: state.geminiApiKey,
         geminiModel: state.geminiModel,
         geminiTemperature: state.geminiTemperature,
+        grokApiKey: state.grokApiKey,
+        grokModel: state.grokModel,
+        anthropicApiKey: state.anthropicApiKey,
+        anthropicModel: state.anthropicModel,
         maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
+    setConnectionIndicatorHidden(state.hideConnectionIndicator);
     initConnectionIndicator();
 
-    if (state.hideConnectionIndicator) {
-        document.body.classList.add('slt-hide-connection-indicator');
-    }
-    
     await registerSettings();
     
     startUpdateChecker(30 * 60 * 1000);

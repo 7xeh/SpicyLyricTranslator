@@ -6,6 +6,7 @@ import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog
 import { reapplyTranslations, forceRetranslate } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
+import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
 import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
@@ -171,7 +172,7 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
         document.body.classList.toggle('slt-vocabulary-mode', Boolean(value));
     }
     if (effects.includes('connectionIndicatorClass')) {
-        document.body.classList.toggle('slt-hide-connection-indicator', Boolean(value));
+        setConnectionIndicatorHidden(Boolean(value));
     }
     if (effects.includes('reapplyTranslations')) {
         reapplyTranslations();
@@ -516,6 +517,78 @@ function bindModalSettingsFields(container: HTMLElement): void {
     });
 }
 
+function connectionStateLabel(connectionState: string): string {
+    switch (connectionState) {
+        case 'connected': return 'Connected';
+        case 'connecting': return 'Connecting…';
+        case 'reconnecting': return 'Reconnecting…';
+        case 'error': return 'Connection error';
+        default: return 'Disconnected';
+    }
+}
+
+function connectionLatencyClass(latencyMs: number | null): string {
+    if (latencyMs === null) return '';
+    if (latencyMs <= 150) return 'slt-conn-great';
+    if (latencyMs <= 300) return 'slt-conn-ok';
+    if (latencyMs <= 500) return 'slt-conn-bad';
+    return 'slt-conn-horrible';
+}
+
+function renderConnectionStatusMarkup(): string {
+    return `
+        <div class="slt-conn-card" id="slt-connection-status">
+            <div class="slt-conn-head">
+                <span class="slt-conn-dot"></span>
+                <span class="slt-conn-title">Connection Status</span>
+                <span class="slt-conn-state">Disconnected</span>
+            </div>
+            <div class="slt-conn-metrics">
+                <div class="slt-conn-metric">
+                    <span class="slt-conn-value slt-conn-ping">—</span>
+                    <span class="slt-conn-label">Ping</span>
+                </div>
+                <div class="slt-conn-metric">
+                    <span class="slt-conn-value slt-conn-users">—</span>
+                    <span class="slt-conn-label">Users installed</span>
+                </div>
+            </div>
+        </div>`;
+}
+
+function updateConnectionStatusCard(root: ParentNode): void {
+    const card = root.querySelector('#slt-connection-status') as HTMLElement | null;
+    if (!card) return;
+
+    const conn = getConnectionState();
+    const dot = card.querySelector('.slt-conn-dot') as HTMLElement | null;
+    const stateEl = card.querySelector('.slt-conn-state') as HTMLElement | null;
+    const pingEl = card.querySelector('.slt-conn-ping') as HTMLElement | null;
+    const usersEl = card.querySelector('.slt-conn-users') as HTMLElement | null;
+    const latencyClass = connectionLatencyClass(conn.latencyMs);
+    const showLatency = conn.state === 'connected' && latencyClass;
+
+    if (dot) dot.className = `slt-conn-dot slt-conn-${conn.state}${showLatency ? ' ' + latencyClass : ''}`;
+    if (stateEl) stateEl.textContent = connectionStateLabel(conn.state);
+    if (pingEl) {
+        pingEl.textContent = conn.latencyMs !== null ? `${conn.latencyMs} ms` : '—';
+        pingEl.className = `slt-conn-value slt-conn-ping${latencyClass ? ' ' + latencyClass : ''}`;
+    }
+    if (usersEl) usersEl.textContent = conn.totalUsers > 0 ? conn.totalUsers.toLocaleString() : '—';
+}
+
+function startConnectionStatusUpdates(root: HTMLElement): void {
+    updateConnectionStatusCard(root);
+    const card = root.querySelector('#slt-connection-status') as HTMLElement | null;
+    const interval = setInterval(() => {
+        if (!card || !card.isConnected) {
+            clearInterval(interval);
+            return;
+        }
+        updateConnectionStatusCard(root);
+    }, 2000);
+}
+
 function createSettingsUI(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'slt-settings-container';
@@ -778,6 +851,75 @@ function createSettingsUI(): HTMLElement {
                 opacity: 0.7;
                 padding-top: 2px;
             }
+            .slt-conn-card {
+                margin: 6px 2px 2px;
+                padding: 14px 16px;
+                border-radius: var(--slt-radius-sm);
+                background: var(--slt-surface);
+                box-shadow: inset 0 0 0 1px var(--slt-hairline);
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .slt-conn-head {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+            }
+            .slt-conn-dot {
+                width: 9px;
+                height: 9px;
+                border-radius: 999px;
+                background: var(--slt-text-3);
+                flex-shrink: 0;
+                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+            }
+            .slt-conn-dot.slt-conn-connecting,
+            .slt-conn-dot.slt-conn-reconnecting { background: #ffd35c; }
+            .slt-conn-dot.slt-conn-error { background: #f1556c; }
+            .slt-conn-dot.slt-conn-connected { background: #1ed760; }
+            .slt-conn-dot.slt-conn-great { background: #1ed760; }
+            .slt-conn-dot.slt-conn-ok { background: #ffd35c; }
+            .slt-conn-dot.slt-conn-bad { background: #ff9f45; }
+            .slt-conn-dot.slt-conn-horrible { background: #f1556c; }
+            .slt-conn-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--slt-text);
+            }
+            .slt-conn-state {
+                margin-left: auto;
+                font-size: 12px;
+                color: var(--slt-text-2);
+            }
+            .slt-conn-metrics {
+                display: flex;
+                gap: 10px;
+            }
+            .slt-conn-metric {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                padding: 10px 12px;
+                border-radius: var(--slt-radius-sm);
+                background: rgba(0, 0, 0, 0.18);
+            }
+            .slt-conn-value {
+                font-size: 17px;
+                font-weight: 600;
+                color: var(--slt-text);
+                font-variant-numeric: tabular-nums;
+            }
+            .slt-conn-value.slt-conn-great { color: #1ed760; }
+            .slt-conn-value.slt-conn-ok { color: #ffd35c; }
+            .slt-conn-value.slt-conn-bad { color: #ff9f45; }
+            .slt-conn-value.slt-conn-horrible { color: #f1556c; }
+            .slt-conn-label {
+                font-size: 11px;
+                letter-spacing: 0.02em;
+                color: var(--slt-text-3);
+            }
             @media (max-width: 620px) {
                 .slt-modal-field {
                     grid-template-columns: 1fr;
@@ -790,6 +932,8 @@ function createSettingsUI(): HTMLElement {
         </style>
         
         ${renderModalSettingsMarkup()}
+
+        ${renderConnectionStatusMarkup()}
 
         <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
             <div style="display: flex; gap: 8px; width: 100%;">
@@ -821,6 +965,7 @@ function createSettingsUI(): HTMLElement {
     setTimeout(() => {
         bindModalSettingsFields(container);
         bindModalCacheActions(container);
+        startConnectionStatusUpdates(container);
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
         const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
         const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
