@@ -1,11 +1,11 @@
 import { state } from './state';
 import { storage } from './storage';
 import { OverlayMode } from './translationOverlay';
-import { SUPPORTED_LANGUAGES, setPreferredApi } from './translator';
+import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolveTargetLanguage } from './translator';
 import type { ApiPreference, CustomApiFormat } from './translator';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
-export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'qualityIndicatorClass' | 'vocabularyModeClass' | 'connectionIndicatorClass';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'vocabularyModeClass' | 'connectionIndicatorClass';
 
 export interface SettingsOption {
     value: string;
@@ -25,6 +25,7 @@ export interface SettingsField {
     keywords?: string;
     secret?: boolean;
     visibleForApis?: ApiPreference[];
+    visibleWhen?: () => boolean;
     effects?: SettingsEffect[];
 }
 
@@ -78,6 +79,19 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         storageKey: 'target-language',
         defaultValue: 'en',
         options: SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name })),
+        effects: ['retranslate', 'fieldVisibility']
+    },
+    {
+        id: 'language-variant',
+        section: 'Translation',
+        keywords: 'variant regional dialect valencian valencia catalan local',
+        label: 'Use Regional Variant',
+        type: 'toggle',
+        storageKey: 'language-variant',
+        defaultValue: false,
+        description: 'Ask the model for the regional variant of the target language. Only available on AI providers that accept written instructions.',
+        visibleForApis: ['openai', 'gemini', 'grok', 'anthropic', 'custom'],
+        visibleWhen: () => Boolean(getLanguageVariantForBase(storage.get('target-language') || 'en')),
         effects: ['retranslate']
     },
     {
@@ -405,8 +419,17 @@ export function getCurrentApiPreference(): ApiPreference {
     return (storage.get('preferred-api') as ApiPreference) || state.preferredApi || 'google';
 }
 
+export function getResolvedTargetLanguage(): string {
+    return resolveTargetLanguage(
+        storage.get('target-language') || 'en',
+        storage.get('language-variant') === 'true',
+        getCurrentApiPreference()
+    );
+}
+
 export function isSettingFieldVisible(field: SettingsField, api: ApiPreference = getCurrentApiPreference()): boolean {
-    return !field.visibleForApis || field.visibleForApis.includes(api);
+    if (field.visibleForApis && !field.visibleForApis.includes(api)) return false;
+    return !field.visibleWhen || field.visibleWhen();
 }
 
 function normalizeLegacySelectValue(fieldId: string, value: string | null): string | null {
@@ -480,13 +503,17 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
 
     switch (field.id) {
         case 'target-language':
-            state.targetLanguage = String(value);
+            state.targetLanguage = getResolvedTargetLanguage();
+            break;
+        case 'language-variant':
+            state.targetLanguage = getResolvedTargetLanguage();
             break;
         case 'overlay-mode':
             state.overlayMode = String(value) as OverlayMode;
             break;
         case 'preferred-api':
             state.preferredApi = String(value) as ApiPreference;
+            state.targetLanguage = getResolvedTargetLanguage();
             configureTranslationApi();
             break;
         case 'custom-api-url':

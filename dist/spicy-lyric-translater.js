@@ -190,73 +190,6 @@ var SpicyLyricTranslater = (() => {
   };
   var storage_default = storage;
 
-  // src/utils/state.ts
-  var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
-  var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
-  var DEFAULT_GROK_MODEL = "grok-4.5";
-  var DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
-  var DEFAULT_LIBRETRANSLATE_URL = "https://libretranslate.com/translate";
-  function normalizeStoredOpenAIModel(model) {
-    const value = (model || "").trim();
-    return value === "gpt-5.5" || value === "gpt-4o-mini" ? value : DEFAULT_OPENAI_MODEL;
-  }
-  function normalizeStoredGeminiModel(model) {
-    const value = (model || "").trim().replace(/^models\//, "");
-    if (value === "gemini-3.1-flash-lite" || value === "gemini-3.5-flash" || value === "gemini-3.1-pro-preview")
-      return value;
-    if (value.includes("flash-lite"))
-      return "gemini-3.1-flash-lite";
-    if (value.includes("pro"))
-      return "gemini-3.1-pro-preview";
-    if (value.includes("flash"))
-      return "gemini-3.5-flash";
-    return DEFAULT_GEMINI_MODEL;
-  }
-  function normalizeStoredGrokModel(model) {
-    const value = (model || "").trim();
-    return value === "grok-4.5" || value === "grok-4.3" ? value : DEFAULT_GROK_MODEL;
-  }
-  function normalizeStoredAnthropicModel(model) {
-    const value = (model || "").trim();
-    return value === "claude-haiku-4-5" || value === "claude-sonnet-5" || value === "claude-opus-4-8" ? value : DEFAULT_ANTHROPIC_MODEL;
-  }
-  var state = {
-    isEnabled: storage.get("translation-enabled") === "true",
-    isTranslating: false,
-    targetLanguage: storage.get("target-language") || "en",
-    autoTranslate: storage.get("auto-translate") === "true",
-    showNotifications: storage.get("show-notifications") !== "false",
-    preferredApi: storage.get("preferred-api") || "google",
-    customApiUrl: storage.get("custom-api-url") || "",
-    customApiKey: storage.getSecret("custom-api-key") || "",
-    customApiFormat: storage.get("custom-api-format") || "generic",
-    customApiModel: storage.get("custom-api-model") || "",
-    libreTranslateApiUrl: storage.get("libretranslate-api-url") || DEFAULT_LIBRETRANSLATE_URL,
-    libreTranslateApiKey: storage.getSecret("libretranslate-api-key") || "",
-    deeplApiKey: storage.getSecret("deepl-api-key") || "",
-    openaiApiKey: storage.getSecret("openai-api-key") || "",
-    openaiModel: normalizeStoredOpenAIModel(storage.get("openai-model")),
-    geminiApiKey: storage.getSecret("gemini-api-key") || "",
-    geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
-    geminiTemperature: storage.get("gemini-temperature") || "0.3",
-    grokApiKey: storage.getSecret("grok-api-key") || "",
-    grokModel: normalizeStoredGrokModel(storage.get("grok-model")),
-    anthropicApiKey: storage.getSecret("anthropic-api-key") || "",
-    anthropicModel: normalizeStoredAnthropicModel(storage.get("anthropic-model")),
-    maxParallelChunks: storage.get("max-parallel-chunks") || "4",
-    lastTranslatedSongUri: null,
-    translatedLyrics: /* @__PURE__ */ new Map(),
-    lastViewMode: null,
-    translationAbortController: null,
-    overlayMode: storage.get("overlay-mode") || "interleaved",
-    detectedLanguage: null,
-    syncWordHighlight: storage.get("sync-word-highlight") !== "false",
-    showQualityIndicator: storage.get("show-quality-indicator") !== "false",
-    vocabularyMode: storage.get("vocabulary-mode") === "true",
-    hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
-    _qualityByIndex: void 0
-  };
-
   // src/utils/debug.ts
   var debugMode = storage.get("debug-mode") === "true";
   var TAG = "%c[SpicyLyricTranslator]";
@@ -1890,11 +1823,11 @@ var SpicyLyricTranslater = (() => {
   }
 
   // src/utils/translator.ts
-  var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
-  var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
-  var DEFAULT_GROK_MODEL2 = "grok-4.5";
-  var DEFAULT_ANTHROPIC_MODEL2 = "claude-haiku-4-5";
-  var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
+  var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+  var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+  var DEFAULT_GROK_MODEL = "grok-4.5";
+  var DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+  var DEFAULT_LIBRETRANSLATE_URL = "https://libretranslate.com/translate";
   var DEFAULT_PARALLEL_CHUNKS = 4;
   var GROK_MODELS = ["grok-4.5", "grok-4.3"];
   var ANTHROPIC_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"];
@@ -1903,18 +1836,18 @@ var SpicyLyricTranslater = (() => {
   var customApiKey = "";
   var customApiFormat = "generic";
   var customApiModel = "";
-  var libreTranslateApiUrl = DEFAULT_LIBRETRANSLATE_URL2;
+  var libreTranslateApiUrl = DEFAULT_LIBRETRANSLATE_URL;
   var libreTranslateApiKey = "";
   var deeplApiKey = "";
   var openaiApiKey = "";
-  var openaiModel = DEFAULT_OPENAI_MODEL2;
+  var openaiModel = DEFAULT_OPENAI_MODEL;
   var geminiApiKey = "";
-  var geminiModel = DEFAULT_GEMINI_MODEL2;
+  var geminiModel = DEFAULT_GEMINI_MODEL;
   var geminiTemperature = 0.3;
   var grokApiKey = "";
-  var grokModel = DEFAULT_GROK_MODEL2;
+  var grokModel = DEFAULT_GROK_MODEL;
   var anthropicApiKey = "";
-  var anthropicModel = DEFAULT_ANTHROPIC_MODEL2;
+  var anthropicModel = DEFAULT_ANTHROPIC_MODEL;
   var maxParallelChunks = DEFAULT_PARALLEL_CHUNKS;
   var RATE_LIMIT = {
     minDelayMs: 100,
@@ -2306,7 +2239,7 @@ var SpicyLyricTranslater = (() => {
     const values = Array.isArray(text) ? text : [text];
     values.forEach((value) => params.append("q", value));
     params.set("source", "auto");
-    params.set("target", targetLang);
+    params.set("target", getApiTargetLanguage(targetLang));
     params.set("format", "text");
     if (libreTranslateApiKey) {
       params.set("api_key", libreTranslateApiKey);
@@ -2542,6 +2475,32 @@ var SpicyLyricTranslater = (() => {
     { code: "yo", name: "Yoruba" },
     { code: "zu", name: "Zulu" }
   ];
+  var LANGUAGE_VARIANTS = [
+    {
+      code: "ca-valencia",
+      baseCode: "ca",
+      label: "Valencian",
+      promptName: "Valencian (the Valencian variant of Catalan, using Valencian vocabulary, orthography and verb forms as codified by the Acad\xE8mia Valenciana de la Llengua)"
+    }
+  ];
+  var VARIANT_CAPABLE_APIS = ["openai", "gemini", "grok", "anthropic", "custom"];
+  function providerSupportsLanguageVariants(api) {
+    return VARIANT_CAPABLE_APIS.includes(api);
+  }
+  function getLanguageVariantForBase(baseCode) {
+    return LANGUAGE_VARIANTS.find((variant) => variant.baseCode === baseCode);
+  }
+  function getLanguageVariantByCode(code) {
+    return LANGUAGE_VARIANTS.find((variant) => variant.code === code);
+  }
+  function resolveTargetLanguage(baseCode, variantEnabled, api) {
+    if (!variantEnabled || !providerSupportsLanguageVariants(api))
+      return baseCode;
+    return getLanguageVariantForBase(baseCode)?.code || baseCode;
+  }
+  function getApiTargetLanguage(targetLang) {
+    return getLanguageVariantByCode(targetLang)?.baseCode || targetLang;
+  }
   function getCachedTranslation(text, targetLang) {
     const cache = storage_default.getJSON("translation-cache", {});
     const key = `${targetLang}:${text}`;
@@ -2617,7 +2576,7 @@ var SpicyLyricTranslater = (() => {
   async function translateWithGoogle(text, targetLang, sourceLang) {
     const encodedText = encodeURIComponent(text);
     const sl = normalizeSourceLangHint(sourceLang);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${targetLang}&dt=t&q=${encodedText}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${getApiTargetLanguage(targetLang)}&dt=t&q=${encodedText}`;
     const response = await fetch(url);
     recordApiUsage(null);
     if (!response.ok) {
@@ -2641,7 +2600,7 @@ var SpicyLyricTranslater = (() => {
   }
   function normalizeLibreTranslateUrl(url) {
     const trimmed = (url || "").trim();
-    return trimmed || DEFAULT_LIBRETRANSLATE_URL2;
+    return trimmed || DEFAULT_LIBRETRANSLATE_URL;
   }
   function getLibreTranslateUrl() {
     const url = normalizeLibreTranslateUrl(libreTranslateApiUrl);
@@ -2719,7 +2678,7 @@ var SpicyLyricTranslater = (() => {
     if (!openaiApiKey) {
       throw createProviderConfigError("OpenAI API key not configured. Set it in Settings.");
     }
-    const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
+    const langName = getTranslationLanguageName(targetLang);
     const data = await postJsonProvider(
       "https://api.openai.com/v1/chat/completions",
       buildOpenAIChatBody(text, langName),
@@ -2742,22 +2701,22 @@ var SpicyLyricTranslater = (() => {
   function normalizeOpenAIModelName(model) {
     const trimmed = (model || "").trim();
     if (!trimmed)
-      return DEFAULT_OPENAI_MODEL2;
+      return DEFAULT_OPENAI_MODEL;
     if (trimmed === "gpt-5.5" || trimmed === "gpt-4o-mini")
       return trimmed;
-    return DEFAULT_OPENAI_MODEL2;
+    return DEFAULT_OPENAI_MODEL;
   }
   function normalizeGrokModelName(model) {
     const trimmed = (model || "").trim();
     if (!trimmed)
-      return DEFAULT_GROK_MODEL2;
-    return GROK_MODELS.includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL2;
+      return DEFAULT_GROK_MODEL;
+    return GROK_MODELS.includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL;
   }
   function normalizeAnthropicModelName(model) {
     const trimmed = (model || "").trim();
     if (!trimmed)
-      return DEFAULT_ANTHROPIC_MODEL2;
-    return ANTHROPIC_MODELS.includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL2;
+      return DEFAULT_ANTHROPIC_MODEL;
+    return ANTHROPIC_MODELS.includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL;
   }
   function isOpenAISpeedModeModel(model) {
     return model === "gpt-5.5";
@@ -2791,7 +2750,7 @@ var SpicyLyricTranslater = (() => {
   function normalizeGeminiModelName(model) {
     const trimmed = (model || "").trim().replace(/^models\//, "");
     if (!trimmed)
-      return DEFAULT_GEMINI_MODEL2;
+      return DEFAULT_GEMINI_MODEL;
     if (trimmed === "gemini-3.1-flash-lite" || trimmed === "gemini-3.5-flash" || trimmed === "gemini-3.1-pro-preview") {
       return trimmed;
     }
@@ -2801,7 +2760,7 @@ var SpicyLyricTranslater = (() => {
       return "gemini-3.1-pro-preview";
     if (trimmed.includes("flash"))
       return "gemini-3.5-flash";
-    return DEFAULT_GEMINI_MODEL2;
+    return DEFAULT_GEMINI_MODEL;
   }
   function normalizeGeminiTemperature(value) {
     const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
@@ -2831,7 +2790,7 @@ var SpicyLyricTranslater = (() => {
     if (!geminiApiKey) {
       throw createProviderConfigError("Gemini API key not configured. Set it in Settings.");
     }
-    const langName = SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
+    const langName = getTranslationLanguageName(targetLang);
     const data = await postJsonProvider(
       appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
       {
@@ -2968,7 +2927,8 @@ ${text}`
       "zh": "ZH-HANS",
       "zh-TW": "ZH-HANT"
     };
-    return deeplLangMap[targetLang] || targetLang.toUpperCase();
+    const apiLang = getApiTargetLanguage(targetLang);
+    return deeplLangMap[apiLang] || apiLang.toUpperCase();
   }
   function buildDeepLBody(texts, targetLang) {
     return {
@@ -2983,6 +2943,9 @@ ${text}`
     };
   }
   function getTranslationLanguageName(targetLang) {
+    const variant = getLanguageVariantByCode(targetLang);
+    if (variant)
+      return variant.promptName;
     return SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name || targetLang;
   }
   function getCustomApiHeaders(format) {
@@ -3055,12 +3018,13 @@ ${text}`
         target_lang: getDeepLTargetLanguage(targetLang)
       };
     }
+    const apiLang = getApiTargetLanguage(targetLang);
     return {
       text,
       q: text,
       source: "auto",
-      target: targetLang,
-      target_lang: targetLang,
+      target: apiLang,
+      target_lang: apiLang,
       format: "text"
     };
   }
@@ -3235,8 +3199,8 @@ ${text}`
         q: texts,
         text: texts,
         source: "auto",
-        target: targetLang,
-        target_lang: targetLang,
+        target: getApiTargetLanguage(targetLang),
+        target_lang: getApiTargetLanguage(targetLang),
         format: "text"
       },
       getCustomApiHeaders(customApiFormat || "generic"),
@@ -4066,6 +4030,80 @@ ${text}`
   function isOffline() {
     return typeof navigator !== "undefined" && !navigator.onLine;
   }
+
+  // src/utils/state.ts
+  var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
+  var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
+  var DEFAULT_GROK_MODEL2 = "grok-4.5";
+  var DEFAULT_ANTHROPIC_MODEL2 = "claude-haiku-4-5";
+  var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
+  function normalizeStoredOpenAIModel(model) {
+    const value = (model || "").trim();
+    return value === "gpt-5.5" || value === "gpt-4o-mini" ? value : DEFAULT_OPENAI_MODEL2;
+  }
+  function normalizeStoredGeminiModel(model) {
+    const value = (model || "").trim().replace(/^models\//, "");
+    if (value === "gemini-3.1-flash-lite" || value === "gemini-3.5-flash" || value === "gemini-3.1-pro-preview")
+      return value;
+    if (value.includes("flash-lite"))
+      return "gemini-3.1-flash-lite";
+    if (value.includes("pro"))
+      return "gemini-3.1-pro-preview";
+    if (value.includes("flash"))
+      return "gemini-3.5-flash";
+    return DEFAULT_GEMINI_MODEL2;
+  }
+  function normalizeStoredGrokModel(model) {
+    const value = (model || "").trim();
+    return value === "grok-4.5" || value === "grok-4.3" ? value : DEFAULT_GROK_MODEL2;
+  }
+  function normalizeStoredAnthropicModel(model) {
+    const value = (model || "").trim();
+    return value === "claude-haiku-4-5" || value === "claude-sonnet-5" || value === "claude-opus-4-8" ? value : DEFAULT_ANTHROPIC_MODEL2;
+  }
+  function resolveStoredTargetLanguage() {
+    return resolveTargetLanguage(
+      storage.get("target-language") || "en",
+      storage.get("language-variant") === "true",
+      storage.get("preferred-api") || "google"
+    );
+  }
+  var state = {
+    isEnabled: storage.get("translation-enabled") === "true",
+    isTranslating: false,
+    targetLanguage: resolveStoredTargetLanguage(),
+    autoTranslate: storage.get("auto-translate") === "true",
+    showNotifications: storage.get("show-notifications") !== "false",
+    preferredApi: storage.get("preferred-api") || "google",
+    customApiUrl: storage.get("custom-api-url") || "",
+    customApiKey: storage.getSecret("custom-api-key") || "",
+    customApiFormat: storage.get("custom-api-format") || "generic",
+    customApiModel: storage.get("custom-api-model") || "",
+    libreTranslateApiUrl: storage.get("libretranslate-api-url") || DEFAULT_LIBRETRANSLATE_URL2,
+    libreTranslateApiKey: storage.getSecret("libretranslate-api-key") || "",
+    deeplApiKey: storage.getSecret("deepl-api-key") || "",
+    openaiApiKey: storage.getSecret("openai-api-key") || "",
+    openaiModel: normalizeStoredOpenAIModel(storage.get("openai-model")),
+    geminiApiKey: storage.getSecret("gemini-api-key") || "",
+    geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
+    geminiTemperature: storage.get("gemini-temperature") || "0.3",
+    grokApiKey: storage.getSecret("grok-api-key") || "",
+    grokModel: normalizeStoredGrokModel(storage.get("grok-model")),
+    anthropicApiKey: storage.getSecret("anthropic-api-key") || "",
+    anthropicModel: normalizeStoredAnthropicModel(storage.get("anthropic-model")),
+    maxParallelChunks: storage.get("max-parallel-chunks") || "4",
+    lastTranslatedSongUri: null,
+    translatedLyrics: /* @__PURE__ */ new Map(),
+    lastViewMode: null,
+    translationAbortController: null,
+    overlayMode: storage.get("overlay-mode") || "interleaved",
+    detectedLanguage: null,
+    syncWordHighlight: storage.get("sync-word-highlight") !== "false",
+    showQualityIndicator: storage.get("show-quality-indicator") !== "false",
+    vocabularyMode: storage.get("vocabulary-mode") === "true",
+    hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
+    _qualityByIndex: void 0
+  };
 
   // src/utils/lyricsFetcher.ts
   var SPICY_API_HOST = "api.spicylyrics.org";
@@ -7629,7 +7667,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.1.2" : "0.0.0";
+    return true ? "2.1.3" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -10768,6 +10806,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       storageKey: "target-language",
       defaultValue: "en",
       options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name })),
+      effects: ["retranslate", "fieldVisibility"]
+    },
+    {
+      id: "language-variant",
+      section: "Translation",
+      keywords: "variant regional dialect valencian valencia catalan local",
+      label: "Use Regional Variant",
+      type: "toggle",
+      storageKey: "language-variant",
+      defaultValue: false,
+      description: "Ask the model for the regional variant of the target language. Only available on AI providers that accept written instructions.",
+      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"],
+      visibleWhen: () => Boolean(getLanguageVariantForBase(storage.get("target-language") || "en")),
       effects: ["retranslate"]
     },
     {
@@ -11082,8 +11133,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function getCurrentApiPreference() {
     return storage.get("preferred-api") || state.preferredApi || "google";
   }
+  function getResolvedTargetLanguage() {
+    return resolveTargetLanguage(
+      storage.get("target-language") || "en",
+      storage.get("language-variant") === "true",
+      getCurrentApiPreference()
+    );
+  }
   function isSettingFieldVisible(field, api = getCurrentApiPreference()) {
-    return !field.visibleForApis || field.visibleForApis.includes(api);
+    if (field.visibleForApis && !field.visibleForApis.includes(api))
+      return false;
+    return !field.visibleWhen || field.visibleWhen();
   }
   function normalizeLegacySelectValue(fieldId, value) {
     const stored = (value || "").trim().replace(/^models\//, "");
@@ -11156,13 +11216,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     switch (field.id) {
       case "target-language":
-        state.targetLanguage = String(value);
+        state.targetLanguage = getResolvedTargetLanguage();
+        break;
+      case "language-variant":
+        state.targetLanguage = getResolvedTargetLanguage();
         break;
       case "overlay-mode":
         state.overlayMode = String(value);
         break;
       case "preferred-api":
         state.preferredApi = String(value);
+        state.targetLanguage = getResolvedTargetLanguage();
         configureTranslationApi();
         break;
       case "custom-api-url":
@@ -11405,7 +11469,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function handleSettingChange(field, value, root, visibleDisplay = "") {
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
-    if (effects.includes("providerVisibility") && root) {
+    if ((effects.includes("providerVisibility") || effects.includes("fieldVisibility")) && root) {
       updateSettingFieldVisibility(root, visibleDisplay);
     }
   }
@@ -13976,8 +14040,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           handleTranslateToggle();
       },
       setLanguage: (lang) => {
-        state.targetLanguage = lang;
         storage.set("target-language", lang);
+        state.targetLanguage = getResolvedTargetLanguage();
       },
       translate: translateCurrentLyrics,
       clearCache: clearTranslationCache,

@@ -1,6 +1,7 @@
 import { storage } from './storage';
 import { OverlayMode } from './translationOverlay';
-import type { CustomApiFormat } from './translator';
+import { resolveTargetLanguage } from './translator';
+import type { ApiPreference, CustomApiFormat } from './translator';
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
@@ -30,6 +31,14 @@ function normalizeStoredGrokModel(model: string | null): string {
 function normalizeStoredAnthropicModel(model: string | null): string {
     const value = (model || '').trim();
     return value === 'claude-haiku-4-5' || value === 'claude-sonnet-5' || value === 'claude-opus-4-8' ? value : DEFAULT_ANTHROPIC_MODEL;
+}
+
+function resolveStoredTargetLanguage(): string {
+    return resolveTargetLanguage(
+        storage.get('target-language') || 'en',
+        storage.get('language-variant') === 'true',
+        (storage.get('preferred-api') as ApiPreference) || 'google'
+    );
 }
 
 export interface TranslationQualityMeta {
@@ -81,7 +90,7 @@ export interface ExtensionState {
 export const state: ExtensionState = {
     isEnabled: storage.get('translation-enabled') === 'true',
     isTranslating: false,
-    targetLanguage: storage.get('target-language') || 'en',
+    targetLanguage: resolveStoredTargetLanguage(),
     autoTranslate: storage.get('auto-translate') === 'true',
     showNotifications: storage.get('show-notifications') !== 'false',
     preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom') || 'google',

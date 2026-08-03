@@ -559,7 +559,7 @@ function buildLibreTranslateForm(text: string | string[], targetLang: string): U
     const values = Array.isArray(text) ? text : [text];
     values.forEach(value => params.append('q', value));
     params.set('source', 'auto');
-    params.set('target', targetLang);
+    params.set('target', getApiTargetLanguage(targetLang));
     params.set('format', 'text');
     if (libreTranslateApiKey) {
         params.set('api_key', libreTranslateApiKey);
@@ -816,6 +816,45 @@ export const SUPPORTED_LANGUAGES: { code: string; name: string }[] = [
     { code: 'zu', name: 'Zulu' },
 ];
 
+interface LanguageVariant {
+    code: string;
+    baseCode: string;
+    label: string;
+    promptName: string;
+}
+
+export const LANGUAGE_VARIANTS: LanguageVariant[] = [
+    {
+        code: 'ca-valencia',
+        baseCode: 'ca',
+        label: 'Valencian',
+        promptName: 'Valencian (the Valencian variant of Catalan, using Valencian vocabulary, orthography and verb forms as codified by the Acadèmia Valenciana de la Llengua)'
+    }
+];
+
+const VARIANT_CAPABLE_APIS: ApiPreference[] = ['openai', 'gemini', 'grok', 'anthropic', 'custom'];
+
+export function providerSupportsLanguageVariants(api: ApiPreference): boolean {
+    return VARIANT_CAPABLE_APIS.includes(api);
+}
+
+export function getLanguageVariantForBase(baseCode: string): LanguageVariant | undefined {
+    return LANGUAGE_VARIANTS.find(variant => variant.baseCode === baseCode);
+}
+
+function getLanguageVariantByCode(code: string): LanguageVariant | undefined {
+    return LANGUAGE_VARIANTS.find(variant => variant.code === code);
+}
+
+export function resolveTargetLanguage(baseCode: string, variantEnabled: boolean, api: ApiPreference): string {
+    if (!variantEnabled || !providerSupportsLanguageVariants(api)) return baseCode;
+    return getLanguageVariantForBase(baseCode)?.code || baseCode;
+}
+
+export function getApiTargetLanguage(targetLang: string): string {
+    return getLanguageVariantByCode(targetLang)?.baseCode || targetLang;
+}
+
 function getCachedTranslation(text: string, targetLang: string): string | null {
     const cache = storage.getJSON<TranslationCache>('translation-cache', {});
     const key = `${targetLang}:${text}`;
@@ -902,7 +941,7 @@ function normalizeSourceLangHint(raw?: string): string {
 async function translateWithGoogle(text: string, targetLang: string, sourceLang?: string): Promise<{ translation: string; detectedLang: string }> {
     const encodedText = encodeURIComponent(text);
     const sl = normalizeSourceLangHint(sourceLang);
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${targetLang}&dt=t&q=${encodedText}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${getApiTargetLanguage(targetLang)}&dt=t&q=${encodedText}`;
 
     const response = await fetch(url);
     recordApiUsage(null);
@@ -1021,7 +1060,7 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
         throw createProviderConfigError('OpenAI API key not configured. Set it in Settings.');
     }
     
-    const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
+    const langName = getTranslationLanguageName(targetLang);
 
     const data = await postJsonProvider(
         'https://api.openai.com/v1/chat/completions',
@@ -1143,7 +1182,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
         throw createProviderConfigError('Gemini API key not configured. Set it in Settings.');
     }
 
-    const langName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
+    const langName = getTranslationLanguageName(targetLang);
 
     const data = await postJsonProvider(
         appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
@@ -1299,7 +1338,8 @@ function getDeepLTargetLanguage(targetLang: string): string {
     const deeplLangMap: Record<string, string> = {
         'en': 'EN-US', 'pt': 'PT-BR', 'zh': 'ZH-HANS', 'zh-TW': 'ZH-HANT'
     };
-    return deeplLangMap[targetLang] || targetLang.toUpperCase();
+    const apiLang = getApiTargetLanguage(targetLang);
+    return deeplLangMap[apiLang] || apiLang.toUpperCase();
 }
 
 function buildDeepLBody(texts: string[], targetLang: string): { text: string[]; target_lang: string } {
@@ -1317,6 +1357,8 @@ function getDeepLHeaders(apiKey: string): Record<string, string> {
 }
 
 function getTranslationLanguageName(targetLang: string): string {
+    const variant = getLanguageVariantByCode(targetLang);
+    if (variant) return variant.promptName;
     return SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || targetLang;
 }
 
@@ -1397,12 +1439,14 @@ function buildCustomSingleBody(text: string, targetLang: string, format: CustomA
         };
     }
 
+    const apiLang = getApiTargetLanguage(targetLang);
+
     return {
         text: text,
         q: text,
         source: 'auto',
-        target: targetLang,
-        target_lang: targetLang,
+        target: apiLang,
+        target_lang: apiLang,
         format: 'text'
     };
 }
@@ -1607,8 +1651,8 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
                 q: texts,
                 text: texts,
                 source: 'auto',
-                target: targetLang,
-                target_lang: targetLang,
+                target: getApiTargetLanguage(targetLang),
+                target_lang: getApiTargetLanguage(targetLang),
                 format: 'text'
             },
             getCustomApiHeaders(customApiFormat || 'generic'),
@@ -2640,5 +2684,10 @@ export default {
     isOffline,
     setPreferredApi,
     getPreferredApi,
-    SUPPORTED_LANGUAGES
+    SUPPORTED_LANGUAGES,
+    LANGUAGE_VARIANTS,
+    getApiTargetLanguage,
+    getLanguageVariantForBase,
+    providerSupportsLanguageVariants,
+    resolveTargetLanguage
 };

@@ -80,6 +80,7 @@ The extension works in the full lyrics view, the sidebar lyrics view, and pictur
 ## Settings
 
 - Target Language (full Google Translate language list)
+- Use Regional Variant: asks for a regional variant of the target language (currently Valencian for Catalan). Only appears when the selected language has a variant and the provider is OpenAI, Gemini, Grok, Claude, or Custom — code-based providers have no variant model, so the option stays hidden rather than silently returning the standard language
 - Translation Display: Replace or Below each line
 - Translation API: Google, LibreTranslate, DeepL, OpenAI, Gemini, or Custom
 - API credentials per provider (DeepL key, OpenAI key/model, Gemini key, Custom URL/key)

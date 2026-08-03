@@ -208,7 +208,7 @@ function updateSettingFieldVisibility(root: ParentNode, visibleDisplay: string):
 function handleSettingChange(field: SettingsField, value: string | boolean, root?: ParentNode, visibleDisplay: string = ''): void {
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
-    if (effects.includes('providerVisibility') && root) {
+    if ((effects.includes('providerVisibility') || effects.includes('fieldVisibility')) && root) {
         updateSettingFieldVisibility(root, visibleDisplay);
     }
 }

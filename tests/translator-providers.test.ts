@@ -1067,3 +1067,82 @@ test('Gemini uses CosmosAsync when available instead of raw browser fetch', asyn
     });
     assert.equal(cosmosCalls[0].body.contents[0].parts[0].text.includes('\u3053\u3093\u306b\u3061\u306f'), true);
 });
+
+
+test('Valencian is not a target-language option; it is a variant of Catalan', () => {
+    const { SUPPORTED_LANGUAGES, getLanguageVariantForBase } = require('../src/utils/translator') as {
+        SUPPORTED_LANGUAGES: { code: string; name: string }[];
+        getLanguageVariantForBase: (base: string) => { code: string; label: string } | undefined;
+    };
+
+    assert.ok(SUPPORTED_LANGUAGES.some(language => language.code === 'ca'));
+    assert.equal(SUPPORTED_LANGUAGES.some(language => language.code === 'ca-valencia'), false);
+    assert.equal(getLanguageVariantForBase('ca')?.code, 'ca-valencia');
+    assert.equal(getLanguageVariantForBase('ca')?.label, 'Valencian');
+    assert.equal(getLanguageVariantForBase('es'), undefined);
+});
+
+test('the variant toggle only resolves on providers that accept written instructions', () => {
+    const { resolveTargetLanguage } = require('../src/utils/translator') as {
+        resolveTargetLanguage: (base: string, enabled: boolean, api: string) => string;
+    };
+
+    assert.equal(resolveTargetLanguage('ca', true, 'openai'), 'ca-valencia');
+    assert.equal(resolveTargetLanguage('ca', true, 'gemini'), 'ca-valencia');
+    assert.equal(resolveTargetLanguage('ca', true, 'grok'), 'ca-valencia');
+    assert.equal(resolveTargetLanguage('ca', true, 'anthropic'), 'ca-valencia');
+    assert.equal(resolveTargetLanguage('ca', true, 'custom'), 'ca-valencia');
+
+    assert.equal(resolveTargetLanguage('ca', true, 'google'), 'ca');
+    assert.equal(resolveTargetLanguage('ca', true, 'libretranslate'), 'ca');
+    assert.equal(resolveTargetLanguage('ca', true, 'deepl'), 'ca');
+
+    assert.equal(resolveTargetLanguage('ca', false, 'openai'), 'ca');
+    assert.equal(resolveTargetLanguage('es', true, 'openai'), 'es');
+});
+
+test('a resolved variant asks the model for Valencian explicitly', async () => {
+    resetState();
+    setPreferredApi('openai', undefined, {
+        openaiApiKey: 'sk-proj-test',
+        openaiModel: 'gpt-4o-mini'
+    } as any);
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        return jsonResponse({ choices: [{ message: { content: 'Bon dia' } }] });
+    };
+
+    await translateText('Good morning', 'ca-valencia', 'en');
+
+    const instruction = JSON.parse(String(calls[0].init?.body)).messages[0].content;
+    assert.ok(instruction.includes('Valencian'));
+    assert.ok(instruction.includes('Catalan'));
+});
+
+test('a resolved variant still sends the plain Catalan code to code-based providers', async () => {
+    resetState();
+
+    const googleCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        googleCalls.push({ url, init });
+        return jsonResponse([[['Bon dia', 'Good morning']], null, 'en']);
+    };
+
+    await translateText('Good morning', 'ca-valencia', 'en');
+    assert.ok(googleCalls[0].url.includes('tl=ca&'));
+    assert.equal(googleCalls[0].url.includes('ca-valencia'), false);
+
+    resetState();
+    setPreferredApi('deepl', undefined, { deeplApiKey: 'deepl-key:fx' } as any);
+
+    const deeplCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        deeplCalls.push({ url, init });
+        return jsonResponse({ translations: [{ text: 'Bon dia', detected_source_language: 'EN' }] });
+    };
+
+    await translateText('Good morning', 'ca-valencia', 'en');
+    assert.equal(JSON.parse(String(deeplCalls[0].init?.body)).target_lang, 'CA');
+});
