@@ -16,15 +16,33 @@ export interface SettingsField {
     id: string;
     label: string;
     type: SettingsFieldType;
+    section: string;
     storageKey: string;
     defaultValue: string | boolean;
     options?: SettingsOption[];
     placeholder?: string;
     description?: string;
+    keywords?: string;
     secret?: boolean;
     visibleForApis?: ApiPreference[];
     effects?: SettingsEffect[];
 }
+
+export interface SettingsCategory {
+    id: string;
+    label: string;
+    sections: string[];
+}
+
+export const SETTINGS_CATEGORIES: SettingsCategory[] = [
+    { id: 'slt-cat-translation', label: 'Translation', sections: ['Translation', 'Behaviour'] },
+    {
+        id: 'slt-cat-providers',
+        label: 'Providers',
+        sections: ['Provider', 'Custom API', 'LibreTranslate', 'DeepL', 'OpenAI', 'Gemini', 'Grok', 'Claude']
+    },
+    { id: 'slt-cat-interface', label: 'Interface', sections: ['Interface'] }
+];
 
 export const API_OPTIONS: SettingsOption[] = [
     { value: 'google', text: 'Google Translate' },
@@ -53,6 +71,8 @@ export const OVERLAY_MODE_OPTIONS: SettingsOption[] = [
 export const SETTINGS_SCHEMA: SettingsField[] = [
     {
         id: 'target-language',
+        section: 'Translation',
+        keywords: 'language locale translate to output',
         label: 'Target Language',
         type: 'select',
         storageKey: 'target-language',
@@ -62,6 +82,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'overlay-mode',
+        section: 'Translation',
+        keywords: 'display overlay replace interleaved below line',
         label: 'Translation Display',
         type: 'select',
         storageKey: 'overlay-mode',
@@ -72,6 +94,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'preferred-api',
+        section: 'Provider',
+        keywords: 'api provider service engine backend',
         label: 'Translation API',
         type: 'select',
         storageKey: 'preferred-api',
@@ -81,6 +105,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'custom-api-url',
+        section: 'Custom API',
+        keywords: 'custom endpoint url self hosted',
         label: 'Custom API URL',
         type: 'text',
         storageKey: 'custom-api-url',
@@ -91,6 +117,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'custom-api-format',
+        section: 'Custom API',
+        keywords: 'custom format schema payload compatible',
         label: 'Custom API Format',
         type: 'select',
         storageKey: 'custom-api-format',
@@ -100,6 +128,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'custom-api-key',
+        section: 'Custom API',
+        keywords: 'custom key token auth secret',
         label: 'Custom API Key (optional)',
         type: 'password',
         storageKey: 'custom-api-key',
@@ -110,6 +140,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'custom-api-model',
+        section: 'Custom API',
+        keywords: 'custom model name llm',
         label: 'Custom API Model (optional)',
         type: 'text',
         storageKey: 'custom-api-model',
@@ -119,6 +151,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'libretranslate-api-url',
+        section: 'LibreTranslate',
+        keywords: 'libretranslate url endpoint self hosted',
         label: 'LibreTranslate URL',
         type: 'text',
         storageKey: 'libretranslate-api-url',
@@ -129,6 +163,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'libretranslate-api-key',
+        section: 'LibreTranslate',
+        keywords: 'libretranslate key token auth secret',
         label: 'LibreTranslate API Key',
         type: 'password',
         storageKey: 'libretranslate-api-key',
@@ -140,6 +176,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'deepl-api-key',
+        section: 'DeepL',
+        keywords: 'deepl key token auth secret pro free',
         label: 'DeepL API Key',
         type: 'password',
         storageKey: 'deepl-api-key',
@@ -151,6 +189,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'openai-api-key',
+        section: 'OpenAI',
+        keywords: 'openai key token auth secret gpt',
         label: 'OpenAI API Key',
         type: 'password',
         storageKey: 'openai-api-key',
@@ -161,6 +201,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'openai-model',
+        section: 'OpenAI',
+        keywords: 'openai model gpt version',
         label: 'OpenAI Model',
         type: 'select',
         storageKey: 'openai-model',
@@ -174,6 +216,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'gemini-api-key',
+        section: 'Gemini',
+        keywords: 'gemini google key token auth secret',
         label: 'Gemini API Key',
         type: 'password',
         storageKey: 'gemini-api-key',
@@ -185,6 +229,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'gemini-model',
+        section: 'Gemini',
+        keywords: 'gemini model flash pro version',
         label: 'Gemini Model',
         type: 'select',
         storageKey: 'gemini-model',
@@ -199,6 +245,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'gemini-temperature',
+        section: 'Gemini',
+        keywords: 'gemini temperature randomness creativity',
         label: 'Gemini Temperature',
         type: 'text',
         storageKey: 'gemini-temperature',
@@ -209,6 +257,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'grok-api-key',
+        section: 'Grok',
+        keywords: 'grok xai key token auth secret',
         label: 'Grok (xAI) API Key',
         type: 'password',
         storageKey: 'grok-api-key',
@@ -220,6 +270,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'grok-model',
+        section: 'Grok',
+        keywords: 'grok xai model version',
         label: 'Grok Model',
         type: 'select',
         storageKey: 'grok-model',
@@ -233,6 +285,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'anthropic-api-key',
+        section: 'Claude',
+        keywords: 'claude anthropic key token auth secret',
         label: 'Claude (Anthropic) API Key',
         type: 'password',
         storageKey: 'anthropic-api-key',
@@ -244,6 +298,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'anthropic-model',
+        section: 'Claude',
+        keywords: 'claude anthropic model haiku sonnet opus',
         label: 'Claude Model',
         type: 'select',
         storageKey: 'anthropic-model',
@@ -258,6 +314,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'max-parallel-chunks',
+        section: 'Provider',
+        keywords: 'parallel concurrent requests speed rate limit cost',
         label: 'Parallel Translation Requests',
         type: 'select',
         storageKey: 'max-parallel-chunks',
@@ -275,6 +333,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'auto-translate',
+        section: 'Behaviour',
+        keywords: 'auto automatic song change start',
         label: 'Auto-Translate on Song Change',
         type: 'toggle',
         storageKey: 'auto-translate',
@@ -282,6 +342,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'show-notifications',
+        section: 'Interface',
+        keywords: 'notifications toasts messages popup',
         label: 'Show Notifications',
         type: 'toggle',
         storageKey: 'show-notifications',
@@ -289,6 +351,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'show-quality-indicator',
+        section: 'Interface',
+        keywords: 'quality indicator badge confidence',
         label: 'Show Translation Quality Indicator',
         type: 'toggle',
         storageKey: 'show-quality-indicator',
@@ -297,6 +361,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'vocabulary-mode',
+        section: 'Behaviour',
+        keywords: 'vocabulary learning study word by word',
         label: 'Vocabulary / Learning Mode',
         type: 'toggle',
         storageKey: 'vocabulary-mode',
@@ -305,6 +371,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     },
     {
         id: 'hide-connection-indicator',
+        section: 'Interface',
+        keywords: 'connection status indicator hide ping',
         label: 'Hide Connection Status',
         type: 'toggle',
         storageKey: 'hide-connection-indicator',
@@ -315,6 +383,22 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
 
 export function getSettingField(id: string): SettingsField | undefined {
     return SETTINGS_SCHEMA.find(field => field.id === id);
+}
+
+export function getCategoryForSection(section: string): SettingsCategory | undefined {
+    return SETTINGS_CATEGORIES.find(category => category.sections.includes(section));
+}
+
+export function getSectionsForCategory(category: SettingsCategory): string[] {
+    return category.sections.filter(section => SETTINGS_SCHEMA.some(field => field.section === section));
+}
+
+export function matchesSettingQuery(field: SettingsField, query: string): boolean {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+
+    return [field.label, field.section, field.description, field.keywords]
+        .some(value => (value || '').toLowerCase().includes(needle));
 }
 
 export function getCurrentApiPreference(): ApiPreference {
@@ -356,6 +440,12 @@ export function readSettingValue(field: SettingsField): string | boolean {
         return String(field.defaultValue);
     }
     return normalizedStored ?? String(field.defaultValue);
+}
+
+export function isSettingAtDefault(field: SettingsField): boolean {
+    const value = readSettingValue(field);
+    if (field.type === 'toggle') return Boolean(value) === Boolean(field.defaultValue);
+    return String(value) === String(field.defaultValue);
 }
 
 function configureTranslationApi(): void {

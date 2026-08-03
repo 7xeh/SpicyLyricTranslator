@@ -5,7 +5,11 @@ import {
     isSameLanguage,
     shouldSkipTranslation,
     detectLanguageHeuristic,
-    detectByDistinctiveLatinMarkers
+    detectByDistinctiveLatinMarkers,
+    detectChineseScript,
+    isLikelyNonTargetLine,
+    assessMixedLanguageContent,
+    detectRomanizedJapanese
 } from '../src/utils/languageDetection';
 
 test('normalizeLanguageCode folds English-based creoles/variants into "en"', () => {
@@ -98,4 +102,143 @@ test('shouldSkipTranslation skips English lyrics that Google\'s API reports as p
     } finally {
         (globalThis as any).fetch = originalFetch;
     }
+});
+
+test('normalizeLanguageCode keeps Simplified and Traditional Chinese apart', () => {
+    assert.equal(normalizeLanguageCode('zh-TW'), 'zh-hant');
+    assert.equal(normalizeLanguageCode('zh_HK'), 'zh-hant');
+    assert.equal(normalizeLanguageCode('zh-Hant'), 'zh-hant');
+    assert.equal(normalizeLanguageCode('Chinese (Traditional)'), 'zh-hant');
+    assert.equal(normalizeLanguageCode('zh-CN'), 'zh-hans');
+    assert.equal(normalizeLanguageCode('zh-Hans'), 'zh-hans');
+    assert.equal(normalizeLanguageCode('Chinese (Simplified)'), 'zh-hans');
+    assert.equal(normalizeLanguageCode('zh'), 'zh-hani');
+});
+
+test('detectChineseScript classifies orthography by variant-specific characters', () => {
+    assert.equal(detectChineseScript('愛你但說不出口，繼續走下去'), 'zh-Hant');
+    assert.equal(detectChineseScript('爱你但说不出口，继续走下去'), 'zh-Hans');
+    assert.equal(detectChineseScript('我不知道你在哪里'), 'zh-Hani');
+});
+
+test('isSameLanguage does not treat Traditional Chinese as the Simplified target', () => {
+    assert.equal(isSameLanguage('zh-Hant', 'zh'), false);
+    assert.equal(isSameLanguage('zh-Hans', 'zh-TW'), false);
+    assert.equal(isSameLanguage('zh-Hans', 'zh'), true);
+    assert.equal(isSameLanguage('zh-Hant', 'zh-TW'), true);
+    assert.equal(isSameLanguage('zh-Hani', 'zh'), true);
+    assert.equal(isSameLanguage('zh-Hani', 'zh-TW'), true);
+});
+
+test('shouldSkipTranslation translates between Chinese orthographies', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const traditional = ['愛你但說不出口', '繼續走下去的時候', '這樣的國家與學校'];
+        const toSimplified = await shouldSkipTranslation(traditional, 'zh');
+        assert.equal(toSimplified.skip, false);
+        assert.equal(toSimplified.detectedLanguage, 'zh-Hant');
+
+        const toTraditional = await shouldSkipTranslation(traditional, 'zh-TW');
+        assert.equal(toTraditional.skip, true);
+        assert.equal(toTraditional.detectedLanguage, 'zh-Hant');
+
+        const simplified = ['爱你但说不出口', '继续走下去的时候', '这样的国家与学校'];
+        const simplifiedToTraditional = await shouldSkipTranslation(simplified, 'zh-TW');
+        assert.equal(simplifiedToTraditional.skip, false);
+        assert.equal(simplifiedToTraditional.detectedLanguage, 'zh-Hans');
+
+        const simplifiedToSimplified = await shouldSkipTranslation(simplified, 'zh');
+        assert.equal(simplifiedToSimplified.skip, true);
+        assert.equal(simplifiedToSimplified.detectedLanguage, 'zh-Hans');
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('shouldSkipTranslation skips Han text that reads the same in both orthographies', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const neutral = ['我不知道你在哪里', '今天的月亮很美', '一人走在路上的我'];
+        assert.equal((await shouldSkipTranslation(neutral, 'zh')).skip, true);
+        assert.equal((await shouldSkipTranslation(neutral, 'zh-TW')).skip, true);
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('isLikelyNonTargetLine flags foreign lines the word-count heuristic cannot classify', () => {
+    const line = 'noche de verano bailando contigo bajo la lluvia';
+    assert.equal(detectLanguageHeuristic(line), null);
+    assert.equal(isLikelyNonTargetLine(line, 'en'), true);
+    assert.equal(isLikelyNonTargetLine(line, 'es'), false);
+});
+
+test('isLikelyNonTargetLine ignores target-language lines, interjections and short lines', () => {
+    assert.equal(isLikelyNonTargetLine('Dancing in the summer rain with you tonight', 'en'), false);
+    assert.equal(isLikelyNonTargetLine('na na na na na', 'en'), false);
+    assert.equal(isLikelyNonTargetLine('oh yeah baby', 'en'), false);
+    assert.equal(isLikelyNonTargetLine('woah oh', 'en'), false);
+    assert.equal(isLikelyNonTargetLine('', 'en'), false);
+});
+
+test('assessMixedLanguageContent reports a single foreign line as mixed content', () => {
+    const lines = [
+        'Dancing in the summer rain with you tonight',
+        'I never wanted this to end so soon',
+        'noche de verano bailando contigo bajo la lluvia'
+    ];
+    const mixed = assessMixedLanguageContent(lines, 'en');
+    assert.equal(mixed.hasMixedContent, true);
+    assert.ok(mixed.nonTargetCount >= 1);
+});
+
+test('assessMixedLanguageContent leaves a fully English track alone', () => {
+    const lines = [
+        'Dancing in the summer rain with you tonight',
+        'I never wanted this to end so soon',
+        'You know that I would wait for you again'
+    ];
+    assert.equal(assessMixedLanguageContent(lines, 'en').hasMixedContent, false);
+});
+
+test('shouldSkipTranslation does not skip a mostly-English track holding one foreign line', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const lines = [
+            'Dancing in the summer rain with you tonight',
+            'I never wanted this to end so soon',
+            'noche de verano bailando contigo bajo la lluvia',
+            'You know that I would wait for you again'
+        ];
+        assert.equal((await shouldSkipTranslation(lines, 'en')).skip, false);
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('shouldSkipTranslation still skips a fully English track targeting English', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const lines = [
+            'Dancing in the summer rain with you tonight',
+            'I never wanted this to end so soon',
+            'You know that I would wait for you again'
+        ];
+        const result = await shouldSkipTranslation(lines, 'en');
+        assert.equal(result.skip, true);
+        assert.equal(result.detectedLanguage, 'en');
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('romanized Japanese detection requires a distinctly Japanese token, not bare particles', () => {
+    assert.equal(detectRomanizedJapanese('I never wanted this to end so soon'), null);
+    assert.equal(detectRomanizedJapanese('so soon to go and so to stay'), null);
+    assert.ok(detectRomanizedJapanese('kimi no koe wa yume no naka de kikoeru'));
+    assert.ok(detectRomanizedJapanese('kokoro ga itai kara namida wo mita'));
 });

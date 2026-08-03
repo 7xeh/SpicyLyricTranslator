@@ -797,7 +797,448 @@ var SpicyLyricTranslater = (() => {
     code: lang.code,
     words: new Set(lang.words)
   }));
+  var HAN_VARIANT_PAIRS = [
+    "\u7231\u611B",
+    "\u8BF4\u8AAA",
+    "\u7EE7\u7E7C",
+    "\u7EED\u7E8C",
+    "\u4EEC\u5011",
+    "\u8FD9\u9019",
+    "\u65F6\u6642",
+    "\u56FD\u570B",
+    "\u5B66\u5B78",
+    "\u4F1A\u6703",
+    "\u6765\u4F86",
+    "\u5BF9\u5C0D",
+    "\u4E2A\u500B",
+    "\u73B0\u73FE",
+    "\u957F\u9577",
+    "\u95EE\u554F",
+    "\u89C1\u898B",
+    "\u5F00\u958B",
+    "\u5173\u95DC",
+    "\u95E8\u9580",
+    "\u65E0\u7121",
+    "\u4E3A\u70BA",
+    "\u8FD8\u9084",
+    "\u8FC7\u904E",
+    "\u4ECE\u5F9E",
+    "\u8BA9\u8B93",
+    "\u8BF7\u8ACB",
+    "\u8C01\u8AB0",
+    "\u8BDD\u8A71",
+    "\u8BED\u8A9E",
+    "\u8C22\u8B1D",
+    "\u8BE5\u8A72",
+    "\u8BB0\u8A18",
+    "\u8BA4\u8A8D",
+    "\u8BC6\u8B58",
+    "\u8BB2\u8B1B",
+    "\u8BBA\u8AD6",
+    "\u8BD5\u8A66",
+    "\u8BC9\u8A34",
+    "\u8BCD\u8A5E",
+    "\u8BFB\u8B80",
+    "\u8BFE\u8AB2",
+    "\u8C08\u8AC7",
+    "\u8BB8\u8A31",
+    "\u8BAE\u8B70",
+    "\u53D8\u8B8A",
+    "\u7535\u96FB",
+    "\u8F66\u8ECA",
+    "\u4E1C\u6771",
+    "\u9A6C\u99AC",
+    "\u9E1F\u9CE5",
+    "\u9C7C\u9B5A",
+    "\u9F99\u9F8D",
+    "\u5934\u982D",
+    "\u4E70\u8CB7",
+    "\u5356\u8CE3",
+    "\u4E07\u842C",
+    "\u4E0E\u8207",
+    "\u4E1A\u696D",
+    "\u4E3D\u9E97",
+    "\u4E3E\u8209",
+    "\u4E49\u7FA9",
+    "\u4E50\u6A02",
+    "\u4E60\u7FD2",
+    "\u4E66\u66F8",
+    "\u4EB2\u89AA",
+    "\u4EA7\u7522",
+    "\u4F17\u773E",
+    "\u4F18\u512A",
+    "\u4F20\u50B3",
+    "\u4F24\u50B7",
+    "\u4F53\u9AD4",
+    "\u4EF7\u50F9",
+    "\u513F\u5152",
+    "\u515A\u9EE8",
+    "\u5185\u5167",
+    "\u519B\u8ECD",
+    "\u519C\u8FB2",
+    "\u51B3\u6C7A",
+    "\u51C0\u6DE8",
+    "\u51CF\u6E1B",
+    "\u51E4\u9CF3",
+    "\u5904\u8655",
+    "\u5907\u5099",
+    "\u591F\u5920",
+    "\u590D\u5FA9",
+    "\u5B9E\u5BE6",
+    "\u5B81\u5BE7",
+    "\u5B9D\u5BF6",
+    "\u5BFB\u5C0B",
+    "\u5BFC\u5C0E",
+    "\u5C81\u6B72",
+    "\u5F52\u6B78",
+    "\u5F53\u7576",
+    "\u5C3D\u76E1",
+    "\u5C42\u5C64",
+    "\u5C5E\u5C6C",
+    "\u5C9B\u5CF6",
+    "\u5E08\u5E2B",
+    "\u5E26\u5E36",
+    "\u5E2E\u5E6B",
+    "\u5E7F\u5EE3",
+    "\u5E94\u61C9",
+    "\u5E86\u6176",
+    "\u5F20\u5F35",
+    "\u5F55\u9304",
+    "\u5F7B\u5FB9",
+    "\u5F84\u5F91",
+    "\u5FC6\u61B6",
+    "\u5FE7\u6182",
+    "\u6000\u61F7",
+    "\u6001\u614B",
+    "\u603B\u7E3D",
+    "\u604B\u6200",
+    "\u60CA\u9A5A",
+    "\u60E7\u61FC",
+    "\u60EF\u6163",
+    "\u6218\u6230",
+    "\u6237\u6236",
+    "\u626B\u6383",
+    "\u6267\u57F7",
+    "\u6269\u64F4",
+    "\u626C\u63DA",
+    "\u62E9\u64C7",
+    "\u62A5\u5831",
+    "\u62C5\u64D4",
+    "\u62DF\u64EC",
+    "\u6302\u639B",
+    "\u6325\u63EE",
+    "\u6362\u63DB",
+    "\u636E\u64DA",
+    "\u635F\u640D",
+    "\u6446\u64FA",
+    "\u6444\u651D",
+    "\u6743\u6B0A",
+    "\u6740\u6BBA",
+    "\u6761\u689D",
+    "\u6781\u6975",
+    "\u6784\u69CB",
+    "\u67AA\u69CD",
+    "\u6807\u6A19",
+    "\u6811\u6A39",
+    "\u6837\u6A23",
+    "\u68C0\u6AA2",
+    "\u697C\u6A13",
+    "\u6B22\u6B61",
+    "\u6B27\u6B50",
+    "\u6C14\u6C23",
+    "\u6C49\u6F22",
+    "\u6C64\u6E6F",
+    "\u6C9F\u6E9D",
+    "\u6CA1\u6C92",
+    "\u6CEA\u6DDA",
+    "\u6D01\u6F54",
+    "\u6D4B\u6E2C",
+    "\u6D4E\u6FDF",
+    "\u6D4F\u700F",
+    "\u6D8C\u6E67",
+    "\u6DA6\u6F64",
+    "\u6DA8\u6F32",
+    "\u6E10\u6F38",
+    "\u6E29\u6EAB",
+    "\u6E7E\u7063",
+    "\u6EE1\u6EFF",
+    "\u6EE8\u6FF1",
+    "\u6EE4\u6FFE",
+    "\u6EDA\u6EFE",
+    "\u706D\u6EC5",
+    "\u706F\u71C8",
+    "\u7075\u9748",
+    "\u707E\u707D",
+    "\u70E6\u7169",
+    "\u70ED\u71B1",
+    "\u7237\u723A",
+    "\u7275\u727D",
+    "\u72B9\u7336",
+    "\u72EC\u7368",
+    "\u72EE\u7345",
+    "\u732A\u8C6C",
+    "\u732E\u737B",
+    "\u739B\u746A",
+    "\u73AF\u74B0",
+    "\u743C\u74CA",
+    "\u7597\u7642",
+    "\u75AF\u760B",
+    "\u76B1\u76BA",
+    "\u76D8\u76E4",
+    "\u7741\u775C",
+    "\u7792\u779E",
+    "\u7801\u78BC",
+    "\u786E\u78BA",
+    "\u7840\u790E",
+    "\u793C\u79AE",
+    "\u7978\u798D",
+    "\u79BB\u96E2",
+    "\u79CD\u7A2E",
+    "\u79EF\u7A4D",
+    "\u79F0\u7A31",
+    "\u7A33\u7A69",
+    "\u7A77\u7AAE",
+    "\u7ADE\u7AF6",
+    "\u7B14\u7B46",
+    "\u7B80\u7C21",
+    "\u7C7B\u985E",
+    "\u7CAE\u7CE7",
+    "\u7D27\u7DCA",
+    "\u7EAA\u7D00",
+    "\u7EAF\u7D14",
+    "\u7EB2\u7DB1",
+    "\u7EB3\u7D0D",
+    "\u7EB8\u7D19",
+    "\u7EA7\u7D1A",
+    "\u7EB7\u7D1B",
+    "\u7EBF\u7DDA",
+    "\u7EC4\u7D44",
+    "\u7EC6\u7D30",
+    "\u7EC7\u7E54",
+    "\u7EC8\u7D42",
+    "\u7ECF\u7D93",
+    "\u7ED3\u7D50",
+    "\u7ED5\u7E5E",
+    "\u7ED9\u7D66",
+    "\u7EDC\u7D61",
+    "\u7EDD\u7D55",
+    "\u7EDF\u7D71",
+    "\u7EE9\u7E3E",
+    "\u7EEA\u7DD2",
+    "\u7EFF\u7DA0",
+    "\u7F13\u7DE9",
+    "\u7F16\u7DE8",
+    "\u7F18\u7DE3",
+    "\u7F29\u7E2E",
+    "\u7F51\u7DB2",
+    "\u7F57\u7F85",
+    "\u7F5A\u7F70",
+    "\u806A\u8070",
+    "\u8054\u806F",
+    "\u58F0\u8072",
+    "\u80A0\u8178",
+    "\u80A4\u819A",
+    "\u80DC\u52DD",
+    "\u8111\u8166",
+    "\u8138\u81C9",
+    "\u814A\u81D8",
+    "\u8230\u8266",
+    "\u8270\u8271",
+    "\u8282\u7BC0",
+    "\u82A6\u8606",
+    "\u82CF\u8607",
+    "\u836F\u85E5",
+    "\u8363\u69AE",
+    "\u83B1\u840A",
+    "\u83B7\u7372",
+    "\u8425\u71DF",
+    "\u8427\u856D",
+    "\u84DD\u85CD",
+    "\u8651\u616E",
+    "\u867D\u96D6",
+    "\u8680\u8755",
+    "\u8721\u881F",
+    "\u8865\u88DC",
+    "\u88C5\u88DD",
+    "\u89C2\u89C0",
+    "\u89C9\u89BA",
+    "\u89E6\u89F8",
+    "\u8BA1\u8A08",
+    "\u8BA2\u8A02",
+    "\u8BA8\u8A0E",
+    "\u8BAD\u8A13",
+    "\u8BAF\u8A0A",
+    "\u8BBE\u8A2D",
+    "\u8BBF\u8A2A",
+    "\u8BC1\u8B49",
+    "\u8BC4\u8A55",
+    "\u8BD1\u8B6F",
+    "\u8BD7\u8A69",
+    "\u8BDA\u8AA0",
+    "\u8BE2\u8A62",
+    "\u8BE6\u8A73",
+    "\u8BEF\u8AA4",
+    "\u8BF8\u8AF8",
+    "\u8C03\u8ABF",
+    "\u8C0A\u8ABC",
+    "\u8C0B\u8B00",
+    "\u8C0E\u8B0A",
+    "\u8C23\u8B20",
+    "\u8C31\u8B5C",
+    "\u8D1D\u8C9D",
+    "\u8D1F\u8CA0",
+    "\u8D1E\u8C9E",
+    "\u8D22\u8CA1",
+    "\u8D23\u8CAC",
+    "\u8D24\u8CE2",
+    "\u8D25\u6557",
+    "\u8D27\u8CA8",
+    "\u8D28\u8CEA",
+    "\u8D29\u8CA9",
+    "\u8D2A\u8CAA",
+    "\u8D2B\u8CA7",
+    "\u8D2D\u8CFC",
+    "\u8D2F\u8CAB",
+    "\u8D31\u8CE4",
+    "\u8D34\u8CBC",
+    "\u8D35\u8CB4",
+    "\u8D38\u8CBF",
+    "\u8D39\u8CBB",
+    "\u8D3A\u8CC0",
+    "\u8D4B\u8CE6",
+    "\u8D4C\u8CED",
+    "\u8D4F\u8CDE",
+    "\u8D50\u8CDC",
+    "\u8D54\u8CE0",
+    "\u8D5B\u8CFD",
+    "\u8D60\u8D08",
+    "\u8D62\u8D0F",
+    "\u8D75\u8D99",
+    "\u8D8B\u8DA8",
+    "\u8DC3\u8E8D",
+    "\u8DF5\u8E10",
+    "\u8F68\u8ECC",
+    "\u8F6C\u8F49",
+    "\u8F6E\u8F2A",
+    "\u8F6F\u8EDF",
+    "\u8F7B\u8F15",
+    "\u8F7D\u8F09",
+    "\u8F83\u8F03",
+    "\u8F85\u8F14",
+    "\u8F86\u8F1B",
+    "\u8F88\u8F29",
+    "\u8F89\u8F1D",
+    "\u8F93\u8F38",
+    "\u8F9E\u8FAD",
+    "\u8FB9\u908A",
+    "\u8FBE\u9054",
+    "\u8FC1\u9077",
+    "\u8FD0\u904B",
+    "\u8FDB\u9032",
+    "\u8FDC\u9060",
+    "\u8FDD\u9055",
+    "\u8FDE\u9023",
+    "\u8FDF\u9072",
+    "\u9002\u9069",
+    "\u9009\u9078",
+    "\u900A\u905C",
+    "\u9012\u905E",
+    "\u903B\u908F",
+    "\u9057\u907A",
+    "\u9093\u9127",
+    "\u90D1\u912D",
+    "\u90AE\u90F5",
+    "\u9171\u91AC",
+    "\u91CA\u91CB",
+    "\u949F\u9418",
+    "\u94A2\u92FC",
+    "\u94B1\u9322",
+    "\u94C1\u9435",
+    "\u94C3\u9234",
+    "\u94F6\u9280",
+    "\u9501\u9396",
+    "\u9505\u934B",
+    "\u9519\u932F",
+    "\u9526\u9326",
+    "\u952E\u9375",
+    "\u955C\u93E1",
+    "\u95EA\u9583",
+    "\u95ED\u9589",
+    "\u95EF\u95D6",
+    "\u95F4\u9593",
+    "\u95F7\u60B6",
+    "\u95F9\u9B27",
+    "\u95FB\u805E",
+    "\u9605\u95B1",
+    "\u9614\u95CA",
+    "\u961F\u968A",
+    "\u9636\u968E",
+    "\u9633\u967D",
+    "\u9634\u9670",
+    "\u9646\u9678",
+    "\u9648\u9673",
+    "\u9669\u96AA",
+    "\u968F\u96A8",
+    "\u9690\u96B1",
+    "\u96BE\u96E3",
+    "\u96FE\u9727",
+    "\u9759\u975C",
+    "\u97E9\u97D3",
+    "\u9875\u9801",
+    "\u9876\u9802",
+    "\u9879\u9805",
+    "\u987A\u9806",
+    "\u987B\u9808",
+    "\u987E\u9867",
+    "\u987F\u9813",
+    "\u9884\u9810",
+    "\u9886\u9818",
+    "\u989C\u984F",
+    "\u9897\u9846",
+    "\u9898\u984C",
+    "\u98A4\u986B",
+    "\u98CE\u98A8",
+    "\u98D8\u98C4",
+    "\u98DE\u98DB",
+    "\u996D\u98EF",
+    "\u996E\u98F2",
+    "\u9970\u98FE",
+    "\u9971\u98FD",
+    "\u997F\u9913",
+    "\u9986\u9928",
+    "\u9A71\u9A45",
+    "\u9A76\u99DB",
+    "\u9A7E\u99D5",
+    "\u9A8C\u9A57",
+    "\u9A97\u9A19",
+    "\u9A84\u9A55",
+    "\u9AC5\u9ACF",
+    "\u9C9C\u9BAE",
+    "\u9E21\u96DE",
+    "\u9E23\u9CF4",
+    "\u9E3F\u9D3B",
+    "\u9E45\u9D5D",
+    "\u9E70\u9DF9",
+    "\u9EA6\u9EA5",
+    "\u9EC4\u9EC3",
+    "\u9F50\u9F4A",
+    "\u9F7F\u9F52",
+    "\u9F84\u9F61",
+    "\u9F9F\u9F9C",
+    "\u53D1\u767C"
+  ];
+  var SIMPLIFIED_ONLY_CHARS = new Set(HAN_VARIANT_PAIRS.map((pair) => pair[0]));
+  var TRADITIONAL_ONLY_CHARS = new Set(HAN_VARIANT_PAIRS.map((pair) => pair[1]));
+  var CHINESE_SIMPLIFIED = "zh-Hans";
+  var CHINESE_TRADITIONAL = "zh-Hant";
+  var CHINESE_UNDETERMINED = "zh-Hani";
   var LANGUAGE_NAME_TO_CODE = {
+    "chinese (simplified)": "zh-hans",
+    "chinese (traditional)": "zh-hant",
+    "chinese simplified": "zh-hans",
+    "chinese traditional": "zh-hant",
+    "simplified chinese": "zh-hans",
+    "traditional chinese": "zh-hant",
     english: "en",
     spanish: "es",
     french: "fr",
@@ -819,6 +1260,26 @@ var SpicyLyricTranslater = (() => {
     greek: "el"
   };
   var ENGLISH_EQUIVALENT_CODES = /* @__PURE__ */ new Set(["pcm", "sco", "jam", "cpe"]);
+  var CHINESE_SUBTAG_TO_VARIANT = {
+    hans: "zh-hans",
+    chs: "zh-hans",
+    cn: "zh-hans",
+    sg: "zh-hans",
+    hant: "zh-hant",
+    cht: "zh-hant",
+    tw: "zh-hant",
+    hk: "zh-hant",
+    mo: "zh-hant",
+    hani: "zh-hani"
+  };
+  function normalizeChineseCode(subtags) {
+    for (const subtag of subtags) {
+      const variant = CHINESE_SUBTAG_TO_VARIANT[subtag];
+      if (variant)
+        return variant;
+    }
+    return "zh-hani";
+  }
   function normalizeLanguageCode(code) {
     if (!code)
       return "unknown";
@@ -826,14 +1287,39 @@ var SpicyLyricTranslater = (() => {
     if (!value || value === "unknown" || value === "auto")
       return value || "unknown";
     const nameKey = value.replace(/\([^)]*\)/g, " ").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
-    if (LANGUAGE_NAME_TO_CODE[nameKey])
-      return LANGUAGE_NAME_TO_CODE[nameKey];
     if (LANGUAGE_NAME_TO_CODE[value])
       return LANGUAGE_NAME_TO_CODE[value];
-    const base = value.replace(/_/g, "-").split("-")[0];
+    if (LANGUAGE_NAME_TO_CODE[nameKey])
+      return LANGUAGE_NAME_TO_CODE[nameKey];
+    const subtags = value.replace(/_/g, "-").split("-");
+    const base = subtags[0];
+    if (base === "zh" || base === "cmn" || base === "yue")
+      return normalizeChineseCode(subtags.slice(1));
     if (ENGLISH_EQUIVALENT_CODES.has(base))
       return "en";
     return base;
+  }
+  function normalizeTargetLanguageCode(code) {
+    const normalized = normalizeLanguageCode(code);
+    return normalized === "zh-hani" ? "zh-hans" : normalized;
+  }
+  function detectChineseScript(text) {
+    let simplified = 0;
+    let traditional = 0;
+    for (const char of text || "") {
+      if (SIMPLIFIED_ONLY_CHARS.has(char))
+        simplified++;
+      else if (TRADITIONAL_ONLY_CHARS.has(char))
+        traditional++;
+    }
+    if (simplified === 0 && traditional === 0)
+      return CHINESE_UNDETERMINED;
+    return traditional >= simplified ? CHINESE_TRADITIONAL : CHINESE_SIMPLIFIED;
+  }
+  function refineChineseLanguageCode(code, lines) {
+    if (!code || normalizeLanguageCode(code) !== "zh-hani")
+      return code;
+    return detectChineseScript(lines.join("\n"));
   }
   function getSampleIndices(length) {
     if (length <= 0)
@@ -897,7 +1383,7 @@ var SpicyLyricTranslater = (() => {
     return expanded;
   }
   var NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
-  var JA_ROMAJI_SPECIFIC_TOKENS = /* @__PURE__ */ new Set([
+  var JA_ROMAJI_STRONG_TOKENS = /* @__PURE__ */ new Set([
     "desu",
     "masu",
     "mashita",
@@ -937,8 +1423,22 @@ var SpicyLyricTranslater = (() => {
     "mou",
     "demo",
     "sou",
-    "nai",
     "naku",
+    "datta",
+    "janai",
+    "iru",
+    "naru",
+    "suru",
+    "shita",
+    "shite",
+    "iku",
+    "itta",
+    "kuru",
+    "kita",
+    "omou",
+    "omotta"
+  ]);
+  var JA_ROMAJI_PARTICLE_TOKENS = /* @__PURE__ */ new Set([
     "wa",
     "wo",
     "no",
@@ -952,27 +1452,22 @@ var SpicyLyricTranslater = (() => {
     "ne",
     "yo",
     "da",
-    "datta",
-    "janai",
-    "iru",
-    "aru",
-    "naru",
-    "suru",
-    "shita",
-    "shite",
-    "iku",
-    "itta",
-    "kuru",
-    "kita",
-    "omou",
-    "omotta"
+    "nai",
+    "aru"
   ]);
   var ROMAJI_SYLLABLE_REGEX = /^(?:[kgsztdnhbpmrw]?y?[aeiou]{1,2}|tsu|shi|chi|n)+n?$/i;
   function countRomajiTokens(words) {
     let romaji = 0;
     let specific = 0;
+    let strong = 0;
     for (const word of words) {
-      if (JA_ROMAJI_SPECIFIC_TOKENS.has(word)) {
+      if (JA_ROMAJI_STRONG_TOKENS.has(word)) {
+        strong++;
+        specific++;
+        romaji++;
+        continue;
+      }
+      if (JA_ROMAJI_PARTICLE_TOKENS.has(word)) {
         specific++;
         romaji++;
         continue;
@@ -981,7 +1476,7 @@ var SpicyLyricTranslater = (() => {
         romaji++;
       }
     }
-    return { romaji, specific };
+    return { romaji, specific, strong };
   }
   function detectRomanizedJapanese(text) {
     if (!text)
@@ -991,11 +1486,13 @@ var SpicyLyricTranslater = (() => {
     const words = tokenizeWords(text);
     if (words.length < 4)
       return null;
-    const { romaji, specific } = countRomajiTokens(words);
+    const { romaji, specific, strong } = countRomajiTokens(words);
     const ratio = romaji / words.length;
-    if (specific < 1)
+    if (strong < 1)
       return null;
     if (ratio < 0.4)
+      return null;
+    if (countLanguageWordHits(expandElidedWords(words), "en") >= 2)
       return null;
     return {
       confidence: Math.min(0.9, 0.5 + ratio * 0.4 + Math.min(specific, 4) * 0.05),
@@ -1027,7 +1524,7 @@ var SpicyLyricTranslater = (() => {
       return { code: "ko", confidence: 0.92, kana, kanji, hangul };
     }
     if (kanji >= 8 && kana === 0) {
-      return { code: "zh", confidence: 0.9, kana, kanji, hangul };
+      return { code: detectChineseScript(lines.join("\n")), confidence: 0.9, kana, kanji, hangul };
     }
     return null;
   }
@@ -1106,7 +1603,7 @@ var SpicyLyricTranslater = (() => {
       return { code: "ko", confidence: Math.min(0.95, 0.65 + hangulCount / totalChars * 0.3) };
     }
     if (hanCount > 0 && hanCount / totalChars > 0.2) {
-      return { code: "zh", confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
+      return { code: detectChineseScript(normalizedText), confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
     }
     const dominantScript = Object.entries(scriptCounts).filter(([code]) => code !== "zh" && code !== "ja" && code !== "ko").map(([code, count]) => ({ code, count, ratio: count / totalChars })).sort((a, b) => b.count - a.count)[0];
     if (dominantScript && dominantScript.ratio > 0.2) {
@@ -1166,7 +1663,13 @@ var SpicyLyricTranslater = (() => {
     }
     const data = await response.json();
     const rawDetectedLang = typeof data?.[2] === "string" ? data[2] : "unknown";
-    const detectedLang = rawDetectedLang === "unknown" ? "unknown" : normalizeLanguageCode(rawDetectedLang);
+    let detectedLang = rawDetectedLang === "unknown" ? "unknown" : normalizeLanguageCode(rawDetectedLang);
+    if (detectedLang.startsWith("zh-")) {
+      const scriptVariant = detectChineseScript(sample);
+      if (scriptVariant !== CHINESE_UNDETERMINED) {
+        detectedLang = scriptVariant;
+      }
+    }
     const confidence = detectedLang !== "unknown" ? 0.9 : 0.5;
     return { code: detectedLang, confidence };
   }
@@ -1232,10 +1735,46 @@ var SpicyLyricTranslater = (() => {
       return heuristic || { code: "unknown", confidence: 0 };
     }
   }
+  function countLanguageWordHits(words, code) {
+    const entry = LATIN_LANGUAGE_WORD_SETS.find((lang) => lang.code === code);
+    if (!entry)
+      return 0;
+    let count = 0;
+    for (const word of new Set(words)) {
+      if (entry.words.has(word))
+        count++;
+    }
+    return count;
+  }
+  function isLikelyNonTargetLine(text, targetLanguage) {
+    const trimmed = (text || "").trim();
+    if (!trimmed)
+      return false;
+    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed)) {
+      return !["ja", "zh-hans", "zh-hant", "zh-hani", "ko", "ar", "he", "ru", "th", "hi", "el"].includes(normalizeTargetLanguageCode(targetLanguage));
+    }
+    const targetCode = normalizeTargetLanguageCode(targetLanguage);
+    if (!LATIN_LANGUAGE_WORD_SETS.some((lang) => lang.code === targetCode))
+      return false;
+    const words = expandElidedWords(tokenizeWords(trimmed));
+    if (words.length < 3)
+      return false;
+    if (new Set(words).size < 3)
+      return false;
+    if (!words.some((word) => word.length >= 4))
+      return false;
+    if (countLanguageWordHits(words, targetCode) > 0)
+      return false;
+    return LATIN_LANGUAGE_WORD_SETS.some((lang) => lang.code !== targetCode && countLanguageWordHits(words, lang.code) >= 2);
+  }
   function isSameLanguage(source, target) {
     if (!source || source === "unknown")
       return false;
-    return normalizeLanguageCode(source) === normalizeLanguageCode(target);
+    const normalizedSource = normalizeLanguageCode(source);
+    const normalizedTarget = normalizeTargetLanguageCode(target);
+    if (normalizedSource === normalizedTarget)
+      return true;
+    return normalizedSource === "zh-hani" && normalizedTarget.startsWith("zh-");
   }
   function assessMixedLanguageContent(lines, targetLanguage) {
     let nonTargetCount = 0;
@@ -1265,7 +1804,9 @@ var SpicyLyricTranslater = (() => {
       }
       const detected = detectLanguageHeuristic(trimmed);
       if (!detected) {
-        if (trimmed.length >= 10) {
+        if (isLikelyNonTargetLine(trimmed, targetLanguage)) {
+          nonTargetCount++;
+        } else if (trimmed.length >= 10) {
           uncertainCount++;
         }
         continue;
@@ -1281,9 +1822,8 @@ var SpicyLyricTranslater = (() => {
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0)
       return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
-    const nonTargetRatio = nonTargetCount / totalChecked;
     const uncertainRatio = uncertainCount / totalChecked;
-    const hasMixedContent = nonLatinNonTargetCount > 0 || (targetIsLatin ? nonTargetCount >= 2 && nonTargetRatio >= 0.18 : nonTargetCount >= 1) || uncertainCount > 0 && uncertainRatio > 0.35 && nonTargetCount > 0;
+    const hasMixedContent = nonLatinNonTargetCount > 0 || nonTargetCount >= 1 || uncertainCount > 0 && uncertainRatio > 0.35 && nonTargetCount > 0;
     return { hasMixedContent, nonTargetCount, uncertainCount };
   }
   async function shouldSkipTranslation(lyrics, targetLanguage, trackUri) {
@@ -1551,7 +2091,7 @@ var SpicyLyricTranslater = (() => {
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
       return true;
     }
-    return false;
+    return isLikelyNonTargetLine(source, targetLang);
   }
   function getConfidentLineLanguage(text) {
     const detected = detectLanguageHeuristic(text);
@@ -1561,9 +2101,12 @@ var SpicyLyricTranslater = (() => {
     const languages = /* @__PURE__ */ new Set();
     for (const line of lines) {
       const lang = getConfidentLineLanguage(line);
-      if (lang) {
-        languages.add(normalizeLanguageCode(lang));
-      }
+      if (!lang)
+        continue;
+      const normalized = normalizeLanguageCode(lang);
+      if (normalized === "zh-hani")
+        continue;
+      languages.add(normalized);
     }
     return languages;
   }
@@ -1628,7 +2171,10 @@ var SpicyLyricTranslater = (() => {
       return true;
     }
     const detected = detectLanguageHeuristic(source);
-    return Boolean(detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang));
+    if (detected && detected.confidence >= 0.6) {
+      return !isSameLanguage(detected.code, targetLang);
+    }
+    return isLikelyNonTargetLine(source, targetLang);
   }
   function shouldInvalidateSameLanguageTrackCache(sourceLang, targetLang, sourceLines, cachedTranslatedLines) {
     if (!sourceLang || !isSameLanguage(sourceLang, targetLang)) {
@@ -2055,13 +2601,18 @@ var SpicyLyricTranslater = (() => {
     pruneTranslationCache(cache);
     storage_default.setJSON("translation-cache", cache);
   }
+  var API_SOURCE_LANG_OVERRIDES = {
+    "zh-hans": "zh-CN",
+    "zh-hant": "zh-TW",
+    "zh-hani": "auto"
+  };
   function normalizeSourceLangHint(raw) {
     if (!raw)
       return "auto";
     const value = normalizeLanguageCode(raw);
     if (!value || value === "unknown" || value === "auto")
       return "auto";
-    return value || "auto";
+    return API_SOURCE_LANG_OVERRIDES[value] || value || "auto";
   }
   async function translateWithGoogle(text, targetLang, sourceLang) {
     const encodedText = encodeURIComponent(text);
@@ -3073,6 +3624,7 @@ ${text}`
   }
   function inferDominantSourceLangFromLines(lines) {
     let zh = 0, ja = 0, ko = 0;
+    const zhLines = [];
     for (const line of lines) {
       if (!line)
         continue;
@@ -3086,6 +3638,7 @@ ${text}`
       }
       if (/[一-鿿㐀-䶿]/.test(line)) {
         zh++;
+        zhLines.push(line);
         continue;
       }
     }
@@ -3094,7 +3647,7 @@ ${text}`
     if (ko > 0 && ko >= zh && ko >= ja)
       return "ko";
     if (zh > 0)
-      return "zh";
+      return detectChineseScript(zhLines.join("\n"));
     return void 0;
   }
   function buildMetricsForCache(session, startedAt) {
@@ -3148,6 +3701,8 @@ ${text}`
       if (inferred) {
         detectedSourceLang = inferred;
       }
+    } else {
+      detectedSourceLang = refineChineseLanguageCode(detectedSourceLang, lines);
     }
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== "auto" && detectedSourceLang !== "unknown" && isSameLanguage(detectedSourceLang, targetLang);
     const confidentLineLangs = Array.from(lineLanguages);
@@ -7037,7 +7592,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.1.1" : "0.0.0";
+    return true ? "2.1.2" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -8584,6 +9139,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       }
       const detected = detectLanguageHeuristic(trimmed);
       if (!detected) {
+        if (isLikelyNonTargetLine(trimmed, targetLanguage)) {
+          indexes.push(i);
+        }
         continue;
       }
       if (!isSameLanguage(detected.code, targetLanguage) && detected.confidence >= 0.6) {
@@ -8905,6 +9463,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         return;
       }
       const sourceLyricsKey = buildLyricsKey(nonEmptyTexts);
+      if (apiLanguage) {
+        apiLanguage = refineChineseLanguageCode(apiLanguage, nonEmptyTexts);
+      }
       const detectedLang = apiLanguage || cachedSourceLanguage || state.detectedLanguage || void 0;
       let skipCheck;
       if (romanizationOn && apiLanguage) {
@@ -10111,6 +10672,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   }
 
   // src/utils/settingsModel.ts
+  var SETTINGS_CATEGORIES = [
+    { id: "slt-cat-translation", label: "Translation", sections: ["Translation", "Behaviour"] },
+    {
+      id: "slt-cat-providers",
+      label: "Providers",
+      sections: ["Provider", "Custom API", "LibreTranslate", "DeepL", "OpenAI", "Gemini", "Grok", "Claude"]
+    },
+    { id: "slt-cat-interface", label: "Interface", sections: ["Interface"] }
+  ];
   var API_OPTIONS = [
     { value: "google", text: "Google Translate" },
     { value: "libretranslate", text: "LibreTranslate" },
@@ -10135,6 +10705,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
   var SETTINGS_SCHEMA = [
     {
       id: "target-language",
+      section: "Translation",
+      keywords: "language locale translate to output",
       label: "Target Language",
       type: "select",
       storageKey: "target-language",
@@ -10144,6 +10716,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "overlay-mode",
+      section: "Translation",
+      keywords: "display overlay replace interleaved below line",
       label: "Translation Display",
       type: "select",
       storageKey: "overlay-mode",
@@ -10154,6 +10728,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "preferred-api",
+      section: "Provider",
+      keywords: "api provider service engine backend",
       label: "Translation API",
       type: "select",
       storageKey: "preferred-api",
@@ -10163,6 +10739,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "custom-api-url",
+      section: "Custom API",
+      keywords: "custom endpoint url self hosted",
       label: "Custom API URL",
       type: "text",
       storageKey: "custom-api-url",
@@ -10173,6 +10751,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "custom-api-format",
+      section: "Custom API",
+      keywords: "custom format schema payload compatible",
       label: "Custom API Format",
       type: "select",
       storageKey: "custom-api-format",
@@ -10182,6 +10762,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "custom-api-key",
+      section: "Custom API",
+      keywords: "custom key token auth secret",
       label: "Custom API Key (optional)",
       type: "password",
       storageKey: "custom-api-key",
@@ -10192,6 +10774,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "custom-api-model",
+      section: "Custom API",
+      keywords: "custom model name llm",
       label: "Custom API Model (optional)",
       type: "text",
       storageKey: "custom-api-model",
@@ -10201,6 +10785,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "libretranslate-api-url",
+      section: "LibreTranslate",
+      keywords: "libretranslate url endpoint self hosted",
       label: "LibreTranslate URL",
       type: "text",
       storageKey: "libretranslate-api-url",
@@ -10211,6 +10797,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "libretranslate-api-key",
+      section: "LibreTranslate",
+      keywords: "libretranslate key token auth secret",
       label: "LibreTranslate API Key",
       type: "password",
       storageKey: "libretranslate-api-key",
@@ -10222,6 +10810,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "deepl-api-key",
+      section: "DeepL",
+      keywords: "deepl key token auth secret pro free",
       label: "DeepL API Key",
       type: "password",
       storageKey: "deepl-api-key",
@@ -10233,6 +10823,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "openai-api-key",
+      section: "OpenAI",
+      keywords: "openai key token auth secret gpt",
       label: "OpenAI API Key",
       type: "password",
       storageKey: "openai-api-key",
@@ -10243,6 +10835,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "openai-model",
+      section: "OpenAI",
+      keywords: "openai model gpt version",
       label: "OpenAI Model",
       type: "select",
       storageKey: "openai-model",
@@ -10256,6 +10850,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "gemini-api-key",
+      section: "Gemini",
+      keywords: "gemini google key token auth secret",
       label: "Gemini API Key",
       type: "password",
       storageKey: "gemini-api-key",
@@ -10267,6 +10863,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "gemini-model",
+      section: "Gemini",
+      keywords: "gemini model flash pro version",
       label: "Gemini Model",
       type: "select",
       storageKey: "gemini-model",
@@ -10281,6 +10879,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "gemini-temperature",
+      section: "Gemini",
+      keywords: "gemini temperature randomness creativity",
       label: "Gemini Temperature",
       type: "text",
       storageKey: "gemini-temperature",
@@ -10291,6 +10891,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "grok-api-key",
+      section: "Grok",
+      keywords: "grok xai key token auth secret",
       label: "Grok (xAI) API Key",
       type: "password",
       storageKey: "grok-api-key",
@@ -10302,6 +10904,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "grok-model",
+      section: "Grok",
+      keywords: "grok xai model version",
       label: "Grok Model",
       type: "select",
       storageKey: "grok-model",
@@ -10315,6 +10919,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "anthropic-api-key",
+      section: "Claude",
+      keywords: "claude anthropic key token auth secret",
       label: "Claude (Anthropic) API Key",
       type: "password",
       storageKey: "anthropic-api-key",
@@ -10326,6 +10932,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "anthropic-model",
+      section: "Claude",
+      keywords: "claude anthropic model haiku sonnet opus",
       label: "Claude Model",
       type: "select",
       storageKey: "anthropic-model",
@@ -10340,6 +10948,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "max-parallel-chunks",
+      section: "Provider",
+      keywords: "parallel concurrent requests speed rate limit cost",
       label: "Parallel Translation Requests",
       type: "select",
       storageKey: "max-parallel-chunks",
@@ -10357,6 +10967,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "auto-translate",
+      section: "Behaviour",
+      keywords: "auto automatic song change start",
       label: "Auto-Translate on Song Change",
       type: "toggle",
       storageKey: "auto-translate",
@@ -10364,6 +10976,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "show-notifications",
+      section: "Interface",
+      keywords: "notifications toasts messages popup",
       label: "Show Notifications",
       type: "toggle",
       storageKey: "show-notifications",
@@ -10371,6 +10985,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "show-quality-indicator",
+      section: "Interface",
+      keywords: "quality indicator badge confidence",
       label: "Show Translation Quality Indicator",
       type: "toggle",
       storageKey: "show-quality-indicator",
@@ -10379,6 +10995,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "vocabulary-mode",
+      section: "Behaviour",
+      keywords: "vocabulary learning study word by word",
       label: "Vocabulary / Learning Mode",
       type: "toggle",
       storageKey: "vocabulary-mode",
@@ -10387,6 +11005,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     },
     {
       id: "hide-connection-indicator",
+      section: "Interface",
+      keywords: "connection status indicator hide ping",
       label: "Hide Connection Status",
       type: "toggle",
       storageKey: "hide-connection-indicator",
@@ -10394,6 +11014,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       effects: ["connectionIndicatorClass"]
     }
   ];
+  function getSectionsForCategory(category) {
+    return category.sections.filter((section) => SETTINGS_SCHEMA.some((field) => field.section === section));
+  }
+  function matchesSettingQuery(field, query) {
+    const needle = query.trim().toLowerCase();
+    if (!needle)
+      return true;
+    return [field.label, field.section, field.description, field.keywords].some((value) => (value || "").toLowerCase().includes(needle));
+  }
   function getCurrentApiPreference() {
     return storage.get("preferred-api") || state.preferredApi || "google";
   }
@@ -10434,6 +11063,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       return String(field.defaultValue);
     }
     return normalizedStored ?? String(field.defaultValue);
+  }
+  function isSettingAtDefault(field) {
+    const value = readSettingValue(field);
+    if (field.type === "toggle")
+      return Boolean(value) === Boolean(field.defaultValue);
+    return String(value) === String(field.defaultValue);
   }
   function configureTranslationApi() {
     setPreferredApi(state.preferredApi, state.customApiUrl, {
@@ -10740,9 +11375,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
     return row;
   }
   function renderNativeSettingsFields(container) {
-    SETTINGS_SCHEMA.forEach((field) => {
-      container.appendChild(createNativeFieldRow(field, container));
-    });
+    for (const category of SETTINGS_CATEGORIES) {
+      for (const section of getSectionsForCategory(category)) {
+        const fields = SETTINGS_SCHEMA.filter((field) => field.section === section);
+        if (fields.length === 0)
+          continue;
+        const heading = document.createElement("h3");
+        heading.className = "slt-native-section-title";
+        heading.textContent = `${category.label} \xB7 ${section}`;
+        container.appendChild(heading);
+        fields.forEach((field) => container.appendChild(createNativeFieldRow(field, container)));
+      }
+    }
   }
   function createNativeSettingsSection() {
     const section = document.createElement("div");
@@ -10931,64 +11575,126 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
       subtree: true
     });
   }
-  function renderModalSettingsMarkup() {
-    return SETTINGS_SCHEMA.map((field) => {
-      const id = getModalSettingInputId(field);
+  var modalFieldHandles = [];
+  function buildModalField(field, onChanged) {
+    const id = getModalSettingInputId(field);
+    const row = document.createElement("div");
+    row.className = field.type === "toggle" ? "slt-modal-field slt-modal-toggle-field" : "slt-modal-field";
+    row.setAttribute("data-slt-setting-field", field.id);
+    const description = field.description ? `<span class="slt-description">${escapeHtml2(field.description)}</span>` : "";
+    let controlMarkup;
+    if (field.type === "toggle") {
+      controlMarkup = `
+            <label class="slt-toggle">
+                <input type="checkbox" id="${id}">
+                <span class="slt-toggle-slider"></span>
+            </label>`;
+    } else if (field.type === "select") {
+      const options = (field.options || []).map((option) => `<option value="${escapeHtml2(option.value)}">${escapeHtml2(option.text)}</option>`).join("");
+      controlMarkup = `<select id="${id}">${options}</select>`;
+    } else {
+      controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml2(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">`;
+    }
+    row.innerHTML = `
+        <div class="slt-modal-field-copy">
+            <label for="${id}">${escapeHtml2(field.label)}</label>
+            ${description}
+        </div>
+        <div class="slt-modal-field-control">
+            ${controlMarkup}
+            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml2(field.label)} to default">\u21BA</button>
+        </div>`;
+    const control = row.querySelector(`#${id}`);
+    const resetButton = row.querySelector(".slt-field-reset");
+    const sync = () => {
       const value = readSettingValue(field);
-      const display = isSettingFieldVisible(field) ? "grid" : "none";
-      const description = field.description ? `<span class="slt-description">${escapeHtml2(field.description)}</span>` : "";
       if (field.type === "toggle") {
-        return `
-        <div class="slt-modal-field slt-modal-toggle-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml2(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <label class="slt-toggle">
-                    <input type="checkbox" id="${id}" ${value === true ? "checked" : ""}>
-                    <span class="slt-toggle-slider"></span>
-                </label>
-            </div>
-        </div>`;
+        control.checked = value === true;
+      } else {
+        control.value = String(value);
       }
-      if (field.type === "select") {
-        return `
-        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml2(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <select id="${id}">
-                    ${(field.options || []).map((option) => `<option value="${escapeHtml2(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml2(option.text)}</option>`).join("")}
-                </select>
-            </div>
-        </div>`;
-      }
-      return `
-        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml2(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <input type="${field.type}" id="${id}" value="${escapeHtml2(String(value))}" placeholder="${escapeHtml2(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">
-            </div>
-        </div>`;
-    }).join("");
-  }
-  function bindModalSettingsFields(container) {
-    SETTINGS_SCHEMA.forEach((field) => {
-      const control = container.querySelector(`#${getModalSettingInputId(field)}`);
-      if (!control)
-        return;
-      const eventName = field.type === "toggle" ? "change" : "change";
-      control.addEventListener(eventName, () => {
-        const value = field.type === "toggle" ? control.checked : control.value;
-        handleSettingChange(field, value, container, "grid");
-      });
+      resetButton.classList.toggle("slt-field-reset-on", !isSettingAtDefault(field));
+    };
+    control.addEventListener("change", () => {
+      const value = field.type === "toggle" ? control.checked : control.value;
+      handleSettingChange(field, value, void 0, "");
+      onChanged();
     });
+    resetButton.addEventListener("click", () => {
+      handleSettingChange(field, field.defaultValue, void 0, "");
+      onChanged();
+    });
+    sync();
+    return { field, row, sync };
+  }
+  function applyModalSettingsFilter(container, query) {
+    const api = getCurrentApiPreference();
+    let matches = 0;
+    for (const handle of modalFieldHandles) {
+      const visible = isSettingFieldVisible(handle.field, api) && matchesSettingQuery(handle.field, query);
+      handle.row.style.display = visible ? "" : "none";
+      if (visible)
+        matches++;
+    }
+    container.querySelectorAll("[data-slt-section]").forEach((sectionEl) => {
+      const section = sectionEl;
+      const hasVisibleRow = Array.from(section.querySelectorAll(".slt-modal-field")).some((row) => row.style.display !== "none");
+      section.style.display = hasVisibleRow ? "" : "none";
+    });
+    container.querySelectorAll("[data-slt-category]").forEach((categoryEl) => {
+      const category = categoryEl;
+      const hasVisibleSection = Array.from(category.querySelectorAll("[data-slt-section]")).some((section) => section.style.display !== "none");
+      category.style.display = hasVisibleSection ? "" : "none";
+    });
+    const status = container.querySelector("#slt-settings-search-status");
+    if (status) {
+      status.textContent = query.trim() ? `${matches} setting${matches === 1 ? "" : "s"} matched` : "";
+    }
+  }
+  function buildModalSettingsPanel() {
+    modalFieldHandles.length = 0;
+    const panel = document.createElement("div");
+    panel.className = "slt-settings-panel";
+    const search = document.createElement("div");
+    search.className = "slt-settings-search";
+    search.innerHTML = `
+        <input type="search" id="slt-settings-search-input" placeholder="Search settings\u2026" autocomplete="off" spellcheck="false">
+        <span id="slt-settings-search-status"></span>`;
+    panel.appendChild(search);
+    const refresh = () => {
+      const input = panel.querySelector("#slt-settings-search-input");
+      modalFieldHandles.forEach((handle) => handle.sync());
+      applyModalSettingsFilter(panel, input?.value || "");
+    };
+    for (const category of SETTINGS_CATEGORIES) {
+      const sections = getSectionsForCategory(category);
+      if (sections.length === 0)
+        continue;
+      const categoryEl = document.createElement("div");
+      categoryEl.className = "slt-settings-category";
+      categoryEl.setAttribute("data-slt-category", category.id);
+      categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml2(category.label)}</div>`;
+      for (const section of sections) {
+        const fields = SETTINGS_SCHEMA.filter((field) => field.section === section);
+        if (fields.length === 0)
+          continue;
+        const sectionEl = document.createElement("div");
+        sectionEl.className = "slt-settings-section";
+        sectionEl.setAttribute("data-slt-section", section);
+        sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml2(section)}</div>`;
+        for (const field of fields) {
+          const handle = buildModalField(field, refresh);
+          modalFieldHandles.push(handle);
+          sectionEl.appendChild(handle.row);
+        }
+        categoryEl.appendChild(sectionEl);
+      }
+      panel.appendChild(categoryEl);
+    }
+    const searchInput = panel.querySelector("#slt-settings-search-input");
+    searchInput.addEventListener("input", () => applyModalSettingsFilter(panel, searchInput.value));
+    applyModalSettingsFilter(panel, "");
+    return panel;
   }
   function connectionStateLabel(connectionState) {
     switch (connectionState) {
@@ -11111,7 +11817,96 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
                 background-clip: padding-box;
             }
             .slt-settings-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
+            .slt-settings-panel {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .slt-settings-search {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 6px 14px 12px;
+            }
+            .slt-settings-search input {
+                flex: 1;
+                min-height: 38px;
+                padding: 8px 13px;
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
+                background-color: var(--slt-surface);
+                color: var(--slt-text);
+                font-size: 13px;
+                font-weight: 500;
+                box-sizing: border-box;
+            }
+            .slt-settings-search input:focus {
+                outline: none;
+                border-color: rgba(255, 255, 255, 0.4);
+                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+            }
+            #slt-settings-search-status {
+                font-size: 12px;
+                color: var(--slt-text-3);
+                white-space: nowrap;
+            }
+            .slt-settings-category {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .slt-settings-category-title {
+                padding: 14px 14px 6px;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.09em;
+                text-transform: uppercase;
+                color: var(--slt-text-3);
+            }
+            .slt-settings-section {
+                display: flex;
+                flex-direction: column;
+                border-radius: var(--slt-radius-sm);
+                background: var(--slt-surface);
+                margin-bottom: 8px;
+                overflow: hidden;
+            }
+            .slt-settings-section-title {
+                padding: 10px 14px 8px;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+                color: var(--slt-text-2);
+            }
+            .slt-settings-section .slt-modal-field:last-child::after { opacity: 0; }
+            .slt-field-reset {
+                flex-shrink: 0;
+                width: 28px;
+                height: 28px;
+                margin-left: 8px;
+                border-radius: 999px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: var(--slt-text-3);
+                font-size: 14px;
+                line-height: 1;
+                cursor: pointer;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s var(--slt-ease), color 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
+            }
+            .slt-field-reset.slt-field-reset-on {
+                opacity: 1;
+                pointer-events: auto;
+                border-color: var(--slt-hairline-strong);
+                color: var(--slt-text-2);
+            }
+            .slt-field-reset.slt-field-reset-on:hover {
+                color: var(--slt-text);
+                border-color: rgba(255, 255, 255, 0.32);
+            }
             .slt-modal-field {
+                display: grid;
                 grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
                 align-items: center;
                 gap: 18px;
@@ -11142,6 +11937,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             }
             .slt-modal-field-control {
                 display: flex;
+                align-items: center;
                 justify-content: flex-end;
                 min-width: 0;
             }
@@ -11410,7 +12206,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
             }
         </style>
         
-        ${renderModalSettingsMarkup()}
+        <div id="slt-settings-panel-mount"></div>
 
         ${renderConnectionStatusMarkup()}
 
@@ -11443,8 +12239,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
         
         <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
+    const settingsMount = container.querySelector("#slt-settings-panel-mount");
+    settingsMount?.replaceWith(buildModalSettingsPanel());
     setTimeout(() => {
-      bindModalSettingsFields(container);
       bindModalCacheActions(container);
       startConnectionStatusUpdates(container);
       const viewCacheButton = container.querySelector("#slt-view-cache");

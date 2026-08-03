@@ -38,7 +38,59 @@ const LATIN_LANGUAGE_WORD_SETS: { code: string; words: Set<string> }[] = LATIN_L
     words: new Set(lang.words)
 }));
 
+const HAN_VARIANT_PAIRS = [
+    '爱愛', '说說', '继繼', '续續', '们們', '这這', '时時', '国國', '学學', '会會', '来來', '对對',
+    '个個', '现現', '长長', '问問', '见見', '开開', '关關', '门門', '无無', '为為', '还還', '过過',
+    '从從', '让讓', '请請', '谁誰', '话話', '语語', '谢謝', '该該', '记記', '认認', '识識', '讲講',
+    '论論', '试試', '诉訴', '词詞', '读讀', '课課', '谈談', '许許', '议議', '变變', '电電', '车車',
+    '东東', '马馬', '鸟鳥', '鱼魚', '龙龍', '头頭', '买買', '卖賣', '万萬', '与與', '业業', '丽麗',
+    '举舉', '义義', '乐樂', '习習', '书書', '亲親', '产產', '众眾', '优優', '传傳', '伤傷', '体體',
+    '价價', '儿兒', '党黨', '内內', '军軍', '农農', '决決', '净淨', '减減', '凤鳳', '处處', '备備',
+    '够夠', '复復', '实實', '宁寧', '宝寶', '寻尋', '导導', '岁歲', '归歸', '当當', '尽盡', '层層',
+    '属屬', '岛島', '师師', '带帶', '帮幫', '广廣', '应應', '庆慶', '张張', '录錄', '彻徹', '径徑',
+    '忆憶', '忧憂', '怀懷', '态態', '总總', '恋戀', '惊驚', '惧懼', '惯慣', '战戰', '户戶', '扫掃',
+    '执執', '扩擴', '扬揚', '择擇', '报報', '担擔', '拟擬', '挂掛', '挥揮', '换換', '据據', '损損',
+    '摆擺', '摄攝', '权權', '杀殺', '条條', '极極', '构構', '枪槍', '标標', '树樹', '样樣', '检檢',
+    '楼樓', '欢歡', '欧歐', '气氣', '汉漢', '汤湯', '沟溝', '没沒', '泪淚', '洁潔', '测測', '济濟',
+    '浏瀏', '涌湧', '润潤', '涨漲', '渐漸', '温溫', '湾灣', '满滿', '滨濱', '滤濾', '滚滾', '灭滅',
+    '灯燈', '灵靈', '灾災', '烦煩', '热熱', '爷爺', '牵牽', '犹猶', '独獨', '狮獅', '猪豬', '献獻',
+    '玛瑪', '环環', '琼瓊', '疗療', '疯瘋', '皱皺', '盘盤', '睁睜', '瞒瞞', '码碼', '确確', '础礎',
+    '礼禮', '祸禍', '离離', '种種', '积積', '称稱', '稳穩', '穷窮', '竞競', '笔筆', '简簡', '类類',
+    '粮糧', '紧緊', '纪紀', '纯純', '纲綱', '纳納', '纸紙', '级級', '纷紛', '线線', '组組', '细細',
+    '织織', '终終', '经經', '结結', '绕繞', '给給', '络絡', '绝絕', '统統', '绩績', '绪緒', '绿綠',
+    '缓緩', '编編', '缘緣', '缩縮', '网網', '罗羅', '罚罰', '聪聰', '联聯', '声聲', '肠腸', '肤膚',
+    '胜勝', '脑腦', '脸臉', '腊臘', '舰艦', '艰艱', '节節', '芦蘆', '苏蘇', '药藥', '荣榮', '莱萊',
+    '获獲', '营營', '萧蕭', '蓝藍', '虑慮', '虽雖', '蚀蝕', '蜡蠟', '补補', '装裝', '观觀', '觉覺',
+    '触觸', '计計', '订訂', '讨討', '训訓', '讯訊', '设設', '访訪', '证證', '评評', '译譯', '诗詩',
+    '诚誠', '询詢', '详詳', '误誤', '诸諸', '调調', '谊誼', '谋謀', '谎謊', '谣謠', '谱譜', '贝貝',
+    '负負', '贞貞', '财財', '责責', '贤賢', '败敗', '货貨', '质質', '贩販', '贪貪', '贫貧', '购購',
+    '贯貫', '贱賤', '贴貼', '贵貴', '贸貿', '费費', '贺賀', '赋賦', '赌賭', '赏賞', '赐賜', '赔賠',
+    '赛賽', '赠贈', '赢贏', '赵趙', '趋趨', '跃躍', '践踐', '轨軌', '转轉', '轮輪', '软軟', '轻輕',
+    '载載', '较較', '辅輔', '辆輛', '辈輩', '辉輝', '输輸', '辞辭', '边邊', '达達', '迁遷', '运運',
+    '进進', '远遠', '违違', '连連', '迟遲', '适適', '选選', '逊遜', '递遞', '逻邏', '遗遺', '邓鄧',
+    '郑鄭', '邮郵', '酱醬', '释釋', '钟鐘', '钢鋼', '钱錢', '铁鐵', '铃鈴', '银銀', '锁鎖', '锅鍋',
+    '错錯', '锦錦', '键鍵', '镜鏡', '闪閃', '闭閉', '闯闖', '间間', '闷悶', '闹鬧', '闻聞', '阅閱',
+    '阔闊', '队隊', '阶階', '阳陽', '阴陰', '陆陸', '陈陳', '险險', '随隨', '隐隱', '难難', '雾霧',
+    '静靜', '韩韓', '页頁', '顶頂', '项項', '顺順', '须須', '顾顧', '顿頓', '预預', '领領', '颜顏',
+    '颗顆', '题題', '颤顫', '风風', '飘飄', '飞飛', '饭飯', '饮飲', '饰飾', '饱飽', '饿餓', '馆館',
+    '驱驅', '驶駛', '驾駕', '验驗', '骗騙', '骄驕', '髅髏', '鲜鮮', '鸡雞', '鸣鳴', '鸿鴻', '鹅鵝',
+    '鹰鷹', '麦麥', '黄黃', '齐齊', '齿齒', '龄齡', '龟龜', '发發'
+];
+
+const SIMPLIFIED_ONLY_CHARS = new Set(HAN_VARIANT_PAIRS.map(pair => pair[0]));
+const TRADITIONAL_ONLY_CHARS = new Set(HAN_VARIANT_PAIRS.map(pair => pair[1]));
+
+export const CHINESE_SIMPLIFIED = 'zh-Hans';
+export const CHINESE_TRADITIONAL = 'zh-Hant';
+export const CHINESE_UNDETERMINED = 'zh-Hani';
+
 const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+    'chinese (simplified)': 'zh-hans',
+    'chinese (traditional)': 'zh-hant',
+    'chinese simplified': 'zh-hans',
+    'chinese traditional': 'zh-hant',
+    'simplified chinese': 'zh-hans',
+    'traditional chinese': 'zh-hant',
     english: 'en',
     spanish: 'es',
     french: 'fr',
@@ -62,6 +114,27 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
 
 const ENGLISH_EQUIVALENT_CODES = new Set(['pcm', 'sco', 'jam', 'cpe']);
 
+const CHINESE_SUBTAG_TO_VARIANT: Record<string, string> = {
+    hans: 'zh-hans',
+    chs: 'zh-hans',
+    cn: 'zh-hans',
+    sg: 'zh-hans',
+    hant: 'zh-hant',
+    cht: 'zh-hant',
+    tw: 'zh-hant',
+    hk: 'zh-hant',
+    mo: 'zh-hant',
+    hani: 'zh-hani'
+};
+
+function normalizeChineseCode(subtags: string[]): string {
+    for (const subtag of subtags) {
+        const variant = CHINESE_SUBTAG_TO_VARIANT[subtag];
+        if (variant) return variant;
+    }
+    return 'zh-hani';
+}
+
 export function normalizeLanguageCode(code?: string | null): string {
     if (!code) return 'unknown';
     const value = code.trim().toLowerCase();
@@ -73,12 +146,37 @@ export function normalizeLanguageCode(code?: string | null): string {
         .replace(/\s+/g, ' ')
         .trim();
 
-    if (LANGUAGE_NAME_TO_CODE[nameKey]) return LANGUAGE_NAME_TO_CODE[nameKey];
     if (LANGUAGE_NAME_TO_CODE[value]) return LANGUAGE_NAME_TO_CODE[value];
+    if (LANGUAGE_NAME_TO_CODE[nameKey]) return LANGUAGE_NAME_TO_CODE[nameKey];
 
-    const base = value.replace(/_/g, '-').split('-')[0];
+    const subtags = value.replace(/_/g, '-').split('-');
+    const base = subtags[0];
+    if (base === 'zh' || base === 'cmn' || base === 'yue') return normalizeChineseCode(subtags.slice(1));
     if (ENGLISH_EQUIVALENT_CODES.has(base)) return 'en';
     return base;
+}
+
+export function normalizeTargetLanguageCode(code?: string | null): string {
+    const normalized = normalizeLanguageCode(code);
+    return normalized === 'zh-hani' ? 'zh-hans' : normalized;
+}
+
+export function detectChineseScript(text: string): string {
+    let simplified = 0;
+    let traditional = 0;
+
+    for (const char of text || '') {
+        if (SIMPLIFIED_ONLY_CHARS.has(char)) simplified++;
+        else if (TRADITIONAL_ONLY_CHARS.has(char)) traditional++;
+    }
+
+    if (simplified === 0 && traditional === 0) return CHINESE_UNDETERMINED;
+    return traditional >= simplified ? CHINESE_TRADITIONAL : CHINESE_SIMPLIFIED;
+}
+
+export function refineChineseLanguageCode(code: string | undefined, lines: string[]): string | undefined {
+    if (!code || normalizeLanguageCode(code) !== 'zh-hani') return code;
+    return detectChineseScript(lines.join('\n'));
 }
 
 function getSampleIndices(length: number): number[] {
@@ -152,25 +250,36 @@ function expandElidedWords(words: string[]): string[] {
 
 const NON_LATIN_SCRIPT_DETECTION_REGEX = /[぀-ヿ一-鿿가-힯؀-ۿ֐-׿Ѐ-ӿ฀-๿ऀ-ॿͰ-Ͽ]/;
 
-const JA_ROMAJI_SPECIFIC_TOKENS = new Set([
+const JA_ROMAJI_STRONG_TOKENS = new Set([
     'desu', 'masu', 'mashita', 'deshita', 'darou', 'daro', 'desho', 'deshou',
     'kimi', 'boku', 'watashi', 'anata', 'kokoro', 'sayonara', 'sayounara',
     'arigatou', 'arigato', 'konnichiwa', 'ohayou', 'yoru', 'asa', 'tsuki',
     'sora', 'hoshi', 'namida', 'yume', 'koi', 'aishiteru', 'suki',
     'tsuzuku', 'tsuyoi', 'tsumetai', 'shiawase', 'chigau', 'chiisai',
-    'hajimete', 'mou', 'demo', 'sou', 'nai', 'naku',
-    'wa', 'wo', 'no', 'ni', 'ga', 'to', 'de', 'mo', 'ya', 'ka', 'ne', 'yo',
-    'da', 'datta', 'janai', 'iru', 'aru', 'naru', 'suru', 'shita', 'shite',
+    'hajimete', 'mou', 'demo', 'sou', 'naku',
+    'datta', 'janai', 'iru', 'naru', 'suru', 'shita', 'shite',
     'iku', 'itta', 'kuru', 'kita', 'omou', 'omotta',
+]);
+
+const JA_ROMAJI_PARTICLE_TOKENS = new Set([
+    'wa', 'wo', 'no', 'ni', 'ga', 'to', 'de', 'mo', 'ya', 'ka', 'ne', 'yo',
+    'da', 'nai', 'aru',
 ]);
 
 const ROMAJI_SYLLABLE_REGEX = /^(?:[kgsztdnhbpmrw]?y?[aeiou]{1,2}|tsu|shi|chi|n)+n?$/i;
 
-function countRomajiTokens(words: string[]): { romaji: number; specific: number } {
+function countRomajiTokens(words: string[]): { romaji: number; specific: number; strong: number } {
     let romaji = 0;
     let specific = 0;
+    let strong = 0;
     for (const word of words) {
-        if (JA_ROMAJI_SPECIFIC_TOKENS.has(word)) {
+        if (JA_ROMAJI_STRONG_TOKENS.has(word)) {
+            strong++;
+            specific++;
+            romaji++;
+            continue;
+        }
+        if (JA_ROMAJI_PARTICLE_TOKENS.has(word)) {
             specific++;
             romaji++;
             continue;
@@ -179,7 +288,7 @@ function countRomajiTokens(words: string[]): { romaji: number; specific: number 
             romaji++;
         }
     }
-    return { romaji, specific };
+    return { romaji, specific, strong };
 }
 
 export function detectRomanizedJapanese(text: string): { confidence: number; ratio: number; specificHits: number } | null {
@@ -187,10 +296,11 @@ export function detectRomanizedJapanese(text: string): { confidence: number; rat
     if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(text)) return null;
     const words = tokenizeWords(text);
     if (words.length < 4) return null;
-    const { romaji, specific } = countRomajiTokens(words);
+    const { romaji, specific, strong } = countRomajiTokens(words);
     const ratio = romaji / words.length;
-    if (specific < 1) return null;
+    if (strong < 1) return null;
     if (ratio < 0.4) return null;
+    if (countLanguageWordHits(expandElidedWords(words), 'en') >= 2) return null;
     return {
         confidence: Math.min(0.9, 0.5 + ratio * 0.4 + Math.min(specific, 4) * 0.05),
         ratio,
@@ -200,7 +310,7 @@ export function detectRomanizedJapanese(text: string): { confidence: number; rat
 
 export function scanCorpusForCjk(
     lines: string[]
-): { code: 'ja' | 'zh' | 'ko'; confidence: number; kana: number; kanji: number; hangul: number } | null {
+): { code: string; confidence: number; kana: number; kanji: number; hangul: number } | null {
     let kana = 0;
     let kanji = 0;
     let hangul = 0;
@@ -220,7 +330,7 @@ export function scanCorpusForCjk(
         return { code: 'ko', confidence: 0.92, kana, kanji, hangul };
     }
     if (kanji >= 8 && kana === 0) {
-        return { code: 'zh', confidence: 0.9, kana, kanji, hangul };
+        return { code: detectChineseScript(lines.join('\n')), confidence: 0.9, kana, kanji, hangul };
     }
     return null;
 }
@@ -313,7 +423,7 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
     }
 
     if (hanCount > 0 && hanCount / totalChars > 0.2) {
-        return { code: 'zh', confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
+        return { code: detectChineseScript(normalizedText), confidence: Math.min(0.95, 0.65 + hanCount / totalChars * 0.3) };
     }
 
     const dominantScript = Object.entries(scriptCounts)
@@ -393,7 +503,13 @@ async function detectLanguageViaAPI(text: string): Promise<{ code: string; confi
     
     const data = await response.json();
     const rawDetectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
-    const detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
+    let detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
+    if (detectedLang.startsWith('zh-')) {
+        const scriptVariant = detectChineseScript(sample);
+        if (scriptVariant !== CHINESE_UNDETERMINED) {
+            detectedLang = scriptVariant;
+        }
+    }
     const confidence = detectedLang !== 'unknown' ? 0.9 : 0.5;
 
     return { code: detectedLang, confidence };
@@ -474,10 +590,47 @@ export async function detectLyricsLanguage(
     }
 }
 
+function countLanguageWordHits(words: string[], code: string): number {
+    const entry = LATIN_LANGUAGE_WORD_SETS.find(lang => lang.code === code);
+    if (!entry) return 0;
+
+    let count = 0;
+    for (const word of new Set(words)) {
+        if (entry.words.has(word)) count++;
+    }
+    return count;
+}
+
+export function isLikelyNonTargetLine(text: string, targetLanguage: string): boolean {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return false;
+
+    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed)) {
+        return !['ja', 'zh-hans', 'zh-hant', 'zh-hani', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el']
+            .includes(normalizeTargetLanguageCode(targetLanguage));
+    }
+
+    const targetCode = normalizeTargetLanguageCode(targetLanguage);
+    if (!LATIN_LANGUAGE_WORD_SETS.some(lang => lang.code === targetCode)) return false;
+
+    const words = expandElidedWords(tokenizeWords(trimmed));
+    if (words.length < 3) return false;
+    if (new Set(words).size < 3) return false;
+    if (!words.some(word => word.length >= 4)) return false;
+    if (countLanguageWordHits(words, targetCode) > 0) return false;
+
+    return LATIN_LANGUAGE_WORD_SETS.some(lang => lang.code !== targetCode && countLanguageWordHits(words, lang.code) >= 2);
+}
+
 export function isSameLanguage(source: string, target: string): boolean {
     if (!source || source === 'unknown') return false;
 
-    return normalizeLanguageCode(source) === normalizeLanguageCode(target);
+    const normalizedSource = normalizeLanguageCode(source);
+    const normalizedTarget = normalizeTargetLanguageCode(target);
+
+    if (normalizedSource === normalizedTarget) return true;
+
+    return normalizedSource === 'zh-hani' && normalizedTarget.startsWith('zh-');
 }
 
 export function assessMixedLanguageContent(
@@ -516,7 +669,9 @@ export function assessMixedLanguageContent(
         const detected = detectLanguageHeuristic(trimmed);
 
         if (!detected) {
-            if (trimmed.length >= 10) {
+            if (isLikelyNonTargetLine(trimmed, targetLanguage)) {
+                nonTargetCount++;
+            } else if (trimmed.length >= 10) {
                 uncertainCount++;
             }
             continue;
@@ -534,12 +689,9 @@ export function assessMixedLanguageContent(
     const totalChecked = targetCount + nonTargetCount + uncertainCount;
     if (totalChecked === 0) return { hasMixedContent: false, nonTargetCount: 0, uncertainCount: 0 };
 
-    const nonTargetRatio = nonTargetCount / totalChecked;
     const uncertainRatio = uncertainCount / totalChecked;
     const hasMixedContent = nonLatinNonTargetCount > 0 ||
-        (targetIsLatin
-            ? nonTargetCount >= 2 && nonTargetRatio >= 0.18
-            : nonTargetCount >= 1) ||
+        nonTargetCount >= 1 ||
         (uncertainCount > 0 && uncertainRatio > 0.35 && nonTargetCount > 0);
 
     return { hasMixedContent, nonTargetCount, uncertainCount };
@@ -638,6 +790,9 @@ export function getLanguageName(code: string): string {
         'ru': 'Russian',
         'ja': 'Japanese',
         'zh': 'Chinese',
+        'zh-hans': 'Chinese (Simplified)',
+        'zh-hant': 'Chinese (Traditional)',
+        'zh-hani': 'Chinese',
         'ko': 'Korean',
         'ar': 'Arabic',
         'he': 'Hebrew',
@@ -660,6 +815,9 @@ export function getLanguageName(code: string): string {
         'unknown': 'Unknown'
     };
     
+    const normalized = normalizeLanguageCode(code);
+    if (languageNames[normalized]) return languageNames[normalized];
+
     const baseCode = code.toLowerCase().split('-')[0];
     return languageNames[baseCode] || code.toUpperCase();
 }
@@ -668,8 +826,13 @@ export default {
     detectLanguageHeuristic,
     detectLyricsLanguage,
     detectRomanizedJapanese,
+    detectChineseScript,
+    refineChineseLanguageCode,
+    normalizeLanguageCode,
+    normalizeTargetLanguageCode,
     scanCorpusForCjk,
     isSameLanguage,
+    isLikelyNonTargetLine,
     assessMixedLanguageContent,
     shouldSkipTranslation,
     clearDetectionCache,

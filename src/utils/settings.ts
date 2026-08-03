@@ -7,7 +7,20 @@ import { reapplyTranslations, forceRetranslate } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
-import { SETTINGS_SCHEMA, SettingsEffect, SettingsField, getCurrentApiPreference, isSettingFieldVisible, readSettingValue, writeSettingValue } from './settingsModel';
+import {
+    SETTINGS_SCHEMA,
+    SETTINGS_CATEGORIES,
+    SettingsCategory,
+    SettingsEffect,
+    SettingsField,
+    getCurrentApiPreference,
+    getSectionsForCategory,
+    isSettingAtDefault,
+    isSettingFieldVisible,
+    matchesSettingQuery,
+    readSettingValue,
+    writeSettingValue
+} from './settingsModel';
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 const SPICY_LYRICS_CACHE_NAMES = ['SpicyLyrics_LyricsStore_g1', 'SpicyLyrics_LyricsStore'];
@@ -227,9 +240,19 @@ function createNativeFieldRow(field: SettingsField, root: ParentNode): HTMLEleme
 }
 
 function renderNativeSettingsFields(container: HTMLElement): void {
-    SETTINGS_SCHEMA.forEach(field => {
-        container.appendChild(createNativeFieldRow(field, container));
-    });
+    for (const category of SETTINGS_CATEGORIES) {
+        for (const section of getSectionsForCategory(category)) {
+            const fields = SETTINGS_SCHEMA.filter(field => field.section === section);
+            if (fields.length === 0) continue;
+
+            const heading = document.createElement('h3');
+            heading.className = 'slt-native-section-title';
+            heading.textContent = `${category.label} · ${section}`;
+            container.appendChild(heading);
+
+            fields.forEach(field => container.appendChild(createNativeFieldRow(field, container)));
+        }
+    }
 }
 
 function createNativeSettingsSection(): HTMLElement {
@@ -451,70 +474,162 @@ function watchForSettingsPage(): void {
     });
 }
 
-function renderModalSettingsMarkup(): string {
-    return SETTINGS_SCHEMA.map(field => {
-        const id = getModalSettingInputId(field);
-        const value = readSettingValue(field);
-        const display = isSettingFieldVisible(field) ? 'grid' : 'none';
-        const description = field.description ? `<span class="slt-description">${escapeHtml(field.description)}</span>` : '';
-
-        if (field.type === 'toggle') {
-            return `
-        <div class="slt-modal-field slt-modal-toggle-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <label class="slt-toggle">
-                    <input type="checkbox" id="${id}" ${value === true ? 'checked' : ''}>
-                    <span class="slt-toggle-slider"></span>
-                </label>
-            </div>
-        </div>`;
-        }
-
-        if (field.type === 'select') {
-            return `
-        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <select id="${id}">
-                    ${(field.options || []).map(option => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.text)}</option>`).join('')}
-                </select>
-            </div>
-        </div>`;
-        }
-
-        return `
-        <div class="slt-modal-field" data-slt-setting-field="${field.id}" style="display: ${display}">
-            <div class="slt-modal-field-copy">
-                <label for="${id}">${escapeHtml(field.label)}</label>
-                ${description}
-            </div>
-            <div class="slt-modal-field-control">
-                <input type="${field.type}" id="${id}" value="${escapeHtml(String(value))}" placeholder="${escapeHtml(field.placeholder || '')}" autocomplete="off" spellcheck="false" data-form-type="other">
-            </div>
-        </div>`;
-    }).join('');
+interface SettingsFieldHandle {
+    field: SettingsField;
+    row: HTMLElement;
+    sync: () => void;
 }
 
-function bindModalSettingsFields(container: HTMLElement): void {
-    SETTINGS_SCHEMA.forEach(field => {
-        const control = container.querySelector(`#${getModalSettingInputId(field)}`) as HTMLInputElement | HTMLSelectElement | null;
-        if (!control) return;
+const modalFieldHandles: SettingsFieldHandle[] = [];
 
-        const eventName = field.type === 'toggle' ? 'change' : 'change';
-        control.addEventListener(eventName, () => {
-            const value = field.type === 'toggle'
-                ? (control as HTMLInputElement).checked
-                : control.value;
-            handleSettingChange(field, value, container, 'grid');
-        });
+function buildModalField(field: SettingsField, onChanged: () => void): SettingsFieldHandle {
+    const id = getModalSettingInputId(field);
+    const row = document.createElement('div');
+    row.className = field.type === 'toggle' ? 'slt-modal-field slt-modal-toggle-field' : 'slt-modal-field';
+    row.setAttribute('data-slt-setting-field', field.id);
+
+    const description = field.description
+        ? `<span class="slt-description">${escapeHtml(field.description)}</span>`
+        : '';
+
+    let controlMarkup: string;
+    if (field.type === 'toggle') {
+        controlMarkup = `
+            <label class="slt-toggle">
+                <input type="checkbox" id="${id}">
+                <span class="slt-toggle-slider"></span>
+            </label>`;
+    } else if (field.type === 'select') {
+        const options = (field.options || [])
+            .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.text)}</option>`)
+            .join('');
+        controlMarkup = `<select id="${id}">${options}</select>`;
+    } else {
+        controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml(field.placeholder || '')}" autocomplete="off" spellcheck="false" data-form-type="other">`;
+    }
+
+    row.innerHTML = `
+        <div class="slt-modal-field-copy">
+            <label for="${id}">${escapeHtml(field.label)}</label>
+            ${description}
+        </div>
+        <div class="slt-modal-field-control">
+            ${controlMarkup}
+            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml(field.label)} to default">↺</button>
+        </div>`;
+
+    const control = row.querySelector(`#${id}`) as HTMLInputElement | HTMLSelectElement;
+    const resetButton = row.querySelector('.slt-field-reset') as HTMLButtonElement;
+
+    const sync = (): void => {
+        const value = readSettingValue(field);
+        if (field.type === 'toggle') {
+            (control as HTMLInputElement).checked = value === true;
+        } else {
+            control.value = String(value);
+        }
+        resetButton.classList.toggle('slt-field-reset-on', !isSettingAtDefault(field));
+    };
+
+    control.addEventListener('change', () => {
+        const value = field.type === 'toggle' ? (control as HTMLInputElement).checked : control.value;
+        handleSettingChange(field, value, undefined, '');
+        onChanged();
     });
+
+    resetButton.addEventListener('click', () => {
+        handleSettingChange(field, field.defaultValue, undefined, '');
+        onChanged();
+    });
+
+    sync();
+    return { field, row, sync };
+}
+
+function applyModalSettingsFilter(container: ParentNode, query: string): void {
+    const api = getCurrentApiPreference();
+    let matches = 0;
+
+    for (const handle of modalFieldHandles) {
+        const visible = isSettingFieldVisible(handle.field, api) && matchesSettingQuery(handle.field, query);
+        handle.row.style.display = visible ? '' : 'none';
+        if (visible) matches++;
+    }
+
+    container.querySelectorAll('[data-slt-section]').forEach(sectionEl => {
+        const section = sectionEl as HTMLElement;
+        const hasVisibleRow = Array.from(section.querySelectorAll('.slt-modal-field'))
+            .some(row => (row as HTMLElement).style.display !== 'none');
+        section.style.display = hasVisibleRow ? '' : 'none';
+    });
+
+    container.querySelectorAll('[data-slt-category]').forEach(categoryEl => {
+        const category = categoryEl as HTMLElement;
+        const hasVisibleSection = Array.from(category.querySelectorAll('[data-slt-section]'))
+            .some(section => (section as HTMLElement).style.display !== 'none');
+        category.style.display = hasVisibleSection ? '' : 'none';
+    });
+
+    const status = container.querySelector('#slt-settings-search-status') as HTMLElement | null;
+    if (status) {
+        status.textContent = query.trim() ? `${matches} setting${matches === 1 ? '' : 's'} matched` : '';
+    }
+}
+
+function buildModalSettingsPanel(): HTMLElement {
+    modalFieldHandles.length = 0;
+
+    const panel = document.createElement('div');
+    panel.className = 'slt-settings-panel';
+
+    const search = document.createElement('div');
+    search.className = 'slt-settings-search';
+    search.innerHTML = `
+        <input type="search" id="slt-settings-search-input" placeholder="Search settings…" autocomplete="off" spellcheck="false">
+        <span id="slt-settings-search-status"></span>`;
+    panel.appendChild(search);
+
+    const refresh = (): void => {
+        const input = panel.querySelector('#slt-settings-search-input') as HTMLInputElement | null;
+        modalFieldHandles.forEach(handle => handle.sync());
+        applyModalSettingsFilter(panel, input?.value || '');
+    };
+
+    for (const category of SETTINGS_CATEGORIES) {
+        const sections = getSectionsForCategory(category);
+        if (sections.length === 0) continue;
+
+        const categoryEl = document.createElement('div');
+        categoryEl.className = 'slt-settings-category';
+        categoryEl.setAttribute('data-slt-category', category.id);
+        categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml(category.label)}</div>`;
+
+        for (const section of sections) {
+            const fields = SETTINGS_SCHEMA.filter(field => field.section === section);
+            if (fields.length === 0) continue;
+
+            const sectionEl = document.createElement('div');
+            sectionEl.className = 'slt-settings-section';
+            sectionEl.setAttribute('data-slt-section', section);
+            sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml(section)}</div>`;
+
+            for (const field of fields) {
+                const handle = buildModalField(field, refresh);
+                modalFieldHandles.push(handle);
+                sectionEl.appendChild(handle.row);
+            }
+
+            categoryEl.appendChild(sectionEl);
+        }
+
+        panel.appendChild(categoryEl);
+    }
+
+    const searchInput = panel.querySelector('#slt-settings-search-input') as HTMLInputElement;
+    searchInput.addEventListener('input', () => applyModalSettingsFilter(panel, searchInput.value));
+
+    applyModalSettingsFilter(panel, '');
+    return panel;
 }
 
 function connectionStateLabel(connectionState: string): string {
@@ -632,7 +747,96 @@ function createSettingsUI(): HTMLElement {
                 background-clip: padding-box;
             }
             .slt-settings-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
+            .slt-settings-panel {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .slt-settings-search {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 6px 14px 12px;
+            }
+            .slt-settings-search input {
+                flex: 1;
+                min-height: 38px;
+                padding: 8px 13px;
+                border-radius: var(--slt-radius-sm);
+                border: 1px solid var(--slt-hairline-strong);
+                background-color: var(--slt-surface);
+                color: var(--slt-text);
+                font-size: 13px;
+                font-weight: 500;
+                box-sizing: border-box;
+            }
+            .slt-settings-search input:focus {
+                outline: none;
+                border-color: rgba(255, 255, 255, 0.4);
+                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+            }
+            #slt-settings-search-status {
+                font-size: 12px;
+                color: var(--slt-text-3);
+                white-space: nowrap;
+            }
+            .slt-settings-category {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .slt-settings-category-title {
+                padding: 14px 14px 6px;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.09em;
+                text-transform: uppercase;
+                color: var(--slt-text-3);
+            }
+            .slt-settings-section {
+                display: flex;
+                flex-direction: column;
+                border-radius: var(--slt-radius-sm);
+                background: var(--slt-surface);
+                margin-bottom: 8px;
+                overflow: hidden;
+            }
+            .slt-settings-section-title {
+                padding: 10px 14px 8px;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+                color: var(--slt-text-2);
+            }
+            .slt-settings-section .slt-modal-field:last-child::after { opacity: 0; }
+            .slt-field-reset {
+                flex-shrink: 0;
+                width: 28px;
+                height: 28px;
+                margin-left: 8px;
+                border-radius: 999px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: var(--slt-text-3);
+                font-size: 14px;
+                line-height: 1;
+                cursor: pointer;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s var(--slt-ease), color 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
+            }
+            .slt-field-reset.slt-field-reset-on {
+                opacity: 1;
+                pointer-events: auto;
+                border-color: var(--slt-hairline-strong);
+                color: var(--slt-text-2);
+            }
+            .slt-field-reset.slt-field-reset-on:hover {
+                color: var(--slt-text);
+                border-color: rgba(255, 255, 255, 0.32);
+            }
             .slt-modal-field {
+                display: grid;
                 grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
                 align-items: center;
                 gap: 18px;
@@ -663,6 +867,7 @@ function createSettingsUI(): HTMLElement {
             }
             .slt-modal-field-control {
                 display: flex;
+                align-items: center;
                 justify-content: flex-end;
                 min-width: 0;
             }
@@ -931,7 +1136,7 @@ function createSettingsUI(): HTMLElement {
             }
         </style>
         
-        ${renderModalSettingsMarkup()}
+        <div id="slt-settings-panel-mount"></div>
 
         ${renderConnectionStatusMarkup()}
 
@@ -962,8 +1167,10 @@ function createSettingsUI(): HTMLElement {
         <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
     
+    const settingsMount = container.querySelector('#slt-settings-panel-mount');
+    settingsMount?.replaceWith(buildModalSettingsPanel());
+
     setTimeout(() => {
-        bindModalSettingsFields(container);
         bindModalCacheActions(container);
         startConnectionStatusUpdates(container);
         const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;

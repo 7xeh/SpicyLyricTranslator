@@ -10,7 +10,7 @@ import {
     getCurrentTrackUri
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
-import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode } from './languageDetection';
+import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
 
 export interface TranslationResult {
     originalText: string;
@@ -270,7 +270,7 @@ function shouldInvalidateIdentityTranslation(source: string, targetLang: string)
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
         return true;
     }
-    return false;
+    return isLikelyNonTargetLine(source, targetLang);
 }
 
 function getConfidentLineLanguage(text: string): string | undefined {
@@ -283,9 +283,10 @@ function getConfidentLineLanguages(lines: string[]): Set<string> {
 
     for (const line of lines) {
         const lang = getConfidentLineLanguage(line);
-        if (lang) {
-            languages.add(normalizeLanguageCode(lang));
-        }
+        if (!lang) continue;
+        const normalized = normalizeLanguageCode(lang);
+        if (normalized === 'zh-hani') continue;
+        languages.add(normalized);
     }
 
     return languages;
@@ -367,7 +368,11 @@ function hasMeaningfulTranslationDifference(source: string, translated: string, 
     }
 
     const detected = detectLanguageHeuristic(source);
-    return Boolean(detected && detected.confidence >= 0.6 && !isSameLanguage(detected.code, targetLang));
+    if (detected && detected.confidence >= 0.6) {
+        return !isSameLanguage(detected.code, targetLang);
+    }
+
+    return isLikelyNonTargetLine(source, targetLang);
 }
 
 function shouldInvalidateSameLanguageTrackCache(
@@ -881,11 +886,17 @@ function cacheTranslation(text: string, targetLang: string, translation: string,
     storage.setJSON('translation-cache', cache);
 }
 
+const API_SOURCE_LANG_OVERRIDES: Record<string, string> = {
+    'zh-hans': 'zh-CN',
+    'zh-hant': 'zh-TW',
+    'zh-hani': 'auto'
+};
+
 function normalizeSourceLangHint(raw?: string): string {
     if (!raw) return 'auto';
     const value = normalizeLanguageCode(raw);
     if (!value || value === 'unknown' || value === 'auto') return 'auto';
-    return value || 'auto';
+    return API_SOURCE_LANG_OVERRIDES[value] || value || 'auto';
 }
 
 async function translateWithGoogle(text: string, targetLang: string, sourceLang?: string): Promise<{ translation: string; detectedLang: string }> {
@@ -2102,15 +2113,16 @@ export async function translateText(text: string, targetLang: string, sourceLang
 
 function inferDominantSourceLangFromLines(lines: string[]): string | undefined {
     let zh = 0, ja = 0, ko = 0;
+    const zhLines: string[] = [];
     for (const line of lines) {
         if (!line) continue;
         if (/[぀-ヿ]/.test(line)) { ja++; continue; }
         if (/[가-힯ᄀ-ᇿ]/.test(line)) { ko++; continue; }
-        if (/[一-鿿㐀-䶿]/.test(line)) { zh++; continue; }
+        if (/[一-鿿㐀-䶿]/.test(line)) { zh++; zhLines.push(line); continue; }
     }
     if (ja > 0 && ja >= zh && ja >= ko) return 'ja';
     if (ko > 0 && ko >= zh && ko >= ja) return 'ko';
-    if (zh > 0) return 'zh';
+    if (zh > 0) return detectChineseScript(zhLines.join('\n'));
     return undefined;
 }
 
@@ -2186,6 +2198,8 @@ async function translateLyricsInner(
         if (inferred) {
             detectedSourceLang = inferred;
         }
+    } else {
+        detectedSourceLang = refineChineseLanguageCode(detectedSourceLang, lines);
     }
 
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== 'auto' && detectedSourceLang !== 'unknown' && isSameLanguage(detectedSourceLang, targetLang);
