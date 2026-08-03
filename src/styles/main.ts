@@ -321,6 +321,7 @@ export const styles = `
 
 
 .Cinema--Container .slt-replace-line,
+.Root__cinema-view .slt-replace-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-replace-line {
     padding: 14px 0;
 }
@@ -331,7 +332,8 @@ export const styles = `
     font-size: 0.9em;
 }
 
-body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line {
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line,
+#SpicyLyricsPage.CardMode .slt-replace-line {
     padding: 4px 0;
     font-size: 0.8em;
 }
@@ -353,7 +355,8 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line {
 }
 
 
-body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation {
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
+#SpicyLyricsPage.CardMode .slt-interleaved-translation {
     font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
     margin-top: 2px;
     margin-bottom: 4px;
@@ -641,7 +644,9 @@ body.slt-overlay-active .LyricsContent {}
 }
 
 .Cinema--Container .slt-interleaved-overlay .slt-interleaved-translation,
+.Root__cinema-view .slt-interleaved-overlay .slt-interleaved-translation,
 .Cinema--Container .slt-interleaved-translation,
+.Root__cinema-view .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-overlay .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-translation {
     font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
@@ -653,7 +658,9 @@ body.slt-overlay-active .LyricsContent {}
 }
 
 body.SpicySidebarLyrics__Active .slt-interleaved-overlay .slt-interleaved-translation,
-body.SpicySidebarLyrics__Active .slt-interleaved-translation {
+#SpicyLyricsPage.CardMode .slt-interleaved-overlay .slt-interleaved-translation,
+body.SpicySidebarLyrics__Active .slt-interleaved-translation,
+#SpicyLyricsPage.CardMode .slt-interleaved-translation {
     font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
     margin-top: 1px;
     margin-bottom: 3px;
@@ -801,16 +808,19 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation {
 
 
 
-body.SpicySidebarLyrics__Active .slt-sync-line {
+body.SpicySidebarLyrics__Active .slt-sync-line,
+#SpicyLyricsPage.CardMode .slt-sync-line {
     margin: 4px 0;
 }
 
-body.SpicySidebarLyrics__Active .slt-sync-translation {
+body.SpicySidebarLyrics__Active .slt-sync-translation,
+#SpicyLyricsPage.CardMode .slt-sync-translation {
     font-size: 0.65em;
     margin-top: 2px;
 }
 
-body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
+body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
+#SpicyLyricsPage.CardMode .slt-sync-word.slt-word-active {
     text-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
 }
 
@@ -825,17 +835,20 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active {
 
 
 .Cinema--Container .slt-sync-line,
+.Root__cinema-view .slt-sync-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-line {
     margin: 12px 0;
 }
 
 .Cinema--Container .slt-sync-translation,
+.Root__cinema-view .slt-sync-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-translation {
     font-size: 0.85em;
     margin-top: 6px;
 }
 
 .Cinema--Container .slt-sync-word.slt-word-active,
+.Root__cinema-view .slt-sync-word.slt-word-active,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-word.slt-word-active {
     text-shadow: 
         0 0 15px rgba(255, 255, 255, 0.6),
@@ -936,13 +949,15 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     -webkit-background-clip: border-box !important;
 }
 
-body.SpicySidebarLyrics__Active .slt-quality-indicator {
+body.SpicySidebarLyrics__Active .slt-quality-indicator,
+#SpicyLyricsPage.CardMode .slt-quality-indicator {
     font-size: 7px;
     padding: 1px 3px;
     bottom: -1px;
 }
 
-body.SpicySidebarLyrics__Active .slt-qi-dot {
+body.SpicySidebarLyrics__Active .slt-qi-dot,
+#SpicyLyricsPage.CardMode .slt-qi-dot {
     width: 4px;
     height: 4px;
 }
@@ -1076,9 +1091,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot {
 
 
 .Cinema--Container .LyricsContainer::before,
+.Root__cinema-view .LyricsContainer::before,
 .Cinema--Container .LyricsContainer::after,
+.Root__cinema-view .LyricsContainer::after,
 .Cinema--Container .simplebar-content::before,
+.Root__cinema-view .simplebar-content::before,
 .Cinema--Container .simplebar-content::after,
+.Root__cinema-view .simplebar-content::after,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::before,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::after,
 #SpicyLyricsPage.ForcedCompactMode .simplebar-content::before,
