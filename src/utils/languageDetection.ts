@@ -393,21 +393,21 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
     }
 
     const normalizedText = text.trim();
-    
+
     let totalChars = 0;
     const scriptCounts: { [code: string]: number } = {};
-    
+
     for (const char of normalizedText) {
         if (/\s/.test(char)) continue;
         totalChars++;
-        
+
         for (const lang of LANGUAGE_PATTERNS) {
             if (lang.scripts.test(char)) {
                 scriptCounts[lang.code] = (scriptCounts[lang.code] || 0) + 1;
             }
         }
     }
-    
+
     if (totalChars === 0) return null;
 
     const hanCount = (normalizedText.match(/[\u4E00-\u9FFF\u3400-\u4DBF]/g) || []).length;
@@ -437,7 +437,7 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
             confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)
         };
     }
-    
+
     const words = tokenizeWords(normalizedText);
     if (words.length < 3) {
         return null;
@@ -457,30 +457,30 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
             }
         }
         wordCounts[lang.code] = count;
-        
+
         if (count > maxCount) {
             maxCount = count;
             maxLang = lang.code;
         }
     }
-    
+
     const matchRatio = maxCount / words.length;
-    
+
     const minMatchCount = words.length <= 6 ? 2 : 3;
     if (matchRatio > 0.12 && maxCount >= minMatchCount) {
         const sortedCounts = Object.entries(wordCounts)
             .sort((a, b) => b[1] - a[1]);
-        
+
         if (sortedCounts.length < 2 || sortedCounts[1][1] === 0) {
             return { code: maxLang, confidence: Math.min(0.75, 0.35 + matchRatio) };
         }
-        
+
         const disambiguationRatio = words.length <= 6 ? 1.3 : 1.5;
         if (sortedCounts[0][1] >= sortedCounts[1][1] * disambiguationRatio) {
             return { code: maxLang, confidence: Math.min(0.8, 0.4 + matchRatio) };
         }
     }
-    
+
     return null;
 }
 
@@ -495,12 +495,12 @@ async function detectLanguageViaAPI(text: string): Promise<{ code: string; confi
     });
 
     const url = `https://translate.googleapis.com/translate_a/single?${params.toString()}`;
-    
+
     const response = await fetch(url);
     if (!response.ok) {
         throw new Error(`Language detection API error: ${response.status}`);
     }
-    
+
     const data = await response.json();
     const rawDetectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
     let detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
@@ -563,26 +563,26 @@ export async function detectLyricsLanguage(
 
     if (heuristic && heuristic.confidence >= 0.7) {
         if (trackUri) {
-            detectionCache.set(trackUri, { 
-                language: heuristic.code, 
+            detectionCache.set(trackUri, {
+                language: heuristic.code,
                 confidence: heuristic.confidence,
-                timestamp: Date.now() 
+                timestamp: Date.now()
             });
         }
-        
+
         return heuristic;
     }
 
     try {
         const apiResult = await detectLanguageViaAPI(sampleText);
         if (trackUri) {
-            detectionCache.set(trackUri, { 
-                language: apiResult.code, 
+            detectionCache.set(trackUri, {
+                language: apiResult.code,
                 confidence: apiResult.confidence,
-                timestamp: Date.now() 
+                timestamp: Date.now()
             });
         }
-        
+
         return apiResult;
     } catch (error) {
         warn('API language detection failed:', error);
@@ -643,7 +643,7 @@ export function assessMixedLanguageContent(
     let targetCount = 0;
     const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
     const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
-    
+
     for (const line of lines) {
         const trimmed = (line || '').trim();
         if (!trimmed || /^[•♪♫\s\-–—]+$/.test(trimmed)) continue;
@@ -747,13 +747,13 @@ export async function shouldSkipTranslation(
         }
         return { skip: false, detectedLanguage: quickHeuristic.code };
     }
-    
+
     const detection = await detectLyricsLanguage(lyrics, trackUri);
-    
+
     if (detection.code === 'unknown' || detection.confidence < 0.6) {
         return { skip: false };
     }
-    
+
     if (isSameLanguage(detection.code, targetLanguage)) {
         const mixedCheck = assessMixedLanguageContent(nonEmptyLyrics, targetLanguage);
         if (mixedCheck.hasMixedContent) {
@@ -765,10 +765,10 @@ export async function shouldSkipTranslation(
             detectedLanguage: detection.code
         };
     }
-    
-    return { 
-        skip: false, 
-        detectedLanguage: detection.code 
+
+    return {
+        skip: false,
+        detectedLanguage: detection.code
     };
 }
 
@@ -814,7 +814,7 @@ export function getLanguageName(code: string): string {
         'hu': 'Hungarian',
         'unknown': 'Unknown'
     };
-    
+
     const normalized = normalizeLanguageCode(code);
     if (languageNames[normalized]) return languageNames[normalized];
 

@@ -1068,7 +1068,6 @@ test('Gemini uses CosmosAsync when available instead of raw browser fetch', asyn
     assert.equal(cosmosCalls[0].body.contents[0].parts[0].text.includes('\u3053\u3093\u306b\u3061\u306f'), true);
 });
 
-
 test('Valencian is not a target-language option; it is a variant of Catalan', () => {
     const { SUPPORTED_LANGUAGES, getLanguageVariantForBase } = require('../src/utils/translator') as {
         SUPPORTED_LANGUAGES: { code: string; name: string }[];

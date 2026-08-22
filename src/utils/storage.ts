@@ -46,7 +46,7 @@ export const storage = {
     set(key: string, value: string): boolean {
         try {
             if (!isLocalStorageAvailable()) return false;
-            
+
             if (value.length > 10000) {
                 const currentSize = getStorageSize();
                 if (currentSize + value.length * 2 > MAX_STORAGE_SIZE_BYTES) {
@@ -54,7 +54,7 @@ export const storage = {
                     this.remove('translation-cache');
                 }
             }
-            
+
             localStorage.setItem(STORAGE_PREFIX + key, value);
             return true;
         } catch (e) {
@@ -107,7 +107,7 @@ export const storage = {
             return false;
         }
     },
-    
+
     getStats(): { usedBytes: number; maxBytes: number; percentUsed: number } {
         const used = getStorageSize();
         return {
@@ -116,7 +116,7 @@ export const storage = {
             percentUsed: Math.round((used / MAX_STORAGE_SIZE_BYTES) * 100)
         };
     },
-    
+
     clearAll(): void {
         try {
             const keysToRemove: string[] = [];

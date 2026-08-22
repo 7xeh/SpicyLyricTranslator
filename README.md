@@ -25,11 +25,12 @@ Translate any song as it plays — replace the lines or stack translations under
 ## Highlights
 
 - **Two display modes** — replace the original lines, or keep them and add translations underneath
+- **Romanization *and* translation together** — read the pinyin/romaji and the meaning at the same time, so you can follow a Chinese or Japanese song and still sing along
 - **Eight providers** — Google (no key needed), LibreTranslate, DeepL, OpenAI, Gemini, Grok, Claude, or your own endpoint
 - **Romanization-safe** — pulls original lyric text rather than translating romaji, pinyin, or other romanized display text
 - **Smart language detection** — skips translation when lyrics are already in your target language
-- **Vocabulary / Learning Mode** — word-by-word flashcards, synced to the karaoke highlight
 - **Fast on repeats** — track-aware caching, plus 1–6 parallel requests on LLM providers
+- **Editable cached translations** — fix a bad line by hand in the cached lyrics viewer; the edit sticks and reapplies live
 - **`Alt+T`** to toggle, auto-translate on song change, and a built-in update checker
 
 Full feature list: [docs/features.md](docs/features.md)
@@ -58,7 +59,7 @@ Then: play a track with lyrics, open the lyrics view, and click the **translate 
 | --- | --- |
 | [Getting Started](docs/getting-started.md) | Requirements, first run, your first translation, keyboard shortcut |
 | [Installation](docs/installation.md) | Manual install — loader script and Windows installer |
-| [Features](docs/features.md) | Display modes, quality indicator, Vocabulary / Learning Mode |
+| [Features](docs/features.md) | Display modes, romanization, quality indicator |
 | [Providers](docs/providers.md) | All eight translation backends, keys, models, and per-provider notes |
 | [Settings](docs/settings.md) | Every setting, credential field, toggle, and action |
 | [How It Works](docs/how-it-works.md) | Romanization handling, source lyric priority, caching and data |

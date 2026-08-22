@@ -17,6 +17,7 @@ import {
     setOriginalContentData,
     setQualityContentData,
     setTimingContentData,
+    updateOverlayConfig,
     isSidebarLyricsActive,
     findSidebarLyricsPage,
     CINEMA_CONTAINER_SELECTOR,
@@ -24,6 +25,7 @@ import {
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
 import { openSettingsModal } from './settings';
+import { openQuickMenu } from './quickMenu';
 import { warn, error } from './debug';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 
@@ -367,7 +369,10 @@ function createTranslateButton(): HTMLButtonElement {
     button.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        openSettingsModal();
+        const rect = button.getBoundingClientRect();
+        const x = e.clientX || rect.left;
+        const y = e.clientY || rect.bottom;
+        openQuickMenu(x, y);
         return false;
     });
 
@@ -1316,11 +1321,16 @@ function applyTranslations(lines: NodeListOf<Element>): void {
         translationMapByIndex.set(index, translatedText);
     });
 
+    const overlaySettings = {
+        mode: state.overlayMode,
+        syncWordHighlight: state.syncWordHighlight,
+        showRomanization: state.showRomanization
+    };
+
     if (!isOverlayActive()) {
-        enableOverlay({
-            mode: state.overlayMode,
-            syncWordHighlight: state.syncWordHighlight
-        });
+        enableOverlay(overlaySettings);
+    } else {
+        updateOverlayConfig(overlaySettings);
     }
     if (state._qualityByIndex) {
         setQualityMetadata(state._qualityByIndex);

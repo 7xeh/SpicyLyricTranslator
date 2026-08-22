@@ -464,6 +464,23 @@ var SpicyLyricTranslater = (() => {
       }
     }
   }
+  function updateTrackCacheLines(trackUri, targetLang, lines) {
+    runCacheSchemaMigration();
+    const storage2 = getStorage();
+    if (!storage2 || !trackUri || !lines.length)
+      return false;
+    const existing = getTrackCache(trackUri, targetLang);
+    if (!existing)
+      return false;
+    const entry = { ...existing, lines, edited: true };
+    try {
+      storage2.setItem(getCacheKey(trackUri, targetLang), JSON.stringify(entry));
+      return true;
+    } catch (e) {
+      warn("Failed to update track cache lines:", e);
+      return false;
+    }
+  }
   function deleteTrackCache(trackUri, targetLang) {
     const storage2 = getStorage();
     if (!storage2 || !trackUri)
@@ -4100,8 +4117,8 @@ ${text}`
     detectedLanguage: null,
     syncWordHighlight: storage.get("sync-word-highlight") !== "false",
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
-    vocabularyMode: storage.get("vocabulary-mode") === "true",
     hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
+    showRomanization: storage.get("show-romanization") === "true",
     _qualityByIndex: void 0
   };
 
@@ -4504,7 +4521,8 @@ ${text}`
     mode: "replace",
     opacity: 0.85,
     fontSize: 0.9,
-    syncWordHighlight: true
+    syncWordHighlight: true,
+    showRomanization: false
   };
   var isOverlayEnabled = false;
   var translationMap = /* @__PURE__ */ new Map();
@@ -4572,31 +4590,44 @@ ${text}`
   function rebuildPerLineMaps(lines) {
     if (!hasContentData())
       return;
-    translationMap = /* @__PURE__ */ new Map();
-    romanizationMap = /* @__PURE__ */ new Map();
-    originalTextMap = /* @__PURE__ */ new Map();
-    qualityMap = /* @__PURE__ */ new Map();
-    lineTimingData = [];
+    const nextTranslation = /* @__PURE__ */ new Map();
+    const nextRomanization = /* @__PURE__ */ new Map();
+    const nextOriginal = /* @__PURE__ */ new Map();
+    const nextQuality = /* @__PURE__ */ new Map();
+    const nextTiming = [];
+    let contentLines = 0;
+    let matchedLines = 0;
     for (let index = 0; index < lines.length; index++) {
       const text = extractLineText(lines[index]);
       if (!text)
         continue;
+      contentLines++;
       const t = lookupByContent(translationByContent, text);
-      if (t)
-        translationMap.set(index, t);
+      if (t) {
+        nextTranslation.set(index, t);
+        matchedLines++;
+      }
       const r = lookupByContent(romanizationByContent, text);
       if (r)
-        romanizationMap.set(index, r);
+        nextRomanization.set(index, r);
       const o = lookupByContent(originalByContent, text);
       if (o)
-        originalTextMap.set(index, o);
+        nextOriginal.set(index, o);
       const q = lookupByContent(qualityByContent, text);
       if (q)
-        qualityMap.set(index, q);
+        nextQuality.set(index, q);
       const tim = lookupByContent(timingByContent, text);
       if (tim)
-        lineTimingData[index] = tim;
+        nextTiming[index] = tim;
     }
+    const coverageCollapsed = contentLines > 0 && matchedLines * 2 < contentLines && translationMap.size > matchedLines;
+    if (coverageCollapsed)
+      return;
+    translationMap = nextTranslation;
+    romanizationMap = nextRomanization;
+    originalTextMap = nextOriginal;
+    qualityMap = nextQuality;
+    lineTimingData = nextTiming;
   }
   function setTranslationContentData(data) {
     translationByContent = new Map(data);
@@ -4618,7 +4649,7 @@ ${text}`
     const parts = [
       currentConfig.mode,
       currentConfig.syncWordHighlight ? "1" : "0",
-      storage.get("vocabulary-mode") === "true" ? "1" : "0"
+      currentConfig.showRomanization ? "1" : "0"
     ];
     for (let i = 0; i < lines.length; i++) {
       const text = extractLineText(lines[i]);
@@ -4640,44 +4671,63 @@ ${text}`
   function resetDocCache(doc) {
     docCacheMap.set(doc, { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 });
   }
-  function isLearningModeActive() {
-    return storage.get("vocabulary-mode") === "true";
-  }
-  function buildOriginalLine(doc, index, timingInfo, line) {
-    const original = originalTextMap.get(index);
-    if (!original || !original.trim())
+  function buildRomanizationLine(doc, index, timingInfo, line, text) {
+    const romanized = text !== void 0 ? text : romanizationMap.get(index);
+    if (!romanized || !romanized.trim())
       return null;
     if (timingInfo?.isInstrumental)
       return null;
-    const origEl = doc.createElement("div");
-    origEl.className = "slt-original-line";
-    origEl.dataset.forLine = index.toString();
-    origEl.dataset.lineIndex = index.toString();
-    origEl.textContent = original;
+    const romanEl = doc.createElement("div");
+    romanEl.className = "slt-romanization-line";
+    romanEl.dataset.forLine = index.toString();
+    romanEl.dataset.lineIndex = index.toString();
+    romanEl.textContent = romanized;
     if (timingInfo) {
-      origEl.dataset.startTime = timingInfo.startTime.toString();
-      origEl.dataset.endTime = timingInfo.endTime.toString();
+      romanEl.dataset.startTime = timingInfo.startTime.toString();
+      romanEl.dataset.endTime = timingInfo.endTime.toString();
     }
     if (isLineActive(line))
-      origEl.classList.add("active");
-    return origEl;
+      romanEl.classList.add("active");
+    return romanEl;
   }
-  function domLineIsRomanized(line, index) {
-    const apiOriginal = originalTextMap.get(index);
-    const apiRomanized = romanizationMap.get(index);
-    if (!apiOriginal || !apiRomanized)
-      return false;
+  function siblingSkippingRomanization(el, dir) {
+    let cur = dir === "next" ? el.nextElementSibling : el.previousElementSibling;
+    while (cur && cur.classList.contains("slt-romanization-line")) {
+      cur = dir === "next" ? cur.nextElementSibling : cur.previousElementSibling;
+    }
+    return cur;
+  }
+  function romanizationCompanionText(line, index, mode) {
+    if (!currentConfig.showRomanization)
+      return "";
     const domText = extractLineText(line);
-    if (!domText)
-      return false;
     const nDom = normalizeCompare(domText);
-    const nOrig = normalizeCompare(apiOriginal);
-    const nRom = normalizeCompare(apiRomanized);
-    if (nDom === nOrig)
+    const apiOriginal = (originalTextMap.get(index) || "").trim();
+    const apiRomanized = (romanizationMap.get(index) || "").trim();
+    if (mode === "replace") {
+      if (apiRomanized)
+        return apiRomanized;
+      if (isMostlyLatin(domText) && apiOriginal && normalizeCompare(apiOriginal) !== nDom)
+        return domText;
+      return "";
+    }
+    const screenShowsRomanization = apiRomanized !== "" && normalizeCompare(apiRomanized) === nDom;
+    const candidates = screenShowsRomanization ? [apiOriginal, apiRomanized] : [apiRomanized, apiOriginal];
+    for (const candidate of candidates) {
+      if (!candidate)
+        continue;
+      if (normalizeCompare(candidate) === nDom)
+        continue;
+      return candidate;
+    }
+    return "";
+  }
+  function isMostlyLatin(text) {
+    const letters = (text || "").replace(/[^\p{L}]/gu, "");
+    if (!letters)
       return false;
-    if (nDom === nRom)
-      return true;
-    return nDom !== nOrig && nRom.length > 0 && nDom.length > 0;
+    const latin = letters.replace(/[^\p{Script=Latin}]/gu, "");
+    return latin.length / letters.length >= 0.8;
   }
   function getPIPWindow() {
     try {
@@ -4846,71 +4896,63 @@ ${text}`
     resetDocCache(doc);
     const lyricsContainer = doc.querySelector(".SpicyLyricsScrollContainer");
     const lyricsType = lyricsContainer?.getAttribute("data-lyrics-type") || "Line";
-    const learningMode = isLearningModeActive();
-    const vocabEnabled = storage.get("vocabulary-mode") === "true";
     const claimed = /* @__PURE__ */ new Set();
     lines.forEach((line, index) => {
       const lineEl = line;
       const translation = translationMap.get(index);
       const originalText = extractLineText(line);
-      let existing = line.nextElementSibling;
+      let existing = siblingSkippingRomanization(line, "next");
       if (existing && !existing.classList.contains("slt-replace-line"))
         existing = null;
-      let existingOrig = line.previousElementSibling;
-      if (existingOrig && !existingOrig.classList.contains("slt-original-line"))
-        existingOrig = null;
       const wants = !!translation && translation !== originalText && !!line.parentNode;
       if (!wants) {
         if (existing)
           existing.remove();
-        if (existingOrig)
-          existingOrig.remove();
+        const staleRom = line.nextElementSibling;
+        if (staleRom && staleRom.classList.contains("slt-romanization-line"))
+          staleRom.remove();
         lineEl.classList.remove("slt-replace-hidden");
-        lineEl.classList.remove("slt-learning-hidden");
         return;
       }
       const timingInfo = lineTimingData[index];
       const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
       const hasRomanization = !!romanizationMap.get(index);
-      const hasApiOriginal = !!originalTextMap.get(index);
-      const domIsRomanized = domLineIsRomanized(line, index);
-      const learningActive = learningMode && hasRomanization && !(timingInfo?.isInstrumental || isBreak);
-      const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
-      const keepDomVisible = learningActive && !domIsRomanized;
       const isInstrumental = timingInfo?.isInstrumental || isBreak;
-      let pairBelowText = originalText;
-      if (domIsRomanized) {
-        pairBelowText = originalTextMap.get(index) || originalText;
-      } else {
-        pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
-      }
+      const romanizationText = isInstrumental ? "" : romanizationCompanionText(line, index, "replace");
       const sig = [
         translation,
         isInstrumental ? "I" : "",
-        domIsRomanized ? "R" : "",
-        showInjectedOriginal ? "O" : "",
-        keepDomVisible ? "K" : "",
-        vocabEnabled ? "V" : "",
         currentConfig.syncWordHighlight ? "W" : "",
-        pairBelowText
+        romanizationText
       ].join("");
-      lineEl.classList.toggle("slt-replace-hidden", !keepDomVisible);
+      lineEl.classList.add("slt-replace-hidden");
       lineEl.dataset.sltIndex = index.toString();
-      const refreshOriginal = () => {
-        if (showInjectedOriginal) {
-          if (existingOrig) {
-            existingOrig.dataset.lineIndex = index.toString();
-            existingOrig.dataset.forLine = index.toString();
-            claimed.add(existingOrig);
-          } else {
-            const origEl = buildOriginalLine(doc, index, timingInfo, line);
-            if (origEl) {
-              line.parentNode.insertBefore(origEl, line);
-              claimed.add(origEl);
-            }
+      const refreshRomanization = (anchor) => {
+        let existingRom = anchor.nextElementSibling;
+        if (existingRom && !existingRom.classList.contains("slt-romanization-line"))
+          existingRom = null;
+        if (!romanizationText) {
+          if (existingRom)
+            existingRom.remove();
+          return;
+        }
+        if (existingRom) {
+          if (existingRom.textContent !== romanizationText)
+            existingRom.textContent = romanizationText;
+          existingRom.dataset.lineIndex = index.toString();
+          existingRom.dataset.forLine = index.toString();
+          if (timingInfo) {
+            existingRom.dataset.startTime = timingInfo.startTime.toString();
+            existingRom.dataset.endTime = timingInfo.endTime.toString();
           }
-        } else if (existingOrig) {
-          existingOrig.remove();
+          existingRom.classList.toggle("active", isLineActive(line));
+          claimed.add(existingRom);
+          return;
+        }
+        const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
+        if (romEl) {
+          anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
+          claimed.add(romEl);
         }
       };
       if (existing && existing.dataset.sltSig === sig) {
@@ -4921,15 +4963,11 @@ ${text}`
           existing.dataset.endTime = timingInfo.endTime.toString();
         }
         claimed.add(existing);
-        refreshOriginal();
+        refreshRomanization(existing);
         return;
       }
       if (existing)
         existing.remove();
-      if (existingOrig) {
-        existingOrig.remove();
-        existingOrig = null;
-      }
       const replaceEl = doc.createElement("div");
       replaceEl.className = "slt-replace-line slt-sync-translation";
       replaceEl.dataset.lineIndex = index.toString();
@@ -4940,10 +4978,7 @@ ${text}`
         replaceEl.textContent = "\u266A \u266A \u266A";
         replaceEl.classList.add("slt-replace-instrumental");
       } else {
-        if (vocabEnabled) {
-          replaceEl.classList.add("slt-vocab-line");
-          appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, "slt-replace-word");
-        } else if (currentConfig.syncWordHighlight) {
+        if (currentConfig.syncWordHighlight) {
           appendTranslationWordSpans(doc, replaceEl, translation, line, "slt-replace-word");
         } else {
           replaceEl.textContent = translation;
@@ -4955,7 +4990,7 @@ ${text}`
       }
       replaceEl.addEventListener("click", (e) => {
         e.preventDefault();
-        const clickedWord = e.target?.closest?.(".slt-replace-word, .slt-vocab-pair");
+        const clickedWord = e.target?.closest?.(".slt-replace-word");
         if (clickedWord) {
           const originalIndex = parseInt(clickedWord.dataset.originalIndex || "-1", 10);
           const originalWords = getWordUnits(line);
@@ -4980,7 +5015,7 @@ ${text}`
       }
       line.parentNode.insertBefore(replaceEl, line.nextSibling);
       claimed.add(replaceEl);
-      refreshOriginal();
+      refreshRomanization(replaceEl);
     });
     doc.querySelectorAll(".slt-replace-line, .slt-original-line, .slt-romanization-line").forEach((el) => {
       if (!claimed.has(el))
@@ -5014,282 +5049,6 @@ ${text}`
       }
       container.appendChild(span);
     });
-  }
-  var JAPANESE_TEXT_REGEX = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u;
-  var JAPANESE_FINAL_PARTICLES = ["\u304B\u306A", "\u3088\u306D", "\u3060\u3088", "\u3060\u306D", "\u306D", "\u306A", "\u3088", "\u304B", "\u3055"];
-  var JAPANESE_STATE_PREFIXES = [
-    "\u3053\u306E\u307E\u307E",
-    "\u305D\u306E\u307E\u307E",
-    "\u3042\u306E\u307E\u307E",
-    "\u3053\u3093\u306A",
-    "\u305D\u3093\u306A",
-    "\u3042\u3093\u306A",
-    "\u3053\u3053",
-    "\u305D\u3053",
-    "\u3042\u305D\u3053",
-    "\u3053\u308C",
-    "\u305D\u308C",
-    "\u3042\u308C"
-  ];
-  function normalizeVocabularyToken(text) {
-    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}?]+/gu, "").trim();
-  }
-  function splitTranslatedWords(text) {
-    return (text || "").trim().split(/\s+/).filter(Boolean);
-  }
-  function splitJapaneseChunk(chunk) {
-    let rest = chunk.trim();
-    const parts = [];
-    let finalParticle = "";
-    const finalMatch = [...JAPANESE_FINAL_PARTICLES].sort((a, b) => b.length - a.length).find((particle) => rest.endsWith(particle) && rest.length > particle.length);
-    if (finalMatch) {
-      finalParticle = finalMatch;
-      rest = rest.slice(0, -finalMatch.length);
-    }
-    const prefix = [...JAPANESE_STATE_PREFIXES].sort((a, b) => b.length - a.length).find((candidate) => rest.startsWith(candidate) && rest.length > candidate.length);
-    if (prefix) {
-      parts.push(prefix);
-      rest = rest.slice(prefix.length);
-    }
-    if (rest.trim()) {
-      parts.push(rest.trim());
-    }
-    if (finalParticle) {
-      parts.push(finalParticle);
-    }
-    return parts.length > 0 ? parts : [chunk];
-  }
-  function segmentVocabularySourceText(text) {
-    const chunks = (text || "").trim().split(/\s+/).filter(Boolean);
-    if (chunks.length === 0)
-      return [];
-    const segments = [];
-    for (const chunk of chunks) {
-      if (JAPANESE_TEXT_REGEX.test(chunk)) {
-        segments.push(...splitJapaneseChunk(chunk));
-      } else {
-        segments.push(chunk);
-      }
-    }
-    return segments.filter(Boolean);
-  }
-  function classifyJapaneseSourceUnit(text) {
-    if (JAPANESE_STATE_PREFIXES.some((prefix) => text.startsWith(prefix)))
-      return "state";
-    if (JAPANESE_FINAL_PARTICLES.includes(text))
-      return "final";
-    return "content";
-  }
-  function translatedPhraseRange(translatedWords, phrases, usedIndexes, preferEnd = false) {
-    const normalizedWords = translatedWords.map(normalizeVocabularyToken);
-    const normalizedPhrases = phrases.map((phrase) => phrase.map(normalizeVocabularyToken).filter(Boolean)).filter((phrase) => phrase.length > 0).sort((a, b) => b.length - a.length);
-    for (const phrase of normalizedPhrases) {
-      const starts = normalizedWords.map((_, index) => index).filter((index) => index + phrase.length <= normalizedWords.length);
-      if (preferEnd)
-        starts.reverse();
-      for (const start of starts) {
-        const end = start + phrase.length;
-        let matches = true;
-        for (let i = start; i < end; i++) {
-          if (usedIndexes.has(i) || normalizedWords[i] !== phrase[i - start]) {
-            matches = false;
-            break;
-          }
-        }
-        if (matches)
-          return { start, end };
-      }
-    }
-    return null;
-  }
-  function contiguousUnusedRanges(totalWords, usedIndexes) {
-    const ranges = [];
-    let start = -1;
-    for (let i = 0; i < totalWords; i++) {
-      if (!usedIndexes.has(i)) {
-        if (start === -1)
-          start = i;
-      } else if (start !== -1) {
-        ranges.push({ start, end: i });
-        start = -1;
-      }
-    }
-    if (start !== -1)
-      ranges.push({ start, end: totalWords });
-    return ranges;
-  }
-  function phraseFromRange(words, range) {
-    return words.slice(range.start, range.end).join(" ").trim();
-  }
-  function alignJapaneseVocabularyPairs(sourceUnits, translatedWords, originalText, translatedText) {
-    const usedTranslatedIndexes = /* @__PURE__ */ new Set();
-    const assignments = /* @__PURE__ */ new Map();
-    let semanticMatches = 0;
-    sourceUnits.forEach((unit, sourceIndex) => {
-      const kind = classifyJapaneseSourceUnit(unit);
-      const range = kind === "state" ? translatedPhraseRange(translatedWords, [
-        ["the", "nay"],
-        ["nhu", "vay"],
-        ["nhu", "the"],
-        ["vay"],
-        ["this", "way"],
-        ["like", "this"],
-        ["as", "it", "is"],
-        ["as", "is"]
-      ], usedTranslatedIndexes) : kind === "final" ? translatedPhraseRange(translatedWords, [
-        ["thoi"],
-        ["nhe"],
-        ["nhi"],
-        ["day"],
-        ["ha"],
-        ["sao"],
-        ["?"]
-      ], usedTranslatedIndexes, true) : null;
-      if (!range)
-        return;
-      for (let i = range.start; i < range.end; i++)
-        usedTranslatedIndexes.add(i);
-      semanticMatches++;
-      assignments.set(sourceIndex, {
-        original: unit,
-        translated: phraseFromRange(translatedWords, range),
-        confidence: "high",
-        sourceIndex,
-        translatedStart: range.start
-      });
-    });
-    if (semanticMatches === 0) {
-      return [{
-        original: originalText.trim(),
-        translated: translatedText.trim(),
-        confidence: "low",
-        sourceIndex: 0,
-        translatedStart: 0
-      }];
-    }
-    const unassignedSourceIndexes = sourceUnits.map((_, index) => index).filter((index) => !assignments.has(index));
-    const remainingRanges = contiguousUnusedRanges(translatedWords.length, usedTranslatedIndexes).filter((range) => range.end > range.start);
-    if (unassignedSourceIndexes.length === 1 && remainingRanges.length > 0) {
-      const sourceIndex = unassignedSourceIndexes[0];
-      const first = remainingRanges[0];
-      const last = remainingRanges[remainingRanges.length - 1];
-      assignments.set(sourceIndex, {
-        original: sourceUnits[sourceIndex],
-        translated: phraseFromRange(translatedWords, { start: first.start, end: last.end }),
-        confidence: "medium",
-        sourceIndex,
-        translatedStart: first.start
-      });
-    } else if (unassignedSourceIndexes.length > 1 && remainingRanges.length > 0) {
-      const remainingText = remainingRanges.map((range) => phraseFromRange(translatedWords, range)).join(" ").trim();
-      const translatedBuckets = distributeWords(splitTranslatedWords(remainingText), unassignedSourceIndexes.length);
-      unassignedSourceIndexes.forEach((sourceIndex, bucketIndex) => {
-        if (!translatedBuckets[bucketIndex])
-          return;
-        assignments.set(sourceIndex, {
-          original: sourceUnits[sourceIndex],
-          translated: translatedBuckets[bucketIndex],
-          confidence: "low",
-          sourceIndex,
-          translatedStart: remainingRanges[0].start + bucketIndex
-        });
-      });
-    }
-    const pairs = Array.from(assignments.values()).filter((pair) => pair.original.trim() && pair.translated.trim()).sort((a, b) => a.translatedStart - b.translatedStart || a.sourceIndex - b.sourceIndex);
-    return pairs.length > 0 ? pairs : [{
-      original: originalText.trim(),
-      translated: translatedText.trim(),
-      confidence: "low",
-      sourceIndex: 0,
-      translatedStart: 0
-    }];
-  }
-  function buildVocabularyPairs(originalText, translatedText) {
-    const original = (originalText || "").trim();
-    const translated = (translatedText || "").trim();
-    const sourceUnits = segmentVocabularySourceText(original);
-    const translatedWords = splitTranslatedWords(translated);
-    if (sourceUnits.length === 0 || translatedWords.length === 0) {
-      return [];
-    }
-    if (JAPANESE_TEXT_REGEX.test(original)) {
-      return alignJapaneseVocabularyPairs(sourceUnits, translatedWords, original, translated);
-    }
-    const ratio = translatedWords.length / Math.max(sourceUnits.length, 1);
-    const NON_LATIN_REGEX = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/;
-    if (ratio < 0.7 || ratio > 1.45 || NON_LATIN_REGEX.test(original)) {
-      return [{
-        original,
-        translated,
-        confidence: "low",
-        sourceIndex: 0,
-        translatedStart: 0
-      }];
-    }
-    const pairCount = Math.min(sourceUnits.length, translatedWords.length);
-    const originalChunks = distributeWords(sourceUnits, pairCount);
-    const translatedChunks = distributeWords(translatedWords, pairCount);
-    return originalChunks.map((chunk, index) => ({
-      original: chunk,
-      translated: translatedChunks[index],
-      confidence: "medium",
-      sourceIndex: index,
-      translatedStart: index
-    }));
-  }
-  function appendVocabularyPairs(doc, container, originalText, translatedText, originalLine, wordClassName) {
-    const pairs = buildVocabularyPairs(originalText, translatedText);
-    if (pairs.length === 0) {
-      container.textContent = translatedText;
-      return;
-    }
-    const originalWordUnits = getWordUnits(originalLine);
-    let globalWordIndex = 0;
-    const origChunks = pairs.map((pair) => pair.original);
-    const transChunks = pairs.map((pair) => pair.translated);
-    for (const [i, vocabPair] of pairs.entries()) {
-      const pair = doc.createElement("span");
-      pair.className = `slt-vocab-pair ${wordClassName}`;
-      pair.dataset.confidence = vocabPair.confidence;
-      if (wordClassName === "slt-sync-word") {
-        pair.classList.add("slt-word-future");
-      } else {
-        pair.classList.add("word-notsng");
-      }
-      const mappedOriginalIndex = originalWordUnits.length > 0 ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1) : vocabPair.sourceIndex;
-      pair.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
-      pair.dataset.wordIndex = globalWordIndex.toString();
-      const chunkWords = splitTranslatedWords(vocabPair.translated);
-      const transSpan = doc.createElement("span");
-      transSpan.className = "slt-vocab-translated";
-      transSpan.textContent = vocabPair.translated;
-      pair.appendChild(transSpan);
-      globalWordIndex += chunkWords.length;
-      const origSpan = doc.createElement("span");
-      origSpan.className = "slt-vocab-original";
-      origSpan.textContent = vocabPair.original;
-      pair.appendChild(origSpan);
-      pair.title = `${origChunks[i]}  \u2192  ${transChunks[i]}`;
-      container.appendChild(pair);
-    }
-  }
-  function distributeWords(words, buckets) {
-    if (buckets >= words.length) {
-      const result2 = words.map((w) => w);
-      while (result2.length < buckets)
-        result2.push("");
-      return result2;
-    }
-    const base = Math.floor(words.length / buckets);
-    const extra = words.length % buckets;
-    const result = [];
-    let idx = 0;
-    for (let b = 0; b < buckets; b++) {
-      const count = base + (b < extra ? 1 : 0);
-      result.push(words.slice(idx, idx + count).join(" "));
-      idx += count;
-    }
-    return result;
   }
   function lineHasWordStructure(line) {
     return !!line.querySelector(".word:not(.dot), .letterGroup, .word-group, .syllable");
@@ -5422,8 +5181,6 @@ ${text}`
       if (renderSignatureUnchanged(doc, lines))
         return;
       resetDocCache(doc);
-      const learningMode = isLearningModeActive();
-      const isVocabMode = storage.get("vocabulary-mode") === "true";
       const claimed = /* @__PURE__ */ new Set();
       lines.forEach((line, index) => {
         try {
@@ -5431,61 +5188,55 @@ ${text}`
           const translation = translationMap.get(index);
           const originalText = extractLineText(line);
           const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
-          let existing = line.nextElementSibling;
+          let existing = siblingSkippingRomanization(line, "next");
           if (existing && !existing.classList.contains("slt-interleaved-translation"))
             existing = null;
-          let existingOrig = line.previousElementSibling;
-          if (existingOrig && !existingOrig.classList.contains("slt-original-line"))
-            existingOrig = null;
           const wants = (!!translation || isBreak) && translation !== originalText && !!line.parentNode;
           if (!wants) {
             if (existing)
               existing.remove();
-            if (existingOrig)
-              existingOrig.remove();
-            lineEl.classList.remove("slt-learning-hidden");
+            const staleRom = line.nextElementSibling;
+            if (staleRom && staleRom.classList.contains("slt-romanization-line"))
+              staleRom.remove();
             lineEl.classList.remove("slt-overlay-parent");
             return;
           }
-          const hasRomanization = !!romanizationMap.get(index);
-          const hasApiOriginal = !!originalTextMap.get(index);
-          const domIsRomanized = domLineIsRomanized(line, index);
-          const learningActive = learningMode && hasRomanization && !isBreak;
-          const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
           const timingInfo = lineTimingData[index];
-          let pairBelowText = originalText;
-          if (domIsRomanized) {
-            pairBelowText = originalTextMap.get(index) || originalText;
-          } else {
-            pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
-          }
+          const romanizationText = isBreak ? "" : romanizationCompanionText(line, index, "interleaved");
           const sig = [
             translation || "",
             isBreak ? "B" : "",
-            isVocabMode ? "V" : "",
             currentConfig.syncWordHighlight ? "W" : "",
-            domIsRomanized ? "R" : "",
-            showInjectedOriginal ? "O" : "",
-            pairBelowText
+            romanizationText
           ].join("");
           lineEl.classList.add("slt-overlay-parent");
           lineEl.dataset.sltIndex = index.toString();
-          lineEl.classList.toggle("slt-learning-hidden", showInjectedOriginal);
-          const refreshOriginal = () => {
-            if (showInjectedOriginal) {
-              if (existingOrig) {
-                existingOrig.dataset.lineIndex = index.toString();
-                existingOrig.dataset.forLine = index.toString();
-                claimed.add(existingOrig);
-              } else {
-                const origEl = buildOriginalLine(doc, index, timingInfo, line);
-                if (origEl) {
-                  line.parentNode.insertBefore(origEl, line);
-                  claimed.add(origEl);
-                }
+          const refreshRomanization = (anchor) => {
+            let existingRom = anchor.nextElementSibling;
+            if (existingRom && !existingRom.classList.contains("slt-romanization-line"))
+              existingRom = null;
+            if (!romanizationText) {
+              if (existingRom)
+                existingRom.remove();
+              return;
+            }
+            if (existingRom) {
+              if (existingRom.textContent !== romanizationText)
+                existingRom.textContent = romanizationText;
+              existingRom.dataset.lineIndex = index.toString();
+              existingRom.dataset.forLine = index.toString();
+              if (timingInfo) {
+                existingRom.dataset.startTime = timingInfo.startTime.toString();
+                existingRom.dataset.endTime = timingInfo.endTime.toString();
               }
-            } else if (existingOrig) {
-              existingOrig.remove();
+              existingRom.classList.toggle("active", isLineActive(line));
+              claimed.add(existingRom);
+              return;
+            }
+            const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
+            if (romEl) {
+              anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
+              claimed.add(romEl);
             }
           };
           if (existing && existing.dataset.sltSig === sig) {
@@ -5496,15 +5247,11 @@ ${text}`
               existing.dataset.endTime = timingInfo.endTime.toString();
             }
             claimed.add(existing);
-            refreshOriginal();
+            refreshRomanization(existing);
             return;
           }
           if (existing)
             existing.remove();
-          if (existingOrig) {
-            existingOrig.remove();
-            existingOrig = null;
-          }
           const translationEl = doc.createElement("div");
           translationEl.className = "slt-interleaved-translation";
           translationEl.dataset.forLine = index.toString();
@@ -5513,10 +5260,6 @@ ${text}`
           if (isBreak) {
             translationEl.textContent = "\u2022 \u2022 \u2022";
             translationEl.classList.add("slt-music-break");
-          } else if (isVocabMode && translation) {
-            translationEl.classList.add("slt-vocab-line");
-            translationEl.classList.add("slt-sync-translation");
-            appendVocabularyPairs(doc, translationEl, pairBelowText, translation, line, "slt-sync-word");
           } else {
             translationEl.classList.add("slt-sync-translation");
             if (currentConfig.syncWordHighlight && translation) {
@@ -5537,7 +5280,7 @@ ${text}`
           }
           line.parentNode.insertBefore(translationEl, line.nextSibling);
           claimed.add(translationEl);
-          refreshOriginal();
+          refreshRomanization(translationEl);
           if (!isBreak && currentConfig.syncWordHighlight && translation) {
             fallbackToContinuousMultilineGradient(translationEl, translation, line);
           }
@@ -5565,6 +5308,12 @@ ${text}`
     container.style.setProperty("--slt-overlay-opacity", currentConfig.opacity.toString());
     container.style.setProperty("--slt-overlay-font-scale", currentConfig.fontSize.toString());
     return container;
+  }
+  function setOverlayRomanization(show) {
+    currentConfig.showRomanization = show;
+  }
+  function updateOverlayConfig(config) {
+    currentConfig = { ...currentConfig, ...config };
   }
   var MIRRORED_LINE_STYLE_PROPS = [
     "--gradient-position",
@@ -6111,7 +5860,6 @@ ${text}`
       doc.querySelectorAll(".slt-sync-translation").forEach((el) => el.remove());
       doc.querySelectorAll(".slt-romanization-line").forEach((el) => el.remove());
       doc.querySelectorAll(".slt-original-line").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-learning-hidden").forEach((el) => el.classList.remove("slt-learning-hidden"));
       doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
       doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
       doc.querySelectorAll("[data-slt-original-html]").forEach((el) => {
@@ -6267,63 +6015,10 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     padding: 8px 0 16px 0;
 }
 
-.line.slt-learning-hidden {
-    display: none !important;
-}
-
-.slt-original-line {
-    display: block;
-    font-size: inherit;
-    font-weight: 900;
-    line-height: 1.15;
-    padding: 4px 0 2px 0;
-    color: rgba(255, 255, 255, 0.9);
-    text-align: left;
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    letter-spacing: 0;
-    pointer-events: none;
-    opacity: 0.55;
-    filter: blur(var(--BlurAmount, 0px));
-    transition: opacity 0.25s ease, filter 0.25s ease;
-}
-
-.slt-original-line.OppositeAligned,
-.slt-original-line.rtl {
-    text-align: end;
-}
-
-.line.Active ~ .slt-original-line,
-.slt-original-line.active,
-.slt-original-line.Active {
-    opacity: 1 !important;
-    filter: none !important;
-}
-
-.spicy-pip-wrapper .slt-original-line {
-    font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
-}
-
-.Cinema--Container .slt-original-line,
-.Root__cinema-view .slt-original-line,
-#SpicyLyricsPage.ForcedCompactMode .slt-original-line {
-    font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-original-line {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
-}
-
-body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-original-line,
-#SpicyLyricsPage.CardMode .slt-original-line {
-    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
-    padding: 2px 0;
-}
-
 .slt-romanization-line {
     display: block;
+    width: 100%;
+    flex: 0 0 100%;
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     font-weight: 600;
     font-style: italic;
@@ -6355,12 +6050,24 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-original-line,
     color: rgba(255, 224, 150, 0.95);
 }
 
-.line.Sung + .slt-romanization-line {
+.line.Sung + .slt-romanization-line,
+.slt-romanization-line.Sung {
     opacity: 0.45;
 }
 
-.line.NotSung + .slt-romanization-line {
+.line.NotSung + .slt-romanization-line,
+.slt-romanization-line.NotSung {
     opacity: 0.55;
+}
+
+.slt-interleaved-translation.Sung,
+.slt-replace-line.Sung {
+    opacity: var(--Vocal-Sung-opacity, 0.497);
+}
+
+.slt-interleaved-translation.NotSung,
+.slt-replace-line.NotSung {
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
 .spicy-pip-wrapper .slt-romanization-line {
@@ -6513,9 +6220,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     transform: translateX(24px);
 }
 
-
-
-
 .line.slt-replace-hidden {
     visibility: hidden !important;
     pointer-events: none !important;
@@ -6524,7 +6228,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     padding: 0 !important;
     overflow: hidden !important;
 }
-
 
 .slt-replace-line {
     display: block;
@@ -6551,11 +6254,11 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     --Vocal-Sung-opacity: 0.497;
     --DefaultLineScale: 1;
     scale: var(--DefaultLineScale);
-    
+
     --text-shadow-blur-radius: 4px;
     --text-shadow-opacity: 0%;
     text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
-    
+
     --gradient-degrees: 180deg;
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
@@ -6582,7 +6285,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     text-align: end;
 }
 
-
 .slt-replace-line:has(.slt-replace-word) {
     background-image: none !important;
     color: inherit !important;
@@ -6592,39 +6294,18 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     text-shadow: none;
 }
 
-.slt-replace-line.slt-vocab-line {
-    background-image: none !important;
-    color: inherit !important;
-    -webkit-text-fill-color: inherit !important;
-    background-clip: border-box !important;
-    -webkit-background-clip: border-box !important;
-    text-shadow: none;
-    font-weight: inherit;
-    filter: none !important;
-}
-
 .slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
-.slt-interleaved-translation.slt-vocab-line {
-    background-image: none !important;
-    color: inherit !important;
-    -webkit-text-fill-color: inherit !important;
-    background-clip: border-box !important;
-    -webkit-background-clip: border-box !important;
-    text-shadow: none;
-    filter: none !important;
-}
-
 
 .slt-replace-word {
     display: inline;
     transform-origin: center center;
     will-change: transform;
     transition: opacity 180ms linear, text-shadow 180ms linear;
-    
+
     --text-shadow-blur-radius: 4px;
     --text-shadow-opacity: 0%;
     text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
-    
+
     --gradient-degrees: 180deg;
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
@@ -6640,7 +6321,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
         rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + 20% + var(--gradient-offset))
     ) !important;
 }
-
 
 .slt-replace-word.word-notsng {
     opacity: 0.51;
@@ -6675,14 +6355,12 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     scale: var(--DefaultLineScale, 1);
 }
 
-
 .slt-replace-line.active .slt-replace-word.word-notsng {
     opacity: 0.51;
 }
 .slt-replace-line.active .slt-replace-word.word-sung {
     opacity: 1;
 }
-
 
 .slt-replace-line.NotSung:hover,
 .slt-replace-line.Sung:hover {
@@ -6691,7 +6369,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     opacity: 0.8 !important;
     filter: none;
 }
-
 
 .slt-replace-line.slt-replace-instrumental {
     color: rgba(255, 255, 255, 0.35) !important;
@@ -6705,18 +6382,15 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     pointer-events: none;
 }
 
-
 .spicy-pip-wrapper .slt-replace-line {
     padding: 8px 0;
 }
-
 
 .Cinema--Container .slt-replace-line,
 .Root__cinema-view .slt-replace-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-replace-line {
     padding: 14px 0;
 }
-
 
 #SpicyLyricsPage.SidebarMode .slt-replace-line {
     padding: 6px 0;
@@ -6744,7 +6418,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line,
     opacity: 1;
     background: #e74c3c !important;
 }
-
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
 #SpicyLyricsPage.CardMode .slt-interleaved-translation {
@@ -6916,7 +6589,6 @@ body.slt-overlay-active .LyricsContent {}
     z-index: 10;
 }
 
-
 .slt-interleaved-translation {
     display: block;
     font-size: calc(0.45em * var(--slt-overlay-font-scale, 1));
@@ -6941,7 +6613,7 @@ body.slt-overlay-active .LyricsContent {}
     --Vocal-Sung-opacity: 0.497;
     --DefaultLineScale: 1;
     scale: var(--DefaultLineScale);
-    
+
     color: rgba(255, 255, 255, 0.85);
 }
 
@@ -6950,7 +6622,6 @@ body.slt-overlay-active .LyricsContent {}
     transform-origin: right center;
     text-align: end;
 }
-
 
 .line.Active + .slt-interleaved-translation,
 .slt-interleaved-translation.active,
@@ -6961,25 +6632,22 @@ body.slt-overlay-active .LyricsContent {}
     text-shadow: var(--ActiveTextGlowDef) !important;
 }
 
-  
 .line.Sung + .slt-interleaved-translation {
     opacity: var(--Vocal-Sung-opacity, 0.497);
 }
-
 
 .line.NotSung + .slt-interleaved-translation {
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
-
 .slt-sync-translation.slt-interleaved-translation {
-    
+
     --gradient-degrees: 180deg;
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
     --gradient-position: -20%;
     --gradient-offset: 0%;
-    
+
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
     background-clip: text !important;
@@ -6994,7 +6662,6 @@ body.slt-overlay-active .LyricsContent {}
     -webkit-box-decoration-break: slice;
     box-decoration-break: slice;
 }
-
 
 .slt-sync-translation.slt-interleaved-translation.active {
     --gradient-alpha: 0.85;
@@ -7012,16 +6679,13 @@ body.slt-overlay-active .LyricsContent {}
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
-
 .line.Sung + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: 100%;
 }
 
-
 .line.NotSung + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: -20%;
 }
-
 
 .line.NotSung + .slt-sync-translation.slt-interleaved-translation.active,
 .line.Sung + .slt-sync-translation.slt-interleaved-translation.active,
@@ -7057,9 +6721,6 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     margin-bottom: 3px;
 }
 
-
-
-
 .slt-sync-line {
     position: relative;
     display: block;
@@ -7067,12 +6728,10 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     transition: opacity 0.3s ease, filter 0.3s ease;
 }
 
-
 .slt-sync-original {
     display: block;
     line-height: 1.4;
 }
-
 
 .slt-sync-translation {
     display: block;
@@ -7080,7 +6739,6 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     margin-top: 4px;
     line-height: 1.3;
 }
-
 
 .slt-sync-word {
     display: inline;
@@ -7106,11 +6764,10 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     ) !important;
 }
 
-
 .slt-sync-word.slt-word-past,
 .slt-sync-word.slt-word-active,
 .slt-sync-word.slt-word-future {
-    
+
 }
 
 .slt-sync-word.slt-word-future {
@@ -7125,45 +6782,35 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     opacity: 1;
 }
 
-
-
-
 .slt-sync-line.slt-line-sung {
     filter: blur(calc(var(--BlurAmount, 0px) * 0.8));
 }
-
 
 .slt-sync-line.slt-line-active {
     filter: none;
 }
 
-
 .slt-sync-line.slt-line-notsung {
     filter: blur(calc(var(--BlurAmount, 0px) * 0.8));
 }
-
 
 .slt-lyrics-scroll-container {
     overflow-y: scroll;
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none; 
-    -ms-overflow-style: none; 
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 
 .slt-lyrics-scroll-container::-webkit-scrollbar {
-    display: none; 
+    display: none;
 }
-
 
 #SpicyLyricsPage .SpicyLyricsScrollContainer,
 #SpicyLyricsPage .LyricsContent,
 .LyricsContainer .LyricsContent {
     scroll-behavior: smooth;
 }
-
-
-
 
 .line.Active + .slt-sync-translation {
     opacity: 1 !important;
@@ -7180,24 +6827,15 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     opacity: 1;
 }
 
-
 .line.Sung + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.5;
     --gradient-alpha-end: 0.35;
 }
 
-
 .line.NotSung + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
 }
-
-
-
-
-
-
-
 
 body.SpicySidebarLyrics__Active .slt-sync-line,
 #SpicyLyricsPage.CardMode .slt-sync-line {
@@ -7215,7 +6853,6 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
     text-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
 }
 
-
 .spicy-pip-wrapper .slt-sync-line {
     margin: 6px 0;
 }
@@ -7223,7 +6860,6 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
 .spicy-pip-wrapper .slt-sync-translation {
     font-size: 0.8em;
 }
-
 
 .Cinema--Container .slt-sync-line,
 .Root__cinema-view .slt-sync-line,
@@ -7241,12 +6877,11 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
 .Cinema--Container .slt-sync-word.slt-word-active,
 .Root__cinema-view .slt-sync-word.slt-word-active,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-word.slt-word-active {
-    text-shadow: 
+    text-shadow:
         0 0 15px rgba(255, 255, 255, 0.6),
         0 0 30px rgba(255, 255, 255, 0.4),
         0 0 45px rgba(255, 255, 255, 0.2);
 }
-
 
 body.slt-hide-quality-indicator .slt-quality-indicator {
     display: none !important;
@@ -7358,129 +6993,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     padding: 1px 4px;
 }
 
-.slt-vocab-line {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px 5px;
-    align-items: flex-end;
-    font-size: 0.55em;
-}
-
-.slt-vocab-pair {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 2px 5px 3px;
-    border-radius: 5px;
-    background: rgba(255, 255, 255, 0.05);
-    border-bottom: 1.5px solid rgba(30, 215, 96, 0.25);
-    transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
-    cursor: default;
-    max-width: 100%;
-}
-
-.slt-vocab-pair:hover {
-    background: rgba(255, 255, 255, 0.12);
-    transform: translateY(-1px);
-    border-bottom-color: rgba(30, 215, 96, 0.6);
-}
-
-.slt-vocab-pair.slt-replace-word,
-.slt-vocab-pair.slt-sync-word {
-    background-clip: border-box !important;
-    -webkit-background-clip: border-box !important;
-    background-image: none !important;
-    color: inherit !important;
-    -webkit-text-fill-color: inherit !important;
-    text-shadow: none !important;
-}
-
-.slt-vocab-translated {
-    font-size: 1em;
-    font-weight: 700;
-    line-height: 1.25;
-    white-space: normal;
-    word-break: break-word;
-    display: inline;
-    transform-origin: center center;
-    will-change: transform;
-    transition: opacity 180ms linear, text-shadow 180ms linear;
-
-    --text-shadow-blur-radius: 4px;
-    --text-shadow-opacity: 0%;
-    text-shadow: 0 0 var(--text-shadow-blur-radius) rgba(255, 255, 255, var(--text-shadow-opacity));
-
-    --gradient-alpha: 0.85;
-    --gradient-alpha-end: 0.5;
-    --gradient-offset: 0%;
-    color: transparent !important;
-    -webkit-text-fill-color: transparent !important;
-    background-clip: text !important;
-    -webkit-background-clip: text !important;
-    background-image: linear-gradient(
-        var(--gradient-degrees, 90deg),
-        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position, -20%),
-        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position, -20%) + 20% + var(--gradient-offset))
-    ) !important;
-}
-
-.slt-vocab-original {
-    font-size: 0.65em;
-    line-height: 1.15;
-    letter-spacing: 0.01em;
-    filter: blur(3px);
-    transition: filter 0.25s ease, color 0.25s ease;
-    user-select: none;
-    white-space: normal;
-    word-break: break-word;
-    margin-top: 1px;
-
-    --gradient-alpha: 0.85;
-    --gradient-alpha-end: 0.5;
-    --gradient-offset: 0%;
-    color: transparent !important;
-    -webkit-text-fill-color: transparent !important;
-    background-clip: text !important;
-    -webkit-background-clip: text !important;
-    background-image: linear-gradient(
-        var(--gradient-degrees, 90deg),
-        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position, -20%),
-        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position, -20%) + 20% + var(--gradient-offset))
-    ) !important;
-}
-
-.slt-vocab-pair:hover .slt-vocab-original {
-    filter: blur(0px);
-    color: rgba(255, 255, 255, 0.65);
-}
-
-.active .slt-vocab-original,
-.Active .slt-vocab-original,
-.slt-interleaved-translation.active .slt-vocab-original {
-    filter: blur(0px);
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.spicy-pip-wrapper .slt-vocab-pair {
-    padding: 1px 3px 2px;
-    border-bottom-width: 1px;
-}
-
-.spicy-pip-wrapper .slt-vocab-line {
-    font-size: 0.5em;
-}
-
-.spicy-pip-wrapper .slt-vocab-original {
-    font-size: 0.55em;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .slt-vocab-original {
-        filter: none !important;
-    }
-}
-
-
 .Cinema--Container .LyricsContainer::before,
 .Root__cinema-view .LyricsContainer::before,
 .Cinema--Container .LyricsContainer::after,
@@ -7503,10 +7015,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.Sung:not(.musical-line) + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
-  .slt-original-line:has(+ .line.Sung:not(.musical-line)),
+  .line.Sung:not(.musical-line) + .slt-romanization-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
-  .slt-romanization-line:has(+ .line.Sung:not(.musical-line)) {
+  .slt-romanization-line.Sung,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-interleaved-translation.Sung,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-replace-line.Sung {
     opacity: 0 !important;
 }
 
@@ -7518,10 +7036,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.NotSung:not(.musical-line) + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
-  .slt-original-line:has(+ .line.NotSung:not(.musical-line)),
+  .line.NotSung:not(.musical-line) + .slt-romanization-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
-  .slt-romanization-line:has(+ .line.NotSung:not(.musical-line)) {
+  .slt-romanization-line.NotSung,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-interleaved-translation.NotSung,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .slt-replace-line.NotSung {
     opacity: 0.5 !important;
 }
 `;
@@ -7667,7 +7191,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.1.3" : "0.0.0";
+    return true ? "2.1.4" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -8826,6 +8350,812 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     </svg>`
   };
 
+  // src/utils/settingsModel.ts
+  var SETTINGS_CATEGORIES = [
+    { id: "slt-cat-translation", label: "Translation", sections: ["Translation", "Behaviour"] },
+    {
+      id: "slt-cat-providers",
+      label: "Providers",
+      sections: ["Provider", "Custom API", "LibreTranslate", "DeepL", "OpenAI", "Gemini", "Grok", "Claude"]
+    },
+    { id: "slt-cat-interface", label: "Interface", sections: ["Interface"] }
+  ];
+  var API_OPTIONS = [
+    { value: "google", text: "Google Translate" },
+    { value: "libretranslate", text: "LibreTranslate" },
+    { value: "deepl", text: "DeepL" },
+    { value: "openai", text: "OpenAI" },
+    { value: "gemini", text: "Gemini" },
+    { value: "grok", text: "Grok (xAI)" },
+    { value: "anthropic", text: "Claude (Anthropic)" },
+    { value: "custom", text: "Custom API" }
+  ];
+  var CUSTOM_API_FORMAT_OPTIONS = [
+    { value: "generic", text: "Generic JSON" },
+    { value: "libretranslate", text: "LibreTranslate Compatible" },
+    { value: "openai", text: "OpenAI Compatible" },
+    { value: "gemini", text: "Gemini Compatible" },
+    { value: "deepl", text: "DeepL Compatible" }
+  ];
+  var OVERLAY_MODE_OPTIONS = [
+    { value: "replace", text: "Replace (default)" },
+    { value: "interleaved", text: "Below each line" }
+  ];
+  var SETTINGS_SCHEMA = [
+    {
+      id: "target-language",
+      section: "Translation",
+      keywords: "language locale translate to output",
+      label: "Target Language",
+      type: "select",
+      storageKey: "target-language",
+      defaultValue: "en",
+      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name })),
+      effects: ["retranslate", "fieldVisibility"]
+    },
+    {
+      id: "language-variant",
+      section: "Translation",
+      keywords: "variant regional dialect valencian valencia catalan local",
+      label: "Use Regional Variant",
+      type: "toggle",
+      storageKey: "language-variant",
+      defaultValue: false,
+      description: "Ask the model for the regional variant of the target language. Only available on AI providers that accept written instructions.",
+      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"],
+      visibleWhen: () => Boolean(getLanguageVariantForBase(storage.get("target-language") || "en")),
+      effects: ["retranslate"]
+    },
+    {
+      id: "overlay-mode",
+      section: "Translation",
+      keywords: "display overlay replace interleaved below line",
+      label: "Translation Display",
+      type: "select",
+      storageKey: "overlay-mode",
+      defaultValue: "replace",
+      options: OVERLAY_MODE_OPTIONS,
+      description: "How translated lyrics are displayed",
+      effects: ["reapplyTranslations"]
+    },
+    {
+      id: "show-romanization",
+      section: "Translation",
+      keywords: "romanization romaji pinyin transliteration pronunciation reading sing along",
+      label: "Show Romanization",
+      type: "toggle",
+      storageKey: "show-romanization",
+      defaultValue: false,
+      description: "Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one",
+      effects: ["romanizationDisplay"]
+    },
+    {
+      id: "preferred-api",
+      section: "Provider",
+      keywords: "api provider service engine backend",
+      label: "Translation API",
+      type: "select",
+      storageKey: "preferred-api",
+      defaultValue: "google",
+      options: API_OPTIONS,
+      effects: ["providerVisibility"]
+    },
+    {
+      id: "custom-api-url",
+      section: "Custom API",
+      keywords: "custom endpoint url self hosted",
+      label: "Custom API URL",
+      type: "text",
+      storageKey: "custom-api-url",
+      defaultValue: "",
+      placeholder: "https://your-api.com/translate",
+      description: "Translation endpoint or compatible API base URL",
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-format",
+      section: "Custom API",
+      keywords: "custom format schema payload compatible",
+      label: "Custom API Format",
+      type: "select",
+      storageKey: "custom-api-format",
+      defaultValue: "generic",
+      options: CUSTOM_API_FORMAT_OPTIONS,
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-key",
+      section: "Custom API",
+      keywords: "custom key token auth secret",
+      label: "Custom API Key (optional)",
+      type: "password",
+      storageKey: "custom-api-key",
+      defaultValue: "",
+      placeholder: "API key",
+      secret: true,
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "custom-api-model",
+      section: "Custom API",
+      keywords: "custom model name llm",
+      label: "Custom API Model (optional)",
+      type: "text",
+      storageKey: "custom-api-model",
+      defaultValue: "",
+      placeholder: "gpt-4o-mini, llama3.1, gemini-3.1-flash-lite",
+      visibleForApis: ["custom"]
+    },
+    {
+      id: "libretranslate-api-url",
+      section: "LibreTranslate",
+      keywords: "libretranslate url endpoint self hosted",
+      label: "LibreTranslate URL",
+      type: "text",
+      storageKey: "libretranslate-api-url",
+      defaultValue: "https://libretranslate.com/translate",
+      placeholder: "https://libretranslate.com/translate",
+      description: "Use the hosted endpoint with a key, or a self-hosted URL without one",
+      visibleForApis: ["libretranslate"]
+    },
+    {
+      id: "libretranslate-api-key",
+      section: "LibreTranslate",
+      keywords: "libretranslate key token auth secret",
+      label: "LibreTranslate API Key",
+      type: "password",
+      storageKey: "libretranslate-api-key",
+      defaultValue: "",
+      placeholder: "API key",
+      description: "Required for hosted libretranslate.com",
+      secret: true,
+      visibleForApis: ["libretranslate"]
+    },
+    {
+      id: "deepl-api-key",
+      section: "DeepL",
+      keywords: "deepl key token auth secret pro free",
+      label: "DeepL API Key",
+      type: "password",
+      storageKey: "deepl-api-key",
+      defaultValue: "",
+      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx:fx",
+      description: "Get a free key at deepl.com/pro-api",
+      secret: true,
+      visibleForApis: ["deepl"]
+    },
+    {
+      id: "openai-api-key",
+      section: "OpenAI",
+      keywords: "openai key token auth secret gpt",
+      label: "OpenAI API Key",
+      type: "password",
+      storageKey: "openai-api-key",
+      defaultValue: "",
+      placeholder: "sk-...",
+      secret: true,
+      visibleForApis: ["openai"]
+    },
+    {
+      id: "openai-model",
+      section: "OpenAI",
+      keywords: "openai model gpt version",
+      label: "OpenAI Model",
+      type: "select",
+      storageKey: "openai-model",
+      defaultValue: "gpt-4o-mini",
+      options: [
+        { value: "gpt-5.5", text: "GPT-5.5 Speed" },
+        { value: "gpt-4o-mini", text: "GPT-4o mini" }
+      ],
+      description: "GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option",
+      visibleForApis: ["openai"]
+    },
+    {
+      id: "gemini-api-key",
+      section: "Gemini",
+      keywords: "gemini google key token auth secret",
+      label: "Gemini API Key",
+      type: "password",
+      storageKey: "gemini-api-key",
+      defaultValue: "",
+      placeholder: "AIza...",
+      description: "Get a key at aistudio.google.com/apikey",
+      secret: true,
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "gemini-model",
+      section: "Gemini",
+      keywords: "gemini model flash pro version",
+      label: "Gemini Model",
+      type: "select",
+      storageKey: "gemini-model",
+      defaultValue: "gemini-3.1-flash-lite",
+      options: [
+        { value: "gemini-3.1-flash-lite", text: "3.1 Flash-Lite" },
+        { value: "gemini-3.5-flash", text: "3.5 Flash" },
+        { value: "gemini-3.1-pro-preview", text: "3.1 Pro" }
+      ],
+      description: "Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics",
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "gemini-temperature",
+      section: "Gemini",
+      keywords: "gemini temperature randomness creativity",
+      label: "Gemini Temperature",
+      type: "text",
+      storageKey: "gemini-temperature",
+      defaultValue: "0.3",
+      placeholder: "0.0 - 2.0",
+      description: "Controls output randomness (0.0 = deterministic, 2.0 = highly creative)",
+      visibleForApis: ["gemini"]
+    },
+    {
+      id: "grok-api-key",
+      section: "Grok",
+      keywords: "grok xai key token auth secret",
+      label: "Grok (xAI) API Key",
+      type: "password",
+      storageKey: "grok-api-key",
+      defaultValue: "",
+      placeholder: "xai-...",
+      description: "Get a key at console.x.ai",
+      secret: true,
+      visibleForApis: ["grok"]
+    },
+    {
+      id: "grok-model",
+      section: "Grok",
+      keywords: "grok xai model version",
+      label: "Grok Model",
+      type: "select",
+      storageKey: "grok-model",
+      defaultValue: "grok-4.5",
+      options: [
+        { value: "grok-4.5", text: "Grok 4.5 (recommended)" },
+        { value: "grok-4.3", text: "Grok 4.3" }
+      ],
+      description: "Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship",
+      visibleForApis: ["grok"]
+    },
+    {
+      id: "anthropic-api-key",
+      section: "Claude",
+      keywords: "claude anthropic key token auth secret",
+      label: "Claude (Anthropic) API Key",
+      type: "password",
+      storageKey: "anthropic-api-key",
+      defaultValue: "",
+      placeholder: "sk-ant-...",
+      description: "Get a key at console.anthropic.com",
+      secret: true,
+      visibleForApis: ["anthropic"]
+    },
+    {
+      id: "anthropic-model",
+      section: "Claude",
+      keywords: "claude anthropic model haiku sonnet opus",
+      label: "Claude Model",
+      type: "select",
+      storageKey: "anthropic-model",
+      defaultValue: "claude-haiku-4-5",
+      options: [
+        { value: "claude-haiku-4-5", text: "Haiku 4.5 (fast & cheap)" },
+        { value: "claude-sonnet-5", text: "Sonnet 5 (balanced)" },
+        { value: "claude-opus-4-8", text: "Opus 4.8 (best quality)" }
+      ],
+      description: "Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics",
+      visibleForApis: ["anthropic"]
+    },
+    {
+      id: "max-parallel-chunks",
+      section: "Provider",
+      keywords: "parallel concurrent requests speed rate limit cost",
+      label: "Parallel Translation Requests",
+      type: "select",
+      storageKey: "max-parallel-chunks",
+      defaultValue: "4",
+      options: [
+        { value: "1", text: "Off (one request)" },
+        { value: "2", text: "2 requests" },
+        { value: "3", text: "3 requests" },
+        { value: "4", text: "4 requests" },
+        { value: "5", text: "5 requests" },
+        { value: "6", text: "6 requests" }
+      ],
+      description: "\u26A0 Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.",
+      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"]
+    },
+    {
+      id: "auto-translate",
+      section: "Behaviour",
+      keywords: "auto automatic song change start",
+      label: "Auto-Translate on Song Change",
+      type: "toggle",
+      storageKey: "auto-translate",
+      defaultValue: false
+    },
+    {
+      id: "show-notifications",
+      section: "Interface",
+      keywords: "notifications toasts messages popup",
+      label: "Show Notifications",
+      type: "toggle",
+      storageKey: "show-notifications",
+      defaultValue: true
+    },
+    {
+      id: "show-quality-indicator",
+      section: "Interface",
+      keywords: "quality indicator badge confidence",
+      label: "Show Translation Quality Indicator",
+      type: "toggle",
+      storageKey: "show-quality-indicator",
+      defaultValue: true,
+      effects: ["qualityIndicatorClass"]
+    },
+    {
+      id: "hide-connection-indicator",
+      section: "Interface",
+      keywords: "connection status indicator hide ping",
+      label: "Hide Connection Status",
+      type: "toggle",
+      storageKey: "hide-connection-indicator",
+      defaultValue: false,
+      effects: ["connectionIndicatorClass"]
+    }
+  ];
+  function getSettingField(id) {
+    return SETTINGS_SCHEMA.find((field) => field.id === id);
+  }
+  function getSectionsForCategory(category) {
+    return category.sections.filter((section) => SETTINGS_SCHEMA.some((field) => field.section === section));
+  }
+  function matchesSettingQuery(field, query) {
+    const needle = query.trim().toLowerCase();
+    if (!needle)
+      return true;
+    return [field.label, field.section, field.description, field.keywords].some((value) => (value || "").toLowerCase().includes(needle));
+  }
+  function getCurrentApiPreference() {
+    return storage.get("preferred-api") || state.preferredApi || "google";
+  }
+  function getResolvedTargetLanguage() {
+    return resolveTargetLanguage(
+      storage.get("target-language") || "en",
+      storage.get("language-variant") === "true",
+      getCurrentApiPreference()
+    );
+  }
+  function isSettingFieldVisible(field, api = getCurrentApiPreference()) {
+    if (field.visibleForApis && !field.visibleForApis.includes(api))
+      return false;
+    return !field.visibleWhen || field.visibleWhen();
+  }
+  function normalizeLegacySelectValue(fieldId, value) {
+    const stored = (value || "").trim().replace(/^models\//, "");
+    if (!stored)
+      return value;
+    if (fieldId === "openai-model") {
+      return stored === "gpt-5.5" || stored === "gpt-4o-mini" ? stored : "gpt-4o-mini";
+    }
+    if (fieldId === "gemini-model") {
+      if (stored === "gemini-3.1-flash-lite" || stored === "gemini-3.5-flash" || stored === "gemini-3.1-pro-preview")
+        return stored;
+      if (stored.includes("flash-lite"))
+        return "gemini-3.1-flash-lite";
+      if (stored.includes("pro"))
+        return "gemini-3.1-pro-preview";
+      if (stored.includes("flash"))
+        return "gemini-3.5-flash";
+      return "gemini-3.1-flash-lite";
+    }
+    return value;
+  }
+  function readSettingValue(field) {
+    if (field.type === "toggle") {
+      const stored2 = storage.get(field.storageKey);
+      if (typeof field.defaultValue === "boolean" && field.defaultValue) {
+        return stored2 !== "false";
+      }
+      return stored2 === "true";
+    }
+    const stored = field.secret ? storage.getSecret(field.storageKey) : storage.get(field.storageKey);
+    const normalizedStored = field.type === "select" ? normalizeLegacySelectValue(field.id, stored) : stored;
+    if (field.type === "select" && field.options && normalizedStored && field.options.every((option) => option.value !== normalizedStored)) {
+      return String(field.defaultValue);
+    }
+    return normalizedStored ?? String(field.defaultValue);
+  }
+  function isSettingAtDefault(field) {
+    const value = readSettingValue(field);
+    if (field.type === "toggle")
+      return Boolean(value) === Boolean(field.defaultValue);
+    return String(value) === String(field.defaultValue);
+  }
+  function configureTranslationApi() {
+    setPreferredApi(state.preferredApi, state.customApiUrl, {
+      customApiKey: state.customApiKey,
+      customApiFormat: state.customApiFormat,
+      customApiModel: state.customApiModel,
+      libreTranslateApiUrl: state.libreTranslateApiUrl,
+      libreTranslateApiKey: state.libreTranslateApiKey,
+      deeplApiKey: state.deeplApiKey,
+      openaiApiKey: state.openaiApiKey,
+      openaiModel: state.openaiModel,
+      geminiApiKey: state.geminiApiKey,
+      geminiModel: state.geminiModel,
+      geminiTemperature: state.geminiTemperature,
+      grokApiKey: state.grokApiKey,
+      grokModel: state.grokModel,
+      anthropicApiKey: state.anthropicApiKey,
+      anthropicModel: state.anthropicModel,
+      maxParallelChunks: state.maxParallelChunks
+    });
+  }
+  function writeSettingValue(field, value) {
+    if (field.type === "toggle") {
+      storage.set(field.storageKey, String(Boolean(value)));
+    } else if (field.secret) {
+      storage.setSecret(field.storageKey, String(value));
+    } else {
+      storage.set(field.storageKey, String(value));
+    }
+    switch (field.id) {
+      case "target-language":
+        state.targetLanguage = getResolvedTargetLanguage();
+        break;
+      case "language-variant":
+        state.targetLanguage = getResolvedTargetLanguage();
+        break;
+      case "overlay-mode":
+        state.overlayMode = String(value);
+        break;
+      case "show-romanization":
+        state.showRomanization = Boolean(value);
+        break;
+      case "preferred-api":
+        state.preferredApi = String(value);
+        state.targetLanguage = getResolvedTargetLanguage();
+        configureTranslationApi();
+        break;
+      case "custom-api-url":
+        state.customApiUrl = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-format":
+        state.customApiFormat = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-key":
+        state.customApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "custom-api-model":
+        state.customApiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "libretranslate-api-url":
+        state.libreTranslateApiUrl = String(value);
+        configureTranslationApi();
+        break;
+      case "libretranslate-api-key":
+        state.libreTranslateApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "deepl-api-key":
+        state.deeplApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "openai-api-key":
+        state.openaiApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "openai-model":
+        state.openaiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-api-key":
+        state.geminiApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-model":
+        state.geminiModel = String(value);
+        configureTranslationApi();
+        break;
+      case "gemini-temperature":
+        state.geminiTemperature = String(value);
+        configureTranslationApi();
+        break;
+      case "grok-api-key":
+        state.grokApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "grok-model":
+        state.grokModel = String(value);
+        configureTranslationApi();
+        break;
+      case "anthropic-api-key":
+        state.anthropicApiKey = String(value);
+        configureTranslationApi();
+        break;
+      case "anthropic-model":
+        state.anthropicModel = String(value);
+        configureTranslationApi();
+        break;
+      case "max-parallel-chunks":
+        state.maxParallelChunks = String(value);
+        configureTranslationApi();
+        break;
+      case "auto-translate":
+        state.autoTranslate = Boolean(value);
+        break;
+      case "show-notifications":
+        state.showNotifications = Boolean(value);
+        break;
+      case "show-quality-indicator":
+        state.showQualityIndicator = Boolean(value);
+        break;
+      case "hide-connection-indicator":
+        state.hideConnectionIndicator = Boolean(value);
+        break;
+    }
+    return field.effects || [];
+  }
+
+  // src/utils/quickMenu.ts
+  var QUICK_MENU_ID = "slt-quick-menu";
+  var QUICK_FIELD_IDS = ["overlay-mode", "show-romanization"];
+  var outsideClickHandler = null;
+  var keydownHandler = null;
+  function escapeHtml2(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function closeQuickMenu() {
+    const existing = document.getElementById(QUICK_MENU_ID);
+    if (existing)
+      existing.remove();
+    if (outsideClickHandler) {
+      document.removeEventListener("mousedown", outsideClickHandler, true);
+      outsideClickHandler = null;
+    }
+    if (keydownHandler) {
+      document.removeEventListener("keydown", keydownHandler, true);
+      keydownHandler = null;
+    }
+  }
+  function quickMenuStyles() {
+    return `
+        #${QUICK_MENU_ID} {
+            position: fixed;
+            z-index: 10000;
+            min-width: 236px;
+            max-width: 300px;
+            padding: 6px;
+            box-sizing: border-box;
+            border-radius: 8px;
+            background: var(--spice-card, #181818);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+            font-size: 13px;
+            color: var(--spice-text, #fff);
+            user-select: none;
+        }
+        #${QUICK_MENU_ID} .slt-qm-group-label {
+            padding: 6px 10px 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--spice-subtext, #b3b3b3);
+        }
+        #${QUICK_MENU_ID} .slt-qm-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            width: 100%;
+            padding: 7px 10px;
+            border: none;
+            border-radius: 5px;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        #${QUICK_MENU_ID} .slt-qm-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        #${QUICK_MENU_ID} .slt-qm-check {
+            flex: 0 0 auto;
+            width: 14px;
+            opacity: 0;
+            font-weight: 700;
+        }
+        #${QUICK_MENU_ID} .slt-qm-item[aria-checked="true"] .slt-qm-check {
+            opacity: 1;
+            color: #1db954;
+        }
+        #${QUICK_MENU_ID} .slt-qm-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #${QUICK_MENU_ID} .slt-qm-value {
+            flex: 0 0 auto;
+            color: var(--spice-subtext, #b3b3b3);
+            font-size: 12px;
+        }
+        #${QUICK_MENU_ID} .slt-qm-sep {
+            height: 1px;
+            margin: 5px 6px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        #${QUICK_MENU_ID} select.slt-qm-select {
+            flex: 0 0 auto;
+            max-width: 130px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: var(--spice-main, #121212);
+            color: var(--spice-text, #fff);
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+    `;
+  }
+  function buildToggleRow(field, onChange) {
+    const checked = Boolean(readSettingValue(field));
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "slt-qm-item";
+    item.setAttribute("role", "menuitemcheckbox");
+    item.setAttribute("aria-checked", String(checked));
+    item.innerHTML = `
+        <span class="slt-qm-check">\u2713</span>
+        <span class="slt-qm-label">${escapeHtml2(field.label)}</span>
+    `;
+    item.addEventListener("click", () => {
+      const next = item.getAttribute("aria-checked") !== "true";
+      item.setAttribute("aria-checked", String(next));
+      applySettingById(field.id, next);
+      onChange();
+    });
+    return item;
+  }
+  function buildModeRows(field, onChange) {
+    const wrapper = document.createElement("div");
+    const current = String(readSettingValue(field));
+    const label = document.createElement("div");
+    label.className = "slt-qm-group-label";
+    label.textContent = field.label;
+    wrapper.appendChild(label);
+    (field.options || []).forEach((option) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "slt-qm-item";
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", String(option.value === current));
+      item.innerHTML = `
+            <span class="slt-qm-check">\u2713</span>
+            <span class="slt-qm-label">${escapeHtml2(option.text)}</span>
+        `;
+      item.addEventListener("click", () => {
+        wrapper.querySelectorAll(".slt-qm-item").forEach((el) => el.setAttribute("aria-checked", "false"));
+        item.setAttribute("aria-checked", "true");
+        applySettingById(field.id, option.value);
+        onChange();
+      });
+      wrapper.appendChild(item);
+    });
+    return wrapper;
+  }
+  function buildSelectRow(field, onChange) {
+    const current = String(readSettingValue(field));
+    const row = document.createElement("div");
+    row.className = "slt-qm-item";
+    row.style.cursor = "default";
+    const label = document.createElement("span");
+    label.className = "slt-qm-label";
+    label.textContent = field.label;
+    const select = document.createElement("select");
+    select.className = "slt-qm-select";
+    (field.options || []).forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.text;
+      if (option.value === current)
+        opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener("change", () => {
+      applySettingById(field.id, select.value);
+      onChange();
+    });
+    select.addEventListener("mousedown", (e) => e.stopPropagation());
+    select.addEventListener("click", (e) => e.stopPropagation());
+    row.appendChild(label);
+    row.appendChild(select);
+    return row;
+  }
+  function positionMenu(menu, x, y) {
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    const rect = menu.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin));
+    const top = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+  function openQuickMenu(x, y) {
+    closeQuickMenu();
+    try {
+      const menu = document.createElement("div");
+      menu.id = QUICK_MENU_ID;
+      menu.setAttribute("role", "menu");
+      const style = document.createElement("style");
+      style.textContent = quickMenuStyles();
+      menu.appendChild(style);
+      const addSeparator = () => {
+        const sep = document.createElement("div");
+        sep.className = "slt-qm-sep";
+        menu.appendChild(sep);
+      };
+      QUICK_FIELD_IDS.forEach((id, index) => {
+        const field = getSettingField(id);
+        if (!field)
+          return;
+        if (index > 0)
+          addSeparator();
+        if (field.type === "toggle") {
+          menu.appendChild(buildToggleRow(field, () => {
+          }));
+        } else if (field.id === "overlay-mode") {
+          menu.appendChild(buildModeRows(field, () => {
+          }));
+        } else {
+          menu.appendChild(buildSelectRow(field, () => {
+          }));
+        }
+      });
+      addSeparator();
+      const allSettings = document.createElement("button");
+      allSettings.type = "button";
+      allSettings.className = "slt-qm-item";
+      allSettings.innerHTML = `
+            <span class="slt-qm-check"></span>
+            <span class="slt-qm-label">All settings\u2026</span>
+        `;
+      allSettings.addEventListener("click", () => {
+        closeQuickMenu();
+        openSettingsModal();
+      });
+      menu.appendChild(allSettings);
+      document.body.appendChild(menu);
+      positionMenu(menu, x, y);
+      outsideClickHandler = (e) => {
+        if (!menu.contains(e.target))
+          closeQuickMenu();
+      };
+      keydownHandler = (e) => {
+        if (e.key === "Escape")
+          closeQuickMenu();
+      };
+      document.addEventListener("mousedown", outsideClickHandler, true);
+      document.addEventListener("keydown", keydownHandler, true);
+    } catch (e) {
+      warn("Failed to open quick menu, falling back to settings:", e);
+      openSettingsModal();
+    }
+  }
+
   // src/utils/core.ts
   var lyricsObserver = null;
   var translateDebounceTimer = null;
@@ -9125,7 +9455,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     button.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openSettingsModal();
+      const rect = button.getBoundingClientRect();
+      const x = e.clientX || rect.left;
+      const y = e.clientY || rect.bottom;
+      openQuickMenu(x, y);
       return false;
     });
     return button;
@@ -9962,11 +10295,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }
       translationMapByIndex.set(index, translatedText);
     });
+    const overlaySettings = {
+      mode: state.overlayMode,
+      syncWordHighlight: state.syncWordHighlight,
+      showRomanization: state.showRomanization
+    };
     if (!isOverlayActive()) {
-      enableOverlay({
-        mode: state.overlayMode,
-        syncWordHighlight: state.syncWordHighlight
-      });
+      enableOverlay(overlaySettings);
+    } else {
+      updateOverlayConfig(overlaySettings);
     }
     if (state._qualityByIndex) {
       setQualityMetadata(state._qualityByIndex);
@@ -10073,23 +10410,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     removeTranslations();
     if (state.isEnabled) {
       translateCurrentLyrics();
-    }
-  }
-  function reapplyTranslations() {
-    if (state.translatedLyrics.size === 0)
-      return;
-    const savedTranslations = new Map(state.translatedLyrics);
-    const savedIndexMap = state._translationsByIndex ? new Map(state._translationsByIndex) : void 0;
-    const savedQualityMap = state._qualityByIndex ? new Map(state._qualityByIndex) : void 0;
-    const savedUri = state.lastTranslatedSongUri;
-    removeTranslations();
-    state.translatedLyrics = savedTranslations;
-    state._translationsByIndex = savedIndexMap;
-    state._qualityByIndex = savedQualityMap;
-    state.lastTranslatedSongUri = savedUri;
-    const lines = getLyricsLines();
-    if (lines.length > 0) {
-      applyTranslations(lines);
     }
   }
   function removeTranslations() {
@@ -10765,557 +11085,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
   }
 
-  // src/utils/settingsModel.ts
-  var SETTINGS_CATEGORIES = [
-    { id: "slt-cat-translation", label: "Translation", sections: ["Translation", "Behaviour"] },
-    {
-      id: "slt-cat-providers",
-      label: "Providers",
-      sections: ["Provider", "Custom API", "LibreTranslate", "DeepL", "OpenAI", "Gemini", "Grok", "Claude"]
-    },
-    { id: "slt-cat-interface", label: "Interface", sections: ["Interface"] }
-  ];
-  var API_OPTIONS = [
-    { value: "google", text: "Google Translate" },
-    { value: "libretranslate", text: "LibreTranslate" },
-    { value: "deepl", text: "DeepL" },
-    { value: "openai", text: "OpenAI" },
-    { value: "gemini", text: "Gemini" },
-    { value: "grok", text: "Grok (xAI)" },
-    { value: "anthropic", text: "Claude (Anthropic)" },
-    { value: "custom", text: "Custom API" }
-  ];
-  var CUSTOM_API_FORMAT_OPTIONS = [
-    { value: "generic", text: "Generic JSON" },
-    { value: "libretranslate", text: "LibreTranslate Compatible" },
-    { value: "openai", text: "OpenAI Compatible" },
-    { value: "gemini", text: "Gemini Compatible" },
-    { value: "deepl", text: "DeepL Compatible" }
-  ];
-  var OVERLAY_MODE_OPTIONS = [
-    { value: "replace", text: "Replace (default)" },
-    { value: "interleaved", text: "Below each line" }
-  ];
-  var SETTINGS_SCHEMA = [
-    {
-      id: "target-language",
-      section: "Translation",
-      keywords: "language locale translate to output",
-      label: "Target Language",
-      type: "select",
-      storageKey: "target-language",
-      defaultValue: "en",
-      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name })),
-      effects: ["retranslate", "fieldVisibility"]
-    },
-    {
-      id: "language-variant",
-      section: "Translation",
-      keywords: "variant regional dialect valencian valencia catalan local",
-      label: "Use Regional Variant",
-      type: "toggle",
-      storageKey: "language-variant",
-      defaultValue: false,
-      description: "Ask the model for the regional variant of the target language. Only available on AI providers that accept written instructions.",
-      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"],
-      visibleWhen: () => Boolean(getLanguageVariantForBase(storage.get("target-language") || "en")),
-      effects: ["retranslate"]
-    },
-    {
-      id: "overlay-mode",
-      section: "Translation",
-      keywords: "display overlay replace interleaved below line",
-      label: "Translation Display",
-      type: "select",
-      storageKey: "overlay-mode",
-      defaultValue: "replace",
-      options: OVERLAY_MODE_OPTIONS,
-      description: "How translated lyrics are displayed",
-      effects: ["reapplyTranslations"]
-    },
-    {
-      id: "preferred-api",
-      section: "Provider",
-      keywords: "api provider service engine backend",
-      label: "Translation API",
-      type: "select",
-      storageKey: "preferred-api",
-      defaultValue: "google",
-      options: API_OPTIONS,
-      effects: ["providerVisibility"]
-    },
-    {
-      id: "custom-api-url",
-      section: "Custom API",
-      keywords: "custom endpoint url self hosted",
-      label: "Custom API URL",
-      type: "text",
-      storageKey: "custom-api-url",
-      defaultValue: "",
-      placeholder: "https://your-api.com/translate",
-      description: "Translation endpoint or compatible API base URL",
-      visibleForApis: ["custom"]
-    },
-    {
-      id: "custom-api-format",
-      section: "Custom API",
-      keywords: "custom format schema payload compatible",
-      label: "Custom API Format",
-      type: "select",
-      storageKey: "custom-api-format",
-      defaultValue: "generic",
-      options: CUSTOM_API_FORMAT_OPTIONS,
-      visibleForApis: ["custom"]
-    },
-    {
-      id: "custom-api-key",
-      section: "Custom API",
-      keywords: "custom key token auth secret",
-      label: "Custom API Key (optional)",
-      type: "password",
-      storageKey: "custom-api-key",
-      defaultValue: "",
-      placeholder: "API key",
-      secret: true,
-      visibleForApis: ["custom"]
-    },
-    {
-      id: "custom-api-model",
-      section: "Custom API",
-      keywords: "custom model name llm",
-      label: "Custom API Model (optional)",
-      type: "text",
-      storageKey: "custom-api-model",
-      defaultValue: "",
-      placeholder: "gpt-4o-mini, llama3.1, gemini-3.1-flash-lite",
-      visibleForApis: ["custom"]
-    },
-    {
-      id: "libretranslate-api-url",
-      section: "LibreTranslate",
-      keywords: "libretranslate url endpoint self hosted",
-      label: "LibreTranslate URL",
-      type: "text",
-      storageKey: "libretranslate-api-url",
-      defaultValue: "https://libretranslate.com/translate",
-      placeholder: "https://libretranslate.com/translate",
-      description: "Use the hosted endpoint with a key, or a self-hosted URL without one",
-      visibleForApis: ["libretranslate"]
-    },
-    {
-      id: "libretranslate-api-key",
-      section: "LibreTranslate",
-      keywords: "libretranslate key token auth secret",
-      label: "LibreTranslate API Key",
-      type: "password",
-      storageKey: "libretranslate-api-key",
-      defaultValue: "",
-      placeholder: "API key",
-      description: "Required for hosted libretranslate.com",
-      secret: true,
-      visibleForApis: ["libretranslate"]
-    },
-    {
-      id: "deepl-api-key",
-      section: "DeepL",
-      keywords: "deepl key token auth secret pro free",
-      label: "DeepL API Key",
-      type: "password",
-      storageKey: "deepl-api-key",
-      defaultValue: "",
-      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx:fx",
-      description: "Get a free key at deepl.com/pro-api",
-      secret: true,
-      visibleForApis: ["deepl"]
-    },
-    {
-      id: "openai-api-key",
-      section: "OpenAI",
-      keywords: "openai key token auth secret gpt",
-      label: "OpenAI API Key",
-      type: "password",
-      storageKey: "openai-api-key",
-      defaultValue: "",
-      placeholder: "sk-...",
-      secret: true,
-      visibleForApis: ["openai"]
-    },
-    {
-      id: "openai-model",
-      section: "OpenAI",
-      keywords: "openai model gpt version",
-      label: "OpenAI Model",
-      type: "select",
-      storageKey: "openai-model",
-      defaultValue: "gpt-4o-mini",
-      options: [
-        { value: "gpt-5.5", text: "GPT-5.5 Speed" },
-        { value: "gpt-4o-mini", text: "GPT-4o mini" }
-      ],
-      description: "GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option",
-      visibleForApis: ["openai"]
-    },
-    {
-      id: "gemini-api-key",
-      section: "Gemini",
-      keywords: "gemini google key token auth secret",
-      label: "Gemini API Key",
-      type: "password",
-      storageKey: "gemini-api-key",
-      defaultValue: "",
-      placeholder: "AIza...",
-      description: "Get a key at aistudio.google.com/apikey",
-      secret: true,
-      visibleForApis: ["gemini"]
-    },
-    {
-      id: "gemini-model",
-      section: "Gemini",
-      keywords: "gemini model flash pro version",
-      label: "Gemini Model",
-      type: "select",
-      storageKey: "gemini-model",
-      defaultValue: "gemini-3.1-flash-lite",
-      options: [
-        { value: "gemini-3.1-flash-lite", text: "3.1 Flash-Lite" },
-        { value: "gemini-3.5-flash", text: "3.5 Flash" },
-        { value: "gemini-3.1-pro-preview", text: "3.1 Pro" }
-      ],
-      description: "Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics",
-      visibleForApis: ["gemini"]
-    },
-    {
-      id: "gemini-temperature",
-      section: "Gemini",
-      keywords: "gemini temperature randomness creativity",
-      label: "Gemini Temperature",
-      type: "text",
-      storageKey: "gemini-temperature",
-      defaultValue: "0.3",
-      placeholder: "0.0 - 2.0",
-      description: "Controls output randomness (0.0 = deterministic, 2.0 = highly creative)",
-      visibleForApis: ["gemini"]
-    },
-    {
-      id: "grok-api-key",
-      section: "Grok",
-      keywords: "grok xai key token auth secret",
-      label: "Grok (xAI) API Key",
-      type: "password",
-      storageKey: "grok-api-key",
-      defaultValue: "",
-      placeholder: "xai-...",
-      description: "Get a key at console.x.ai",
-      secret: true,
-      visibleForApis: ["grok"]
-    },
-    {
-      id: "grok-model",
-      section: "Grok",
-      keywords: "grok xai model version",
-      label: "Grok Model",
-      type: "select",
-      storageKey: "grok-model",
-      defaultValue: "grok-4.5",
-      options: [
-        { value: "grok-4.5", text: "Grok 4.5 (recommended)" },
-        { value: "grok-4.3", text: "Grok 4.3" }
-      ],
-      description: "Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship",
-      visibleForApis: ["grok"]
-    },
-    {
-      id: "anthropic-api-key",
-      section: "Claude",
-      keywords: "claude anthropic key token auth secret",
-      label: "Claude (Anthropic) API Key",
-      type: "password",
-      storageKey: "anthropic-api-key",
-      defaultValue: "",
-      placeholder: "sk-ant-...",
-      description: "Get a key at console.anthropic.com",
-      secret: true,
-      visibleForApis: ["anthropic"]
-    },
-    {
-      id: "anthropic-model",
-      section: "Claude",
-      keywords: "claude anthropic model haiku sonnet opus",
-      label: "Claude Model",
-      type: "select",
-      storageKey: "anthropic-model",
-      defaultValue: "claude-haiku-4-5",
-      options: [
-        { value: "claude-haiku-4-5", text: "Haiku 4.5 (fast & cheap)" },
-        { value: "claude-sonnet-5", text: "Sonnet 5 (balanced)" },
-        { value: "claude-opus-4-8", text: "Opus 4.8 (best quality)" }
-      ],
-      description: "Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics",
-      visibleForApis: ["anthropic"]
-    },
-    {
-      id: "max-parallel-chunks",
-      section: "Provider",
-      keywords: "parallel concurrent requests speed rate limit cost",
-      label: "Parallel Translation Requests",
-      type: "select",
-      storageKey: "max-parallel-chunks",
-      defaultValue: "4",
-      options: [
-        { value: "1", text: "Off (one request)" },
-        { value: "2", text: "2 requests" },
-        { value: "3", text: "3 requests" },
-        { value: "4", text: "4 requests" },
-        { value: "5", text: "5 requests" },
-        { value: "6", text: "6 requests" }
-      ],
-      description: "\u26A0 Splits long songs across concurrent requests for faster translation. Higher values send more requests per song, which can increase API usage/cost and may hit rate limits on free tiers. Lower it (or set Off) if you see errors.",
-      visibleForApis: ["openai", "gemini", "grok", "anthropic", "custom"]
-    },
-    {
-      id: "auto-translate",
-      section: "Behaviour",
-      keywords: "auto automatic song change start",
-      label: "Auto-Translate on Song Change",
-      type: "toggle",
-      storageKey: "auto-translate",
-      defaultValue: false
-    },
-    {
-      id: "show-notifications",
-      section: "Interface",
-      keywords: "notifications toasts messages popup",
-      label: "Show Notifications",
-      type: "toggle",
-      storageKey: "show-notifications",
-      defaultValue: true
-    },
-    {
-      id: "show-quality-indicator",
-      section: "Interface",
-      keywords: "quality indicator badge confidence",
-      label: "Show Translation Quality Indicator",
-      type: "toggle",
-      storageKey: "show-quality-indicator",
-      defaultValue: true,
-      effects: ["qualityIndicatorClass"]
-    },
-    {
-      id: "vocabulary-mode",
-      section: "Behaviour",
-      keywords: "vocabulary learning study word by word",
-      label: "Vocabulary / Learning Mode",
-      type: "toggle",
-      storageKey: "vocabulary-mode",
-      defaultValue: false,
-      effects: ["vocabularyModeClass", "reapplyTranslations"]
-    },
-    {
-      id: "hide-connection-indicator",
-      section: "Interface",
-      keywords: "connection status indicator hide ping",
-      label: "Hide Connection Status",
-      type: "toggle",
-      storageKey: "hide-connection-indicator",
-      defaultValue: false,
-      effects: ["connectionIndicatorClass"]
-    }
-  ];
-  function getSectionsForCategory(category) {
-    return category.sections.filter((section) => SETTINGS_SCHEMA.some((field) => field.section === section));
-  }
-  function matchesSettingQuery(field, query) {
-    const needle = query.trim().toLowerCase();
-    if (!needle)
-      return true;
-    return [field.label, field.section, field.description, field.keywords].some((value) => (value || "").toLowerCase().includes(needle));
-  }
-  function getCurrentApiPreference() {
-    return storage.get("preferred-api") || state.preferredApi || "google";
-  }
-  function getResolvedTargetLanguage() {
-    return resolveTargetLanguage(
-      storage.get("target-language") || "en",
-      storage.get("language-variant") === "true",
-      getCurrentApiPreference()
-    );
-  }
-  function isSettingFieldVisible(field, api = getCurrentApiPreference()) {
-    if (field.visibleForApis && !field.visibleForApis.includes(api))
-      return false;
-    return !field.visibleWhen || field.visibleWhen();
-  }
-  function normalizeLegacySelectValue(fieldId, value) {
-    const stored = (value || "").trim().replace(/^models\//, "");
-    if (!stored)
-      return value;
-    if (fieldId === "openai-model") {
-      return stored === "gpt-5.5" || stored === "gpt-4o-mini" ? stored : "gpt-4o-mini";
-    }
-    if (fieldId === "gemini-model") {
-      if (stored === "gemini-3.1-flash-lite" || stored === "gemini-3.5-flash" || stored === "gemini-3.1-pro-preview")
-        return stored;
-      if (stored.includes("flash-lite"))
-        return "gemini-3.1-flash-lite";
-      if (stored.includes("pro"))
-        return "gemini-3.1-pro-preview";
-      if (stored.includes("flash"))
-        return "gemini-3.5-flash";
-      return "gemini-3.1-flash-lite";
-    }
-    return value;
-  }
-  function readSettingValue(field) {
-    if (field.type === "toggle") {
-      const stored2 = storage.get(field.storageKey);
-      if (typeof field.defaultValue === "boolean" && field.defaultValue) {
-        return stored2 !== "false";
-      }
-      return stored2 === "true";
-    }
-    const stored = field.secret ? storage.getSecret(field.storageKey) : storage.get(field.storageKey);
-    const normalizedStored = field.type === "select" ? normalizeLegacySelectValue(field.id, stored) : stored;
-    if (field.type === "select" && field.options && normalizedStored && field.options.every((option) => option.value !== normalizedStored)) {
-      return String(field.defaultValue);
-    }
-    return normalizedStored ?? String(field.defaultValue);
-  }
-  function isSettingAtDefault(field) {
-    const value = readSettingValue(field);
-    if (field.type === "toggle")
-      return Boolean(value) === Boolean(field.defaultValue);
-    return String(value) === String(field.defaultValue);
-  }
-  function configureTranslationApi() {
-    setPreferredApi(state.preferredApi, state.customApiUrl, {
-      customApiKey: state.customApiKey,
-      customApiFormat: state.customApiFormat,
-      customApiModel: state.customApiModel,
-      libreTranslateApiUrl: state.libreTranslateApiUrl,
-      libreTranslateApiKey: state.libreTranslateApiKey,
-      deeplApiKey: state.deeplApiKey,
-      openaiApiKey: state.openaiApiKey,
-      openaiModel: state.openaiModel,
-      geminiApiKey: state.geminiApiKey,
-      geminiModel: state.geminiModel,
-      geminiTemperature: state.geminiTemperature,
-      grokApiKey: state.grokApiKey,
-      grokModel: state.grokModel,
-      anthropicApiKey: state.anthropicApiKey,
-      anthropicModel: state.anthropicModel,
-      maxParallelChunks: state.maxParallelChunks
-    });
-  }
-  function writeSettingValue(field, value) {
-    if (field.type === "toggle") {
-      storage.set(field.storageKey, String(Boolean(value)));
-    } else if (field.secret) {
-      storage.setSecret(field.storageKey, String(value));
-    } else {
-      storage.set(field.storageKey, String(value));
-    }
-    switch (field.id) {
-      case "target-language":
-        state.targetLanguage = getResolvedTargetLanguage();
-        break;
-      case "language-variant":
-        state.targetLanguage = getResolvedTargetLanguage();
-        break;
-      case "overlay-mode":
-        state.overlayMode = String(value);
-        break;
-      case "preferred-api":
-        state.preferredApi = String(value);
-        state.targetLanguage = getResolvedTargetLanguage();
-        configureTranslationApi();
-        break;
-      case "custom-api-url":
-        state.customApiUrl = String(value);
-        configureTranslationApi();
-        break;
-      case "custom-api-format":
-        state.customApiFormat = String(value);
-        configureTranslationApi();
-        break;
-      case "custom-api-key":
-        state.customApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "custom-api-model":
-        state.customApiModel = String(value);
-        configureTranslationApi();
-        break;
-      case "libretranslate-api-url":
-        state.libreTranslateApiUrl = String(value);
-        configureTranslationApi();
-        break;
-      case "libretranslate-api-key":
-        state.libreTranslateApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "deepl-api-key":
-        state.deeplApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "openai-api-key":
-        state.openaiApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "openai-model":
-        state.openaiModel = String(value);
-        configureTranslationApi();
-        break;
-      case "gemini-api-key":
-        state.geminiApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "gemini-model":
-        state.geminiModel = String(value);
-        configureTranslationApi();
-        break;
-      case "gemini-temperature":
-        state.geminiTemperature = String(value);
-        configureTranslationApi();
-        break;
-      case "grok-api-key":
-        state.grokApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "grok-model":
-        state.grokModel = String(value);
-        configureTranslationApi();
-        break;
-      case "anthropic-api-key":
-        state.anthropicApiKey = String(value);
-        configureTranslationApi();
-        break;
-      case "anthropic-model":
-        state.anthropicModel = String(value);
-        configureTranslationApi();
-        break;
-      case "max-parallel-chunks":
-        state.maxParallelChunks = String(value);
-        configureTranslationApi();
-        break;
-      case "auto-translate":
-        state.autoTranslate = Boolean(value);
-        break;
-      case "show-notifications":
-        state.showNotifications = Boolean(value);
-        break;
-      case "show-quality-indicator":
-        state.showQualityIndicator = Boolean(value);
-        break;
-      case "vocabulary-mode":
-        state.vocabularyMode = Boolean(value);
-        break;
-      case "hide-connection-indicator":
-        state.hideConnectionIndicator = Boolean(value);
-        break;
-    }
-    return field.effects || [];
-  }
-
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
   var SPICY_LYRICS_CACHE_NAMES2 = ["SpicyLyrics_LyricsStore_g1", "SpicyLyrics_LyricsStore"];
@@ -11431,7 +11200,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
         </div>
         <div class="x-settings-secondColumn">
-            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml2(placeholder)}" autocomplete="off" spellcheck="false" data-form-type="other">
+            <input type="${type}" id="${id}" class="main-dropDown-dropDown" style="width: 200px;" value="" placeholder="${escapeHtml3(placeholder)}" autocomplete="off" spellcheck="false" data-form-type="other">
         </div>
     `;
     const input = row.querySelector("input");
@@ -11444,18 +11213,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (effects.includes("qualityIndicatorClass")) {
       document.body.classList.toggle("slt-hide-quality-indicator", !Boolean(value));
     }
-    if (effects.includes("vocabularyModeClass")) {
-      document.body.classList.toggle("slt-vocabulary-mode", Boolean(value));
-    }
     if (effects.includes("connectionIndicatorClass")) {
       setConnectionIndicatorHidden(Boolean(value));
     }
-    if (effects.includes("reapplyTranslations")) {
-      reapplyTranslations();
+    if (effects.includes("romanizationDisplay")) {
+      setOverlayRomanization(Boolean(value));
     }
-    if (effects.includes("retranslate")) {
+    if (effects.includes("romanizationDisplay") || effects.includes("reapplyTranslations") || effects.includes("retranslate")) {
       forceRetranslate();
     }
+  }
+  function applySettingById(id, value) {
+    const field = getSettingField(id);
+    if (!field)
+      return;
+    const effects = writeSettingValue(field, value);
+    runSettingEffects(effects, value);
   }
   function updateSettingFieldVisibility(root, visibleDisplay) {
     const api = getCurrentApiPreference();
@@ -11701,7 +11474,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const row = document.createElement("div");
     row.className = field.type === "toggle" ? "slt-modal-field slt-modal-toggle-field" : "slt-modal-field";
     row.setAttribute("data-slt-setting-field", field.id);
-    const description = field.description ? `<span class="slt-description">${escapeHtml2(field.description)}</span>` : "";
+    const description = field.description ? `<span class="slt-description">${escapeHtml3(field.description)}</span>` : "";
     let controlMarkup;
     if (field.type === "toggle") {
       controlMarkup = `
@@ -11710,19 +11483,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 <span class="slt-toggle-slider"></span>
             </label>`;
     } else if (field.type === "select") {
-      const options = (field.options || []).map((option) => `<option value="${escapeHtml2(option.value)}">${escapeHtml2(option.text)}</option>`).join("");
+      const options = (field.options || []).map((option) => `<option value="${escapeHtml3(option.value)}">${escapeHtml3(option.text)}</option>`).join("");
       controlMarkup = `<select id="${id}">${options}</select>`;
     } else {
-      controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml2(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">`;
+      controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml3(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">`;
     }
     row.innerHTML = `
         <div class="slt-modal-field-copy">
-            <label for="${id}">${escapeHtml2(field.label)}</label>
+            <label for="${id}">${escapeHtml3(field.label)}</label>
             ${description}
         </div>
         <div class="slt-modal-field-control">
             ${controlMarkup}
-            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml2(field.label)} to default">\u21BA</button>
+            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml3(field.label)} to default">\u21BA</button>
         </div>`;
     const control = row.querySelector(`#${id}`);
     const resetButton = row.querySelector(".slt-field-reset");
@@ -11793,7 +11566,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const categoryEl = document.createElement("div");
       categoryEl.className = "slt-settings-category";
       categoryEl.setAttribute("data-slt-category", category.id);
-      categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml2(category.label)}</div>`;
+      categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml3(category.label)}</div>`;
       for (const section of sections) {
         const fields = SETTINGS_SCHEMA.filter((field) => field.section === section);
         if (fields.length === 0)
@@ -11801,7 +11574,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         const sectionEl = document.createElement("div");
         sectionEl.className = "slt-settings-section";
         sectionEl.setAttribute("data-slt-section", section);
-        sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml2(section)}</div>`;
+        sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml3(section)}</div>`;
         for (const field of fields) {
           const handle = buildModalField(field, refresh);
           modalFieldHandles.push(handle);
@@ -12325,7 +12098,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 }
             }
         </style>
-        
+
         <div id="slt-settings-panel-mount"></div>
 
         ${renderConnectionStatusMarkup()}
@@ -12340,7 +12113,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
             </div>
         </div>
-        
+
         <div class="slt-modal-footer">
             <div>
                 <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
@@ -12356,7 +12129,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
             </div>
         </div>
-        
+
         <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
     const settingsMount = container.querySelector("#slt-settings-panel-mount");
@@ -12521,7 +12294,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return api;
     }
   }
-  function escapeHtml2(value) {
+  function escapeHtml3(value) {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function getTrackIdFromUri2(trackUri) {
@@ -12598,19 +12371,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const metrics = trackCache.metrics;
     const providerLabel = formatApiProviderLabel(trackCache.api);
     const modelLabel = metrics?.model;
-    const renderInfoCell = (label, value, title) => `<div class="slt-lyrics-info-cell"${title ? ` title="${escapeHtml2(title)}"` : ""}>
-            <span class="slt-lyrics-info-label">${escapeHtml2(label)}</span>
-            <span class="slt-lyrics-info-value">${escapeHtml2(value)}</span>
+    const renderInfoCell = (label, value, title) => `<div class="slt-lyrics-info-cell"${title ? ` title="${escapeHtml3(title)}"` : ""}>
+            <span class="slt-lyrics-info-label">${escapeHtml3(label)}</span>
+            <span class="slt-lyrics-info-value">${escapeHtml3(value)}</span>
         </div>`;
     const renderRows = (sourceLines) => {
       const maxLines = Math.max(sourceLines.length, translatedLines.length);
       return Array.from({ length: maxLines }).map((_, idx) => {
-        const sourceText = escapeHtml2(sourceLines[idx] ?? "");
-        const translatedText = escapeHtml2(translatedLines[idx] ?? "");
+        const sourceText = escapeHtml3(sourceLines[idx] ?? "");
+        const translatedText = escapeHtml3(translatedLines[idx] ?? "");
         return `
                 <div class="slt-lyrics-row">
                     <div class="slt-lyrics-col">${sourceText || "&nbsp;"}</div>
-                    <div class="slt-lyrics-col">${translatedText || "&nbsp;"}</div>
+                    <div class="slt-lyrics-col slt-lyrics-col-editable" contenteditable="plaintext-only" spellcheck="false" data-line-index="${idx}" role="textbox" aria-label="Translated line ${idx + 1}">${translatedText}</div>
                 </div>
             `;
       }).join("");
@@ -12746,6 +12519,37 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 color: var(--spice-subtext);
                 font-weight: 700;
             }
+            .slt-lyrics-col-editable {
+                min-height: 19px;
+                padding: 2px 6px;
+                margin: -2px -6px;
+                border-radius: 4px;
+                border: 1px solid transparent;
+                cursor: text;
+                transition: background 0.15s, border-color 0.15s;
+            }
+            .slt-lyrics-col-editable:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: var(--slt-hairline-strong);
+            }
+            .slt-lyrics-col-editable:focus {
+                outline: none;
+                background: rgba(255, 255, 255, 0.08);
+                border-color: #1db954;
+            }
+            .slt-lyrics-col-editable.slt-line-dirty {
+                border-color: rgba(29, 185, 84, 0.55);
+            }
+            .slt-lyrics-save[disabled] {
+                opacity: 0.4;
+                cursor: default;
+            }
+            .slt-lyrics-edit-hint {
+                font-size: 11px;
+                color: var(--spice-subtext);
+                align-self: center;
+                margin-right: auto;
+            }
             @media (max-width: 620px) {
                 .slt-lyrics-viewer {
                     width: min(100%, 90vw);
@@ -12760,6 +12564,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             }
         </style>
         <div class="slt-lyrics-toolbar">
+            <span class="slt-lyrics-edit-hint">Click a translated line to edit it</span>
+            <button id="slt-lyrics-save" class="slt-lyrics-copy slt-lyrics-save" type="button" disabled>Save Edits</button>
             <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">Copy Lyrics</button>
             <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">&lt; Back to Cache</button>
         </div>
@@ -12772,11 +12578,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             ${renderInfoCell("Tokens (in/out)", metrics?.totalTokens ? `${formatTokenCount(metrics.inputTokens)} / ${formatTokenCount(metrics.outputTokens)}` : "\u2014", metrics?.totalTokens ? `Total ${formatTokenCount(metrics.totalTokens)} tokens` : void 0)}
             ${renderInfoCell("Cached", formatDate(trackCache.timestamp))}
         </div>
-        <div class="slt-lyrics-header">Track ID: ${escapeHtml2(getTrackIdFromUri2(trackUri))}</div>
+        <div class="slt-lyrics-header">Track ID: ${escapeHtml3(getTrackIdFromUri2(trackUri))}</div>
         <div class="slt-lyrics-grid">
             <div class="slt-lyrics-row">
-                <div class="slt-lyrics-col slt-lyrics-head" id="slt-lyrics-source-heading">${escapeHtml2(sourceLang.toUpperCase())} (Source)</div>
-                <div class="slt-lyrics-col slt-lyrics-head">${escapeHtml2(targetLang.toUpperCase())} (Translated)</div>
+                <div class="slt-lyrics-col slt-lyrics-head" id="slt-lyrics-source-heading">${escapeHtml3(sourceLang.toUpperCase())} (Source)</div>
+                <div class="slt-lyrics-col slt-lyrics-head">${escapeHtml3(targetLang.toUpperCase())} (Translated)</div>
             </div>
             <div id="slt-lyrics-rows">
                 ${renderRows([]) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No cached lines</div><div class="slt-lyrics-col">No cached lines</div></div>'}
@@ -12841,19 +12647,86 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }, 2e3);
       }
     });
+    const saveBtn = content.querySelector("#slt-lyrics-save");
+    let hasUnsavedEdits = false;
+    const bindEditableCells = () => {
+      content.querySelectorAll(".slt-lyrics-col-editable").forEach((node) => {
+        const cell = node;
+        if (cell.dataset.bound === "true")
+          return;
+        cell.dataset.bound = "true";
+        cell.addEventListener("input", () => {
+          cell.classList.add("slt-line-dirty");
+          hasUnsavedEdits = true;
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save Edits";
+            saveBtn.classList.remove("slt-copied");
+          }
+        });
+        cell.addEventListener("keydown", (event) => {
+          const keyEvent = event;
+          if (keyEvent.key === "Enter" && !keyEvent.shiftKey) {
+            keyEvent.preventDefault();
+            cell.blur();
+          }
+        });
+      });
+    };
+    const renderInto = (sourceLines, emptyMessage) => {
+      if (hasUnsavedEdits)
+        return;
+      const rowsContainer = content.querySelector("#slt-lyrics-rows");
+      if (!rowsContainer)
+        return;
+      rowsContainer.innerHTML = renderRows(sourceLines) || emptyMessage;
+      bindEditableCells();
+    };
+    bindEditableCells();
+    saveBtn?.addEventListener("click", () => {
+      const cells = Array.from(content.querySelectorAll(".slt-lyrics-col-editable"));
+      const editedLines = cells.sort((a, b) => Number(a.dataset.lineIndex || 0) - Number(b.dataset.lineIndex || 0)).map((cell) => (cell.textContent || "").replace(/\s+/g, " ").trim());
+      while (editedLines.length > 0 && !editedLines[editedLines.length - 1])
+        editedLines.pop();
+      if (editedLines.length === 0) {
+        saveBtn.textContent = "Nothing to save";
+        setTimeout(() => {
+          saveBtn.textContent = "Save Edits";
+        }, 2e3);
+        return;
+      }
+      const saved = updateTrackCacheLines(trackUri, targetLang, editedLines);
+      if (!saved) {
+        saveBtn.textContent = "Save failed";
+        setTimeout(() => {
+          saveBtn.textContent = "Save Edits";
+        }, 2500);
+        return;
+      }
+      translatedLines.length = 0;
+      translatedLines.push(...editedLines);
+      hasUnsavedEdits = false;
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saved!";
+      saveBtn.classList.add("slt-copied");
+      content.querySelectorAll(".slt-line-dirty").forEach((el) => el.classList.remove("slt-line-dirty"));
+      setTimeout(() => {
+        saveBtn.textContent = "Save Edits";
+        saveBtn.classList.remove("slt-copied");
+      }, 2e3);
+      if (getCurrentTrackUri() === trackUri) {
+        forceRetranslate();
+      }
+    });
     const cachedSourceLines = trackCache.sourceLines || [];
     if (cachedSourceLines.length > 0) {
-      const rowsContainer = content.querySelector("#slt-lyrics-rows");
-      if (rowsContainer) {
-        rowsContainer.innerHTML = renderRows(cachedSourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
-      }
+      renderInto(cachedSourceLines, '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>');
     }
     try {
       const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
       const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : cachedSourceLines;
-      const rowsContainer = content.querySelector("#slt-lyrics-rows");
-      if (rowsContainer && sourceLines.length > 0) {
-        rowsContainer.innerHTML = renderRows(sourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
+      if (sourceLines.length > 0) {
+        renderInto(sourceLines, '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>');
       }
       if (sourceLyrics?.language) {
         const sourceHeading = content.querySelector("#slt-lyrics-source-heading");
@@ -12863,10 +12736,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }
     } catch (e) {
       if (cachedSourceLines.length === 0) {
-        const rowsContainer = content.querySelector("#slt-lyrics-rows");
-        if (rowsContainer) {
-          rowsContainer.innerHTML = renderRows([]);
-        }
+        renderInto([], renderRows([]));
       }
     }
   }
@@ -13107,7 +12977,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         <div class="slt-cache-toolbar">
             <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
-        
+
         <div class="slt-cache-stats">
             <div class="slt-stat">
                 <span class="slt-stat-label">Cached Tracks</span>
@@ -13126,7 +12996,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 <span class="slt-stat-value">${stats.oldestTimestamp ? formatDate(stats.oldestTimestamp) : "N/A"}</span>
             </div>
         </div>
-        
+
         <div class="slt-cache-list" id="slt-cache-list">
             ${cachedTracks.length === 0 ? '<div class="slt-empty-cache">No cached translations</div>' : cachedTracks.sort((a, b) => b.timestamp - a.timestamp).map((track, index) => {
       const trackId = getTrackIdFromUri2(track.trackUri);
@@ -13146,23 +13016,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         metricsPills.push(`<span class="slt-metric-pill" title="API calls">\u21BB ${track.metrics.apiCalls}</span>`);
       }
       return `
-                        <div class="slt-cache-item" data-uri="${escapeHtml2(track.trackUri)}" data-lang="${escapeHtml2(track.targetLang)}">
+                        <div class="slt-cache-item" data-uri="${escapeHtml3(track.trackUri)}" data-lang="${escapeHtml3(track.targetLang)}">
                             <div class="slt-cache-item-info">
-                                <span class="slt-cache-item-title">${escapeHtml2(displayTitle)}</span>
-                                ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml2(displayArtist)}</span>` : ""}
-                                <span class="slt-cache-item-meta">${escapeHtml2(track.sourceLang)} \u2192 ${escapeHtml2(track.targetLang)} \xB7 ${track.lineCount} lines \xB7 ${formatDate(track.timestamp)}</span>
-                                <span class="slt-cache-item-provider"><span class="slt-provider-chip">${escapeHtml2(providerBadge)}</span>${metricsPills.join("")}</span>
+                                <span class="slt-cache-item-title">${escapeHtml3(displayTitle)}</span>
+                                ${displayArtist ? `<span class="slt-cache-item-artist">${escapeHtml3(displayArtist)}</span>` : ""}
+                                <span class="slt-cache-item-meta">${escapeHtml3(track.sourceLang)} \u2192 ${escapeHtml3(track.targetLang)} \xB7 ${track.lineCount} lines \xB7 ${formatDate(track.timestamp)}</span>
+                                <span class="slt-cache-item-provider"><span class="slt-provider-chip">${escapeHtml3(providerBadge)}</span>${metricsPills.join("")}</span>
                             </div>
                             <div class="slt-cache-item-actions">
                                 <button class="slt-cache-action slt-cache-play" data-index="${index}">Play</button>
-                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${escapeHtml2(track.sourceLang)}">View Lyrics</button>
+                                <button class="slt-cache-action slt-cache-view-lyrics" data-index="${index}" data-source-lang="${escapeHtml3(track.sourceLang)}">View Lyrics</button>
                                 <button class="slt-cache-delete" data-index="${index}">Delete</button>
                             </div>
                         </div>
                     `;
     }).join("")}
         </div>
-        
+
         ${cachedTracks.length > 0 ? `
         <div class="slt-cache-actions">
             <button class="slt-cache-delete-all" id="slt-delete-all-cache">Delete All Cached Translations</button>
@@ -13586,7 +13456,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         <div class="slt-cache-toolbar">
             <button id="slt-sl-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
-        
+
         <div class="slt-cache-stats">
             <div class="slt-stat">
                 <span class="slt-stat-label">Cached Requests</span>
@@ -13597,7 +13467,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes(totalSize)}</span>
             </div>
         </div>
-        
+
         <div class="slt-cache-list" id="slt-sl-cache-list">
             ${cacheItems.length === 0 ? '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>' : cacheItems.map((item, index) => {
         const displayTitle = item.isTrackId ? "Track ID: " + item.trackId : item.url.pathname;
@@ -13615,16 +13485,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         const metaText = detailParts.join(" \xB7 ");
         const chips = [];
         if (item.source)
-          chips.push(`<span class="slt-provider-chip">${escapeHtml2(item.source)}</span>`);
+          chips.push(`<span class="slt-provider-chip">${escapeHtml3(item.source)}</span>`);
         if (item.type && item.type !== "Unknown")
-          chips.push(`<span class="slt-metric-pill" title="Lyric type">${escapeHtml2(item.type)}</span>`);
+          chips.push(`<span class="slt-metric-pill" title="Lyric type">${escapeHtml3(item.type)}</span>`);
         if (item.lang)
-          chips.push(`<span class="slt-metric-pill" title="Language">${escapeHtml2(String(item.lang).toUpperCase())}</span>`);
+          chips.push(`<span class="slt-metric-pill" title="Language">${escapeHtml3(String(item.lang).toUpperCase())}</span>`);
         return `
-                    <div class="slt-cache-item" data-url="${escapeHtml2(item.req.url)}" data-cache="${escapeHtml2(item.cacheName)}" data-size="${item.sizeBytes}" data-track="${item.isTrackId ? item.trackId : ""}" data-index="${index}">
+                    <div class="slt-cache-item" data-url="${escapeHtml3(item.req.url)}" data-cache="${escapeHtml3(item.cacheName)}" data-size="${item.sizeBytes}" data-track="${item.isTrackId ? item.trackId : ""}" data-index="${index}">
                         <div class="slt-cache-item-info">
-                            <span class="slt-cache-item-title">${escapeHtml2(displayTitle)}</span>
-                            <span class="slt-cache-item-meta">${escapeHtml2(metaText)}</span>
+                            <span class="slt-cache-item-title">${escapeHtml3(displayTitle)}</span>
+                            <span class="slt-cache-item-meta">${escapeHtml3(metaText)}</span>
                             ${chips.length ? `<span class="slt-cache-item-provider">${chips.join("")}</span>` : ""}
                         </div>
                         <div class="slt-cache-item-actions">
@@ -13636,7 +13506,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 `;
       }).join("")}
         </div>
-        
+
         ${cacheItems.length > 0 ? `
         <div class="slt-cache-actions">
             <button class="slt-cache-delete-all" id="slt-sl-delete-all-cache">Delete All Spicy Lyrics Cache</button>
@@ -13758,9 +13628,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       prettyJson = prettyJson.slice(0, JSON_VIEW_LIMIT) + `
 \u2026 (truncated at ${formatBytes(JSON_VIEW_LIMIT)} of ${formatBytes(originalJsonLength)})`;
     }
-    const renderInfoCell = (label, value, title) => `<div class="slt-lyrics-info-cell"${title ? ` title="${escapeHtml2(title)}"` : ""}>
-            <span class="slt-lyrics-info-label">${escapeHtml2(label)}</span>
-            <span class="slt-lyrics-info-value">${escapeHtml2(value)}</span>
+    const renderInfoCell = (label, value, title) => `<div class="slt-lyrics-info-cell"${title ? ` title="${escapeHtml3(title)}"` : ""}>
+            <span class="slt-lyrics-info-label">${escapeHtml3(label)}</span>
+            <span class="slt-lyrics-info-value">${escapeHtml3(value)}</span>
         </div>`;
     const displayTitle = item.isTrackId && item.trackId ? `Track ID: ${item.trackId}` : item.url.pathname;
     const trackLen = item.trackLengthMs ? formatTrackLength(item.trackLengthMs) : "";
@@ -13850,10 +13720,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             ${renderInfoCell("Size", formatBytes(item.sizeBytes))}
             ${renderInfoCell("Cached", item.cachedAt ? formatDate(item.cachedAt) : "\u2014")}
         </div>
-        <div class="slt-lyrics-header">${escapeHtml2(displayTitle)} \xB7 ${escapeHtml2(item.url.hostname)}</div>
-        ${item.firstLineSample ? `<div class="slt-lyrics-sample"><span class="slt-lyrics-sample-label">First Line</span>${escapeHtml2(item.firstLineSample)}</div>` : ""}
+        <div class="slt-lyrics-header">${escapeHtml3(displayTitle)} \xB7 ${escapeHtml3(item.url.hostname)}</div>
+        ${item.firstLineSample ? `<div class="slt-lyrics-sample"><span class="slt-lyrics-sample-label">First Line</span>${escapeHtml3(item.firstLineSample)}</div>` : ""}
         ${prettyJsonTruncated ? `<div class="slt-lyrics-sample" style="color: #f0b86e;"><span class="slt-lyrics-sample-label">Notice</span>JSON preview truncated for performance. Use Copy JSON to copy the full ${formatBytes(originalJsonLength)} payload.</div>` : ""}
-        <div class="slt-json-box" id="slt-sl-entry-json">${escapeHtml2(prettyJson || "(empty response)")}</div>
+        <div class="slt-json-box" id="slt-sl-entry-json">${escapeHtml3(prettyJson || "(empty response)")}</div>
     `;
     if (Spicetify.PopupModal) {
       displayModal({

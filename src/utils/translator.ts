@@ -623,18 +623,18 @@ async function retryWithBackoff<T>(
     baseDelay: number = RATE_LIMIT.minDelayMs
 ): Promise<T> {
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
             await rateLimitedDelay();
             return await fn();
         } catch (error) {
             lastError = error as Error;
-            
+
             if (isNonRetryableProviderError(error)) {
                 throw error;
             }
-            
+
             if (attempt < maxRetries) {
                 const delay = Math.min(
                     baseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
@@ -644,7 +644,7 @@ async function retryWithBackoff<T>(
             }
         }
     }
-    
+
     throw lastError || new Error('All retry attempts failed');
 }
 
@@ -859,7 +859,7 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
     const cache = storage.getJSON<TranslationCache>('translation-cache', {});
     const key = `${targetLang}:${text}`;
     const cached = cache[key];
-    
+
     if (cached) {
         if (typeof cached.timestamp === 'number' && Date.now() - cached.timestamp < CACHE_EXPIRY) {
             const normalized = normalizeTranslatedLine(cached.translation || '');
@@ -899,7 +899,7 @@ function getCachedTranslation(text: string, targetLang: string): string | null {
         pruneTranslationCache(cache);
         storage.setJSON('translation-cache', cache);
     }
-    
+
     return null;
 }
 
@@ -964,7 +964,7 @@ async function translateWithGoogle(text: string, targetLang: string, sourceLang?
             return { translation, detectedLang };
         }
     }
-    
+
     throw new Error('Invalid response from Google Translate');
 }
 
@@ -1032,11 +1032,11 @@ async function translateWithDeepL(text: string, targetLang: string): Promise<{ t
     if (!deeplApiKey) {
         throw createProviderConfigError('DeepL API key not configured. Set it in Settings.');
     }
-    
+
     const isFreePlan = deeplApiKey.endsWith(':fx');
     const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
     const url = `${baseUrl}/v2/translate`;
-    
+
     const data = await postJsonProvider(
         getSpicetifyCorsProxyUrl(url),
         buildDeepLBody([text], targetLang),
@@ -1051,7 +1051,7 @@ async function translateWithDeepL(text: string, targetLang: string): Promise<{ t
             detectedLang: data.translations[0].detected_source_language?.toLowerCase()
         };
     }
-    
+
     throw new Error('Invalid response from DeepL API');
 }
 
@@ -1059,7 +1059,7 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
     if (!openaiApiKey) {
         throw createProviderConfigError('OpenAI API key not configured. Set it in Settings.');
     }
-    
+
     const langName = getTranslationLanguageName(targetLang);
 
     const data = await postJsonProvider(
@@ -2036,27 +2036,27 @@ export async function translateText(text: string, targetLang: string, sourceLang
         const result = await translateWithGoogle(text, targetLang, sourceLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
-    
+
     const tryLibreTranslate = async () => {
         const translation = await translateWithLibreTranslate(text, targetLang);
         return { translation, detectedLang: undefined };
     };
-    
+
     const tryCustom = async () => {
         const result = await translateWithCustomApi(text, targetLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
-    
+
     const tryDeepL = async () => {
         const result = await translateWithDeepL(text, targetLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
-    
+
     const tryOpenAI = async () => {
         const result = await translateWithOpenAI(text, targetLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
     };
-    
+
     const tryGemini = async () => {
         const result = await translateWithGemini(text, targetLang);
         return { translation: result.translation, detectedLang: result.detectedLang };
@@ -2074,7 +2074,7 @@ export async function translateText(text: string, targetLang: string, sourceLang
 
     let primaryApi: () => Promise<{ translation: string; detectedLang?: string }>;
     let fallbackApis: { name: string, fn: () => Promise<{ translation: string; detectedLang?: string }> }[] = [];
-    
+
     switch (preferredApi) {
         case 'libretranslate':
             primaryApi = tryLibreTranslate;
@@ -2110,10 +2110,10 @@ export async function translateText(text: string, targetLang: string, sourceLang
             fallbackApis = [{ name: 'libretranslate', fn: tryLibreTranslate }];
             break;
     }
-    
+
     try {
         const result = await primaryApi();
-        
+
         cacheTranslation(text, targetLang, result.translation, preferredApi);
         return {
             originalText: text,
@@ -2131,11 +2131,11 @@ export async function translateText(text: string, targetLang: string, sourceLang
             throw new NonRetryableProviderError(message);
         }
         warn(`Primary API (${preferredApi}) failed, trying fallbacks:`, primaryError);
-        
+
         for (const fallbackApi of fallbackApis) {
             try {
                 const result = await fallbackApi.fn();
-                
+
                 cacheTranslation(text, targetLang, result.translation, fallbackApi.name);
                 return {
                     originalText: text,
@@ -2149,7 +2149,7 @@ export async function translateText(text: string, targetLang: string, sourceLang
                 continue;
             }
         }
-        
+
         logError('All translation services failed');
         throw new Error('Translation failed. Please try again later.');
     }
@@ -2302,7 +2302,7 @@ async function translateLyricsInner(
             }
         }
     }
-    
+
     const results: TranslationResult[] = [];
     const cachedResults: Map<number, TranslationResult> = new Map();
     const uncachedLines: { index: number; text: string }[] = [];
@@ -2335,7 +2335,7 @@ async function translateLyricsInner(
             }
         }
     });
-    
+
     if (uncachedLines.length === 0) {
         const finalResults = lines.map((_, index) => cachedResults.get(index)!);
         const someTranslated = finalResults.some(r => r.wasTranslated);
@@ -2358,9 +2358,9 @@ async function translateLyricsInner(
 
         return finalResults;
     }
-    
+
     let detectedLang = detectedSourceLang || 'auto';
-    
+
     try {
         let translatedLines: string[] | null = null;
 
@@ -2526,7 +2526,7 @@ async function translateLyricsInner(
         storage.setJSON('translation-cache', repairCache);
     } catch (error) {
         logError('Batch translation failed (fallback disabled to prevent rate limits):', error);
-        
+
         for (const item of uncachedLines) {
             cachedResults.set(item.index, {
                 originalText: item.text,
@@ -2537,7 +2537,7 @@ async function translateLyricsInner(
             });
         }
     }
-    
+
     for (let i = 0; i < lines.length; i++) {
         results.push(cachedResults.get(i)!);
     }
@@ -2588,9 +2588,9 @@ export function clearTranslationCache(): void {
     clearAllTrackCache();
 }
 
-export function getCacheStats(): { 
-    entries: number; 
-    oldestTimestamp: number | null; 
+export function getCacheStats(): {
+    entries: number;
+    oldestTimestamp: number | null;
     sizeBytes: number;
     trackCount?: number;
     totalLines?: number;
@@ -2600,22 +2600,22 @@ export function getCacheStats(): {
         storage.setJSON('translation-cache', lineCache);
     }
     const lineKeys = Object.keys(lineCache);
-    
+
     const trackStats = getTrackCacheStats();
-    
+
     let lineSizeBytes = 0;
     let lineOldestTimestamp: number | null = null;
-    
+
     if (lineKeys.length > 0) {
         const timestamps = lineKeys.map(k => lineCache[k].timestamp);
         lineSizeBytes = JSON.stringify(lineCache).length * 2;
         lineOldestTimestamp = Math.min(...timestamps);
     }
-    
+
     const oldestTimestamp = lineOldestTimestamp !== null && trackStats.oldestTimestamp !== null
         ? Math.min(lineOldestTimestamp, trackStats.oldestTimestamp)
         : lineOldestTimestamp || trackStats.oldestTimestamp;
-    
+
     return {
         entries: lineKeys.length + trackStats.trackCount,
         oldestTimestamp,
@@ -2631,7 +2631,7 @@ export function getCachedTranslations(): Array<{ original: string; translated: s
         storage.setJSON('translation-cache', cache);
     }
     const entries: Array<{ original: string; translated: string; language: string; date: Date; api?: string }> = [];
-    
+
     for (const key of Object.keys(cache)) {
         const [lang, ...textParts] = key.split(':');
         const original = textParts.join(':');
@@ -2643,16 +2643,16 @@ export function getCachedTranslations(): Array<{ original: string; translated: s
             api: cache[key].api
         });
     }
-    
+
     entries.sort((a, b) => b.date.getTime() - a.date.getTime());
-    
+
     return entries;
 }
 
 export function deleteCachedTranslation(original: string, language: string): boolean {
     const cache = storage.getJSON<TranslationCache>('translation-cache', {});
     const key = `${language}:${original}`;
-    
+
     if (cache[key]) {
         delete cache[key];
         storage.setJSON('translation-cache', cache);

@@ -140,7 +140,7 @@ function updateUI(): void {
     const dot = containerElement.querySelector('.slt-ci-dot');
     const pingEl = containerElement.querySelector('.slt-ci-ping');
     const totalCountEl = containerElement.querySelector('.slt-ci-total-count');
-    
+
     if (!button || !dot) return;
 
     dot.classList.remove('slt-ci-connecting', 'slt-ci-connected', 'slt-ci-error', 'slt-ci-great', 'slt-ci-ok', 'slt-ci-bad', 'slt-ci-horrible');
@@ -186,7 +186,7 @@ function updateUI(): void {
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout: number = CONNECTION_TIMEOUT): Promise<Response> {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
         const response = await fetch(url, { ...options, signal: controller.signal });
         clearTimeout(id);
@@ -211,7 +211,7 @@ async function measureLatency(): Promise<number | null> {
 
 async function measureLatencyAccurate(): Promise<number | null> {
     const samples: number[] = [];
-    
+
     for (let i = 0; i < LATENCY_SAMPLES; i++) {
         if (i > 0) {
             await new Promise(resolve => setTimeout(resolve, SAMPLE_DELAY));
@@ -221,13 +221,13 @@ async function measureLatencyAccurate(): Promise<number | null> {
             samples.push(latency);
         }
     }
-    
+
     if (samples.length === 0) return null;
     if (samples.length === 1) return samples[0];
-    
+
     samples.sort((a, b) => a - b);
     const trimmed = samples.slice(0, -1);
-    
+
     const avg = trimmed.reduce((sum, val) => sum + val, 0) / trimmed.length;
     return Math.round(avg);
 }
@@ -243,14 +243,14 @@ async function sendHeartbeat(): Promise<boolean> {
 
         const response = await fetchWithTimeout(`${API_BASE}?${params}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
+
         const data = await response.json();
         if (data.success) {
             indicatorState.sessionId = data.sessionId || indicatorState.sessionId;
             indicatorState.totalUsers = data.totalUsers || 0;
             indicatorState.region = data.region || '';
             indicatorState.lastHeartbeat = Date.now();
-            
+
             if (indicatorState.state !== 'connected') {
                 indicatorState.state = 'connected';
                 updateUI();
@@ -276,16 +276,16 @@ async function connect(): Promise<boolean> {
 
         const response = await fetchWithTimeout(`${API_BASE}?${params}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             indicatorState.sessionId = data.sessionId;
             indicatorState.totalUsers = data.totalUsers || 0;
             indicatorState.region = data.region || '';
             indicatorState.state = 'connected';
             indicatorState.lastHeartbeat = Date.now();
-            
+
             setTimeout(async () => {
                 const latency = await measureLatencyAccurate();
                 if (latency !== null) {
@@ -293,7 +293,7 @@ async function connect(): Promise<boolean> {
                     updateUI();
                 }
             }, 1000);
-            
+
             updateUI();
             return true;
         }
@@ -304,7 +304,7 @@ async function connect(): Promise<boolean> {
         }
         indicatorState.state = 'error';
         updateUI();
-        
+
         setTimeout(() => {
             if (indicatorState.state === 'error') {
                 indicatorState.state = 'reconnecting';
@@ -312,7 +312,7 @@ async function connect(): Promise<boolean> {
                 connect();
             }
         }, 5000);
-        
+
         return false;
     }
 }
@@ -368,7 +368,7 @@ function getIndicatorContainer(): HTMLElement | null {
 
     const userWidget = document.querySelector('.main-userWidget-box');
     if (userWidget && userWidget.parentNode) return userWidget.parentNode as HTMLElement;
-    
+
     const historyButtons = document.querySelector('.main-topBar-historyButtons');
     if (historyButtons && historyButtons.parentNode) return historyButtons.parentNode as HTMLElement;
 
@@ -432,16 +432,16 @@ function removeFromDOM(): void {
 
 export async function initConnectionIndicator(): Promise<void> {
     if (indicatorState.isInitialized) return;
-    
+
     const appended = await appendToDOM();
     if (!appended) return;
 
     indicatorState.isInitialized = true;
-    
+
     await new Promise(resolve => setTimeout(resolve, INITIAL_DELAY));
-    
+
     const connected = await connect();
-    
+
     if (connected) {
         startPeriodicChecks();
     }
@@ -458,7 +458,7 @@ export async function initConnectionIndicator(): Promise<void> {
                         updateUI();
                     }
                 }, LATENCY_CHECK_INTERVAL);
-                
+
                 setTimeout(async () => {
                     const latency = await measureLatencyAccurate();
                     if (latency !== null) {

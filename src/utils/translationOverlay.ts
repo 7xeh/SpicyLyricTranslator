@@ -24,13 +24,15 @@ export interface OverlayConfig {
     opacity: number;
     fontSize: number;
     syncWordHighlight: boolean;
+    showRomanization: boolean;
 }
 
 let currentConfig: OverlayConfig = {
     mode: 'replace',
     opacity: 0.85,
     fontSize: 0.9,
-    syncWordHighlight: true
+    syncWordHighlight: true,
+    showRomanization: false
 };
 
 let isOverlayEnabled = false;
@@ -101,31 +103,49 @@ function hasContentData(): boolean {
 function rebuildPerLineMaps(lines: ArrayLike<Element>): void {
     if (!hasContentData()) return;
 
-    translationMap = new Map();
-    romanizationMap = new Map();
-    originalTextMap = new Map();
-    qualityMap = new Map();
-    lineTimingData = [];
+    const nextTranslation = new Map<number, string>();
+    const nextRomanization = new Map<number, string>();
+    const nextOriginal = new Map<number, string>();
+    const nextQuality = new Map<number, TranslationQualityMeta>();
+    const nextTiming: LyricLineData[] = [];
+
+    let contentLines = 0;
+    let matchedLines = 0;
 
     for (let index = 0; index < lines.length; index++) {
         const text = extractLineText(lines[index]);
         if (!text) continue;
+        contentLines++;
 
         const t = lookupByContent(translationByContent, text);
-        if (t) translationMap.set(index, t);
+        if (t) {
+            nextTranslation.set(index, t);
+            matchedLines++;
+        }
 
         const r = lookupByContent(romanizationByContent, text);
-        if (r) romanizationMap.set(index, r);
+        if (r) nextRomanization.set(index, r);
 
         const o = lookupByContent(originalByContent, text);
-        if (o) originalTextMap.set(index, o);
+        if (o) nextOriginal.set(index, o);
 
         const q = lookupByContent(qualityByContent, text);
-        if (q) qualityMap.set(index, q);
+        if (q) nextQuality.set(index, q);
 
         const tim = lookupByContent(timingByContent, text);
-        if (tim) lineTimingData[index] = tim;
+        if (tim) nextTiming[index] = tim;
     }
+
+    const coverageCollapsed = contentLines > 0
+        && matchedLines * 2 < contentLines
+        && translationMap.size > matchedLines;
+    if (coverageCollapsed) return;
+
+    translationMap = nextTranslation;
+    romanizationMap = nextRomanization;
+    originalTextMap = nextOriginal;
+    qualityMap = nextQuality;
+    lineTimingData = nextTiming;
 }
 
 export function setTranslationContentData(data: Map<string, string>): void {
@@ -154,7 +174,7 @@ function computeRenderSignature(lines: ArrayLike<Element>): string {
     const parts: string[] = [
         currentConfig.mode,
         currentConfig.syncWordHighlight ? '1' : '0',
-        storage.get('vocabulary-mode') === 'true' ? '1' : '0'
+        currentConfig.showRomanization ? '1' : '0'
     ];
     for (let i = 0; i < lines.length; i++) {
         const text = extractLineText(lines[i]);
@@ -181,16 +201,6 @@ interface DocCache {
     lastActiveIndex: number;
 }
 
-export type VocabularyPairConfidence = 'high' | 'medium' | 'low';
-
-export interface VocabularyPairChunk {
-    original: string;
-    translated: string;
-    confidence: VocabularyPairConfidence;
-    sourceIndex: number;
-    translatedStart: number;
-}
-
 const docCacheMap = new WeakMap<Document, DocCache>();
 
 function getDocCache(doc: Document): DocCache {
@@ -206,17 +216,14 @@ function resetDocCache(doc: Document): void {
     docCacheMap.set(doc, { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 });
 }
 
-function isLearningModeActive(): boolean {
-    return storage.get('vocabulary-mode') === 'true';
-}
-
 function buildRomanizationLine(
     doc: Document,
     index: number,
     timingInfo: LyricLineData | undefined,
-    line: Element
+    line: Element,
+    text?: string
 ): HTMLElement | null {
-    const romanized = romanizationMap.get(index);
+    const romanized = text !== undefined ? text : romanizationMap.get(index);
     if (!romanized || !romanized.trim()) return null;
     if (timingInfo?.isInstrumental) return null;
 
@@ -234,45 +241,48 @@ function buildRomanizationLine(
     return romanEl;
 }
 
-function buildOriginalLine(
-    doc: Document,
-    index: number,
-    timingInfo: LyricLineData | undefined,
-    line: Element
-): HTMLElement | null {
-    const original = originalTextMap.get(index);
-    if (!original || !original.trim()) return null;
-    if (timingInfo?.isInstrumental) return null;
-
-    const origEl = doc.createElement('div');
-    origEl.className = 'slt-original-line';
-    origEl.dataset.forLine = index.toString();
-    origEl.dataset.lineIndex = index.toString();
-    origEl.textContent = original;
-
-    if (timingInfo) {
-        origEl.dataset.startTime = timingInfo.startTime.toString();
-        origEl.dataset.endTime = timingInfo.endTime.toString();
+function siblingSkippingRomanization(el: Element, dir: 'next' | 'prev'): HTMLElement | null {
+    let cur = (dir === 'next' ? el.nextElementSibling : el.previousElementSibling) as HTMLElement | null;
+    while (cur && cur.classList.contains('slt-romanization-line')) {
+        cur = (dir === 'next' ? cur.nextElementSibling : cur.previousElementSibling) as HTMLElement | null;
     }
-    if (isLineActive(line)) origEl.classList.add('active');
-    return origEl;
+    return cur;
 }
 
-function domLineIsRomanized(line: Element, index: number): boolean {
-    const apiOriginal = originalTextMap.get(index);
-    const apiRomanized = romanizationMap.get(index);
-    if (!apiOriginal || !apiRomanized) return false;
+function romanizationCompanionText(line: Element, index: number, mode: OverlayMode): string {
+    if (!currentConfig.showRomanization) return '';
 
     const domText = extractLineText(line);
-    if (!domText) return false;
-
     const nDom = normalizeCompare(domText);
-    const nOrig = normalizeCompare(apiOriginal);
-    const nRom = normalizeCompare(apiRomanized);
 
-    if (nDom === nOrig) return false;
-    if (nDom === nRom) return true;
-    return nDom !== nOrig && nRom.length > 0 && nDom.length > 0;
+    const apiOriginal = (originalTextMap.get(index) || '').trim();
+    const apiRomanized = (romanizationMap.get(index) || '').trim();
+
+    if (mode === 'replace') {
+        if (apiRomanized) return apiRomanized;
+        if (isMostlyLatin(domText) && apiOriginal && normalizeCompare(apiOriginal) !== nDom) return domText;
+        return '';
+    }
+
+    const screenShowsRomanization = apiRomanized !== '' && normalizeCompare(apiRomanized) === nDom;
+    const candidates = screenShowsRomanization
+        ? [apiOriginal, apiRomanized]
+        : [apiRomanized, apiOriginal];
+
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        if (normalizeCompare(candidate) === nDom) continue;
+        return candidate;
+    }
+
+    return '';
+}
+
+function isMostlyLatin(text: string): boolean {
+    const letters = (text || '').replace(/[^\p{L}]/gu, '');
+    if (!letters) return false;
+    const latin = letters.replace(/[^\p{Script=Latin}]/gu, '');
+    return latin.length / letters.length >= 0.8;
 }
 
 function getPIPWindow(): Window | null {
@@ -459,8 +469,6 @@ function applyReplaceMode(doc: Document): void {
 
     const lyricsContainer = doc.querySelector('.SpicyLyricsScrollContainer');
     const lyricsType = lyricsContainer?.getAttribute('data-lyrics-type') || 'Line';
-    const learningMode = isLearningModeActive();
-    const vocabEnabled = storage.get('vocabulary-mode') === 'true';
 
     const claimed = new Set<Element>();
 
@@ -469,66 +477,61 @@ function applyReplaceMode(doc: Document): void {
         const translation = translationMap.get(index);
         const originalText = extractLineText(line);
 
-        let existing = line.nextElementSibling as HTMLElement | null;
+        let existing = siblingSkippingRomanization(line, 'next');
         if (existing && !existing.classList.contains('slt-replace-line')) existing = null;
-        let existingOrig = line.previousElementSibling as HTMLElement | null;
-        if (existingOrig && !existingOrig.classList.contains('slt-original-line')) existingOrig = null;
 
         const wants = !!translation && translation !== originalText && !!line.parentNode;
         if (!wants) {
             if (existing) existing.remove();
-            if (existingOrig) existingOrig.remove();
+            const staleRom = line.nextElementSibling as HTMLElement | null;
+            if (staleRom && staleRom.classList.contains('slt-romanization-line')) staleRom.remove();
             lineEl.classList.remove('slt-replace-hidden');
-            lineEl.classList.remove('slt-learning-hidden');
             return;
         }
 
         const timingInfo = lineTimingData[index];
         const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
         const hasRomanization = !!romanizationMap.get(index);
-        const hasApiOriginal = !!originalTextMap.get(index);
-        const domIsRomanized = domLineIsRomanized(line, index);
-        const learningActive = learningMode && hasRomanization && !(timingInfo?.isInstrumental || isBreak);
-        const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
-        const keepDomVisible = learningActive && !domIsRomanized;
         const isInstrumental = timingInfo?.isInstrumental || isBreak;
 
-        let pairBelowText = originalText;
-        if (domIsRomanized) {
-            pairBelowText = originalTextMap.get(index) || originalText;
-        } else {
-            pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
-        }
+        const romanizationText = isInstrumental ? '' : romanizationCompanionText(line, index, 'replace');
 
         const sig = [
             translation,
             isInstrumental ? 'I' : '',
-            domIsRomanized ? 'R' : '',
-            showInjectedOriginal ? 'O' : '',
-            keepDomVisible ? 'K' : '',
-            vocabEnabled ? 'V' : '',
             currentConfig.syncWordHighlight ? 'W' : '',
-            pairBelowText
+            romanizationText
         ].join('');
 
-        lineEl.classList.toggle('slt-replace-hidden', !keepDomVisible);
+        lineEl.classList.add('slt-replace-hidden');
         lineEl.dataset.sltIndex = index.toString();
 
-        const refreshOriginal = () => {
-            if (showInjectedOriginal) {
-                if (existingOrig) {
-                    existingOrig.dataset.lineIndex = index.toString();
-                    existingOrig.dataset.forLine = index.toString();
-                    claimed.add(existingOrig);
-                } else {
-                    const origEl = buildOriginalLine(doc, index, timingInfo, line);
-                    if (origEl) {
-                        line.parentNode!.insertBefore(origEl, line);
-                        claimed.add(origEl);
-                    }
+        const refreshRomanization = (anchor: HTMLElement): void => {
+            let existingRom = anchor.nextElementSibling as HTMLElement | null;
+            if (existingRom && !existingRom.classList.contains('slt-romanization-line')) existingRom = null;
+
+            if (!romanizationText) {
+                if (existingRom) existingRom.remove();
+                return;
+            }
+
+            if (existingRom) {
+                if (existingRom.textContent !== romanizationText) existingRom.textContent = romanizationText;
+                existingRom.dataset.lineIndex = index.toString();
+                existingRom.dataset.forLine = index.toString();
+                if (timingInfo) {
+                    existingRom.dataset.startTime = timingInfo.startTime.toString();
+                    existingRom.dataset.endTime = timingInfo.endTime.toString();
                 }
-            } else if (existingOrig) {
-                existingOrig.remove();
+                existingRom.classList.toggle('active', isLineActive(line));
+                claimed.add(existingRom);
+                return;
+            }
+
+            const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
+            if (romEl) {
+                anchor.parentNode!.insertBefore(romEl, anchor.nextSibling);
+                claimed.add(romEl);
             }
         };
 
@@ -540,12 +543,11 @@ function applyReplaceMode(doc: Document): void {
                 existing.dataset.endTime = timingInfo.endTime.toString();
             }
             claimed.add(existing);
-            refreshOriginal();
+            refreshRomanization(existing);
             return;
         }
 
         if (existing) existing.remove();
-        if (existingOrig) { existingOrig.remove(); existingOrig = null; }
 
         const replaceEl = doc.createElement('div');
         replaceEl.className = 'slt-replace-line slt-sync-translation';
@@ -558,10 +560,7 @@ function applyReplaceMode(doc: Document): void {
             replaceEl.textContent = '♪ ♪ ♪';
             replaceEl.classList.add('slt-replace-instrumental');
         } else {
-            if (vocabEnabled) {
-                replaceEl.classList.add('slt-vocab-line');
-                appendVocabularyPairs(doc, replaceEl, pairBelowText, translation, line, 'slt-replace-word');
-            } else if (currentConfig.syncWordHighlight) {
+            if (currentConfig.syncWordHighlight) {
                 appendTranslationWordSpans(doc, replaceEl, translation, line, 'slt-replace-word');
             } else {
                 replaceEl.textContent = translation;
@@ -576,7 +575,7 @@ function applyReplaceMode(doc: Document): void {
         replaceEl.addEventListener('click', (e) => {
             e.preventDefault();
 
-            const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word, .slt-vocab-pair');
+            const clickedWord = (e.target as HTMLElement)?.closest?.('.slt-replace-word');
             if (clickedWord) {
                 const originalIndex = parseInt((clickedWord as HTMLElement).dataset.originalIndex || '-1', 10);
                 const originalWords = getWordUnits(line);
@@ -606,7 +605,7 @@ function applyReplaceMode(doc: Document): void {
         line.parentNode!.insertBefore(replaceEl, line.nextSibling);
         claimed.add(replaceEl);
 
-        refreshOriginal();
+        refreshRomanization(replaceEl);
     });
 
     doc.querySelectorAll('.slt-replace-line, .slt-original-line, .slt-romanization-line').forEach(el => {
@@ -654,363 +653,6 @@ function appendTranslationWordSpans(
         }
         container.appendChild(span);
     });
-}
-
-const JAPANESE_TEXT_REGEX = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u;
-const JAPANESE_FINAL_PARTICLES = ['かな', 'よね', 'だよ', 'だね', 'ね', 'な', 'よ', 'か', 'さ'];
-const JAPANESE_STATE_PREFIXES = [
-    'このまま',
-    'そのまま',
-    'あのまま',
-    'こんな',
-    'そんな',
-    'あんな',
-    'ここ',
-    'そこ',
-    'あそこ',
-    'これ',
-    'それ',
-    'あれ'
-];
-
-function normalizeVocabularyToken(text: string): string {
-    return (text || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}?]+/gu, '')
-        .trim();
-}
-
-function splitTranslatedWords(text: string): string[] {
-    return (text || '').trim().split(/\s+/).filter(Boolean);
-}
-
-function splitJapaneseChunk(chunk: string): string[] {
-    let rest = chunk.trim();
-    const parts: string[] = [];
-    let finalParticle = '';
-
-    const finalMatch = [...JAPANESE_FINAL_PARTICLES]
-        .sort((a, b) => b.length - a.length)
-        .find(particle => rest.endsWith(particle) && rest.length > particle.length);
-    if (finalMatch) {
-        finalParticle = finalMatch;
-        rest = rest.slice(0, -finalMatch.length);
-    }
-
-    const prefix = [...JAPANESE_STATE_PREFIXES]
-        .sort((a, b) => b.length - a.length)
-        .find(candidate => rest.startsWith(candidate) && rest.length > candidate.length);
-    if (prefix) {
-        parts.push(prefix);
-        rest = rest.slice(prefix.length);
-    }
-
-    if (rest.trim()) {
-        parts.push(rest.trim());
-    }
-    if (finalParticle) {
-        parts.push(finalParticle);
-    }
-
-    return parts.length > 0 ? parts : [chunk];
-}
-
-function segmentVocabularySourceText(text: string): string[] {
-    const chunks = (text || '').trim().split(/\s+/).filter(Boolean);
-    if (chunks.length === 0) return [];
-
-    const segments: string[] = [];
-    for (const chunk of chunks) {
-        if (JAPANESE_TEXT_REGEX.test(chunk)) {
-            segments.push(...splitJapaneseChunk(chunk));
-        } else {
-            segments.push(chunk);
-        }
-    }
-
-    return segments.filter(Boolean);
-}
-
-function classifyJapaneseSourceUnit(text: string): 'state' | 'final' | 'content' {
-    if (JAPANESE_STATE_PREFIXES.some(prefix => text.startsWith(prefix))) return 'state';
-    if (JAPANESE_FINAL_PARTICLES.includes(text)) return 'final';
-    return 'content';
-}
-
-function translatedPhraseRange(
-    translatedWords: string[],
-    phrases: string[][],
-    usedIndexes: Set<number>,
-    preferEnd: boolean = false
-): { start: number; end: number } | null {
-    const normalizedWords = translatedWords.map(normalizeVocabularyToken);
-    const normalizedPhrases = phrases
-        .map(phrase => phrase.map(normalizeVocabularyToken).filter(Boolean))
-        .filter(phrase => phrase.length > 0)
-        .sort((a, b) => b.length - a.length);
-
-    for (const phrase of normalizedPhrases) {
-        const starts = normalizedWords
-            .map((_, index) => index)
-            .filter(index => index + phrase.length <= normalizedWords.length);
-        if (preferEnd) starts.reverse();
-
-        for (const start of starts) {
-            const end = start + phrase.length;
-            let matches = true;
-            for (let i = start; i < end; i++) {
-                if (usedIndexes.has(i) || normalizedWords[i] !== phrase[i - start]) {
-                    matches = false;
-                    break;
-                }
-            }
-            if (matches) return { start, end };
-        }
-    }
-
-    return null;
-}
-
-function contiguousUnusedRanges(totalWords: number, usedIndexes: Set<number>): Array<{ start: number; end: number }> {
-    const ranges: Array<{ start: number; end: number }> = [];
-    let start = -1;
-
-    for (let i = 0; i < totalWords; i++) {
-        if (!usedIndexes.has(i)) {
-            if (start === -1) start = i;
-        } else if (start !== -1) {
-            ranges.push({ start, end: i });
-            start = -1;
-        }
-    }
-    if (start !== -1) ranges.push({ start, end: totalWords });
-
-    return ranges;
-}
-
-function phraseFromRange(words: string[], range: { start: number; end: number }): string {
-    return words.slice(range.start, range.end).join(' ').trim();
-}
-
-function alignJapaneseVocabularyPairs(
-    sourceUnits: string[],
-    translatedWords: string[],
-    originalText: string,
-    translatedText: string
-): VocabularyPairChunk[] {
-    const usedTranslatedIndexes = new Set<number>();
-    const assignments = new Map<number, VocabularyPairChunk>();
-    let semanticMatches = 0;
-
-    sourceUnits.forEach((unit, sourceIndex) => {
-        const kind = classifyJapaneseSourceUnit(unit);
-        const range = kind === 'state'
-            ? translatedPhraseRange(translatedWords, [
-                ['the', 'nay'],
-                ['nhu', 'vay'],
-                ['nhu', 'the'],
-                ['vay'],
-                ['this', 'way'],
-                ['like', 'this'],
-                ['as', 'it', 'is'],
-                ['as', 'is']
-            ], usedTranslatedIndexes)
-            : kind === 'final'
-                ? translatedPhraseRange(translatedWords, [
-                    ['thoi'],
-                    ['nhe'],
-                    ['nhi'],
-                    ['day'],
-                    ['ha'],
-                    ['sao'],
-                    ['?']
-                ], usedTranslatedIndexes, true)
-                : null;
-
-        if (!range) return;
-
-        for (let i = range.start; i < range.end; i++) usedTranslatedIndexes.add(i);
-        semanticMatches++;
-        assignments.set(sourceIndex, {
-            original: unit,
-            translated: phraseFromRange(translatedWords, range),
-            confidence: 'high',
-            sourceIndex,
-            translatedStart: range.start
-        });
-    });
-
-    if (semanticMatches === 0) {
-        return [{
-            original: originalText.trim(),
-            translated: translatedText.trim(),
-            confidence: 'low',
-            sourceIndex: 0,
-            translatedStart: 0
-        }];
-    }
-
-    const unassignedSourceIndexes = sourceUnits
-        .map((_, index) => index)
-        .filter(index => !assignments.has(index));
-    const remainingRanges = contiguousUnusedRanges(translatedWords.length, usedTranslatedIndexes)
-        .filter(range => range.end > range.start);
-
-    if (unassignedSourceIndexes.length === 1 && remainingRanges.length > 0) {
-        const sourceIndex = unassignedSourceIndexes[0];
-        const first = remainingRanges[0];
-        const last = remainingRanges[remainingRanges.length - 1];
-        assignments.set(sourceIndex, {
-            original: sourceUnits[sourceIndex],
-            translated: phraseFromRange(translatedWords, { start: first.start, end: last.end }),
-            confidence: 'medium',
-            sourceIndex,
-            translatedStart: first.start
-        });
-    } else if (unassignedSourceIndexes.length > 1 && remainingRanges.length > 0) {
-        const remainingText = remainingRanges
-            .map(range => phraseFromRange(translatedWords, range))
-            .join(' ')
-            .trim();
-        const translatedBuckets = distributeWords(splitTranslatedWords(remainingText), unassignedSourceIndexes.length);
-        unassignedSourceIndexes.forEach((sourceIndex, bucketIndex) => {
-            if (!translatedBuckets[bucketIndex]) return;
-            assignments.set(sourceIndex, {
-                original: sourceUnits[sourceIndex],
-                translated: translatedBuckets[bucketIndex],
-                confidence: 'low',
-                sourceIndex,
-                translatedStart: remainingRanges[0].start + bucketIndex
-            });
-        });
-    }
-
-    const pairs = Array.from(assignments.values())
-        .filter(pair => pair.original.trim() && pair.translated.trim())
-        .sort((a, b) => a.translatedStart - b.translatedStart || a.sourceIndex - b.sourceIndex);
-
-    return pairs.length > 0 ? pairs : [{
-        original: originalText.trim(),
-        translated: translatedText.trim(),
-        confidence: 'low',
-        sourceIndex: 0,
-        translatedStart: 0
-    }];
-}
-
-export function buildVocabularyPairs(originalText: string, translatedText: string): VocabularyPairChunk[] {
-    const original = (originalText || '').trim();
-    const translated = (translatedText || '').trim();
-    const sourceUnits = segmentVocabularySourceText(original);
-    const translatedWords = splitTranslatedWords(translated);
-
-    if (sourceUnits.length === 0 || translatedWords.length === 0) {
-        return [];
-    }
-
-    if (JAPANESE_TEXT_REGEX.test(original)) {
-        return alignJapaneseVocabularyPairs(sourceUnits, translatedWords, original, translated);
-    }
-
-    const ratio = translatedWords.length / Math.max(sourceUnits.length, 1);
-    const NON_LATIN_REGEX = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/;
-    if (ratio < 0.7 || ratio > 1.45 || NON_LATIN_REGEX.test(original)) {
-        return [{
-            original,
-            translated,
-            confidence: 'low',
-            sourceIndex: 0,
-            translatedStart: 0
-        }];
-    }
-
-    const pairCount = Math.min(sourceUnits.length, translatedWords.length);
-    const originalChunks = distributeWords(sourceUnits, pairCount);
-    const translatedChunks = distributeWords(translatedWords, pairCount);
-
-    return originalChunks.map((chunk, index) => ({
-        original: chunk,
-        translated: translatedChunks[index],
-        confidence: 'medium',
-        sourceIndex: index,
-        translatedStart: index
-    }));
-}
-
-function appendVocabularyPairs(
-    doc: Document,
-    container: HTMLElement,
-    originalText: string,
-    translatedText: string,
-    originalLine: Element,
-    wordClassName: 'slt-sync-word' | 'slt-replace-word'
-): void {
-    const pairs = buildVocabularyPairs(originalText, translatedText);
-
-    if (pairs.length === 0) {
-        container.textContent = translatedText;
-        return;
-    }
-
-    const originalWordUnits = getWordUnits(originalLine);
-
-    let globalWordIndex = 0;
-    const origChunks = pairs.map(pair => pair.original);
-    const transChunks = pairs.map(pair => pair.translated);
-
-    for (const [i, vocabPair] of pairs.entries()) {
-        const pair = doc.createElement('span');
-        pair.className = `slt-vocab-pair ${wordClassName}`;
-        pair.dataset.confidence = vocabPair.confidence;
-
-        if (wordClassName === 'slt-sync-word') {
-            pair.classList.add('slt-word-future');
-        } else {
-            pair.classList.add('word-notsng');
-        }
-
-        const mappedOriginalIndex = originalWordUnits.length > 0
-            ? Math.min(vocabPair.sourceIndex, originalWordUnits.length - 1)
-            : vocabPair.sourceIndex;
-        pair.dataset.originalIndex = Math.max(0, mappedOriginalIndex).toString();
-        pair.dataset.wordIndex = globalWordIndex.toString();
-
-        const chunkWords = splitTranslatedWords(vocabPair.translated);
-        const transSpan = doc.createElement('span');
-        transSpan.className = 'slt-vocab-translated';
-        transSpan.textContent = vocabPair.translated;
-        pair.appendChild(transSpan);
-
-        globalWordIndex += chunkWords.length;
-
-        const origSpan = doc.createElement('span');
-        origSpan.className = 'slt-vocab-original';
-        origSpan.textContent = vocabPair.original;
-        pair.appendChild(origSpan);
-
-        pair.title = `${origChunks[i]}  →  ${transChunks[i]}`;
-        container.appendChild(pair);
-    }
-}
-
-function distributeWords(words: string[], buckets: number): string[] {
-    if (buckets >= words.length) {
-        const result = words.map(w => w);
-        while (result.length < buckets) result.push('');
-        return result;
-    }
-    const base = Math.floor(words.length / buckets);
-    const extra = words.length % buckets;
-    const result: string[] = [];
-    let idx = 0;
-    for (let b = 0; b < buckets; b++) {
-        const count = base + (b < extra ? 1 : 0);
-        result.push(words.slice(idx, idx + count).join(' '));
-        idx += count;
-    }
-    return result;
 }
 
 function lineHasWordStructure(line: Element): boolean {
@@ -1243,9 +885,6 @@ function applyInterleavedMode(doc: Document): void {
 
         resetDocCache(doc);
 
-        const learningMode = isLearningModeActive();
-        const isVocabMode = storage.get('vocabulary-mode') === 'true';
-
         const claimed = new Set<Element>();
 
         lines.forEach((line, index) => {
@@ -1255,63 +894,57 @@ function applyInterleavedMode(doc: Document): void {
                 const originalText = extractLineText(line);
                 const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
 
-                let existing = line.nextElementSibling as HTMLElement | null;
+                let existing = siblingSkippingRomanization(line, 'next');
                 if (existing && !existing.classList.contains('slt-interleaved-translation')) existing = null;
-                let existingOrig = line.previousElementSibling as HTMLElement | null;
-                if (existingOrig && !existingOrig.classList.contains('slt-original-line')) existingOrig = null;
-
                 const wants = (!!translation || isBreak) && translation !== originalText && !!line.parentNode;
                 if (!wants) {
                     if (existing) existing.remove();
-                    if (existingOrig) existingOrig.remove();
-                    lineEl.classList.remove('slt-learning-hidden');
+                    const staleRom = line.nextElementSibling as HTMLElement | null;
+                    if (staleRom && staleRom.classList.contains('slt-romanization-line')) staleRom.remove();
                     lineEl.classList.remove('slt-overlay-parent');
                     return;
                 }
 
-                const hasRomanization = !!romanizationMap.get(index);
-                const hasApiOriginal = !!originalTextMap.get(index);
-                const domIsRomanized = domLineIsRomanized(line, index);
-                const learningActive = learningMode && hasRomanization && !isBreak;
-                const showInjectedOriginal = learningActive && domIsRomanized && hasApiOriginal;
                 const timingInfo = lineTimingData[index];
 
-                let pairBelowText = originalText;
-                if (domIsRomanized) {
-                    pairBelowText = originalTextMap.get(index) || originalText;
-                } else {
-                    pairBelowText = romanizationMap.get(index) || originalTextMap.get(index) || originalText;
-                }
+                const romanizationText = isBreak ? '' : romanizationCompanionText(line, index, 'interleaved');
 
                 const sig = [
                     translation || '',
                     isBreak ? 'B' : '',
-                    isVocabMode ? 'V' : '',
                     currentConfig.syncWordHighlight ? 'W' : '',
-                    domIsRomanized ? 'R' : '',
-                    showInjectedOriginal ? 'O' : '',
-                    pairBelowText
+                    romanizationText
                 ].join('');
 
                 lineEl.classList.add('slt-overlay-parent');
                 lineEl.dataset.sltIndex = index.toString();
-                lineEl.classList.toggle('slt-learning-hidden', showInjectedOriginal);
 
-                const refreshOriginal = () => {
-                    if (showInjectedOriginal) {
-                        if (existingOrig) {
-                            existingOrig.dataset.lineIndex = index.toString();
-                            existingOrig.dataset.forLine = index.toString();
-                            claimed.add(existingOrig);
-                        } else {
-                            const origEl = buildOriginalLine(doc, index, timingInfo, line);
-                            if (origEl) {
-                                line.parentNode!.insertBefore(origEl, line);
-                                claimed.add(origEl);
-                            }
+                const refreshRomanization = (anchor: HTMLElement): void => {
+                    let existingRom = anchor.nextElementSibling as HTMLElement | null;
+                    if (existingRom && !existingRom.classList.contains('slt-romanization-line')) existingRom = null;
+
+                    if (!romanizationText) {
+                        if (existingRom) existingRom.remove();
+                        return;
+                    }
+
+                    if (existingRom) {
+                        if (existingRom.textContent !== romanizationText) existingRom.textContent = romanizationText;
+                        existingRom.dataset.lineIndex = index.toString();
+                        existingRom.dataset.forLine = index.toString();
+                        if (timingInfo) {
+                            existingRom.dataset.startTime = timingInfo.startTime.toString();
+                            existingRom.dataset.endTime = timingInfo.endTime.toString();
                         }
-                    } else if (existingOrig) {
-                        existingOrig.remove();
+                        existingRom.classList.toggle('active', isLineActive(line));
+                        claimed.add(existingRom);
+                        return;
+                    }
+
+                    const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
+                    if (romEl) {
+                        anchor.parentNode!.insertBefore(romEl, anchor.nextSibling);
+                        claimed.add(romEl);
                     }
                 };
 
@@ -1323,12 +956,11 @@ function applyInterleavedMode(doc: Document): void {
                         existing.dataset.endTime = timingInfo.endTime.toString();
                     }
                     claimed.add(existing);
-                    refreshOriginal();
+                            refreshRomanization(existing);
                     return;
                 }
 
                 if (existing) existing.remove();
-                if (existingOrig) { existingOrig.remove(); existingOrig = null; }
 
                 const translationEl = doc.createElement('div');
                 translationEl.className = 'slt-interleaved-translation';
@@ -1339,10 +971,6 @@ function applyInterleavedMode(doc: Document): void {
                 if (isBreak) {
                     translationEl.textContent = '• • •';
                     translationEl.classList.add('slt-music-break');
-                } else if (isVocabMode && translation) {
-                    translationEl.classList.add('slt-vocab-line');
-                    translationEl.classList.add('slt-sync-translation');
-                    appendVocabularyPairs(doc, translationEl, pairBelowText, translation, line, 'slt-sync-word');
                 } else {
                     translationEl.classList.add('slt-sync-translation');
                     if (currentConfig.syncWordHighlight && translation) {
@@ -1367,7 +995,7 @@ function applyInterleavedMode(doc: Document): void {
                 line.parentNode!.insertBefore(translationEl, line.nextSibling);
                 claimed.add(translationEl);
 
-                refreshOriginal();
+                    refreshRomanization(translationEl);
 
                 if (!isBreak && currentConfig.syncWordHighlight && translation) {
                     fallbackToContinuousMultilineGradient(translationEl, translation, line);
@@ -1401,6 +1029,14 @@ function initOverlayContainer(doc: Document): HTMLElement | null {
     container.style.setProperty('--slt-overlay-font-scale', currentConfig.fontSize.toString());
 
     return container;
+}
+
+export function setOverlayRomanization(show: boolean): void {
+    currentConfig.showRomanization = show;
+}
+
+export function updateOverlayConfig(config: Partial<OverlayConfig>): void {
+    currentConfig = { ...currentConfig, ...config };
 }
 
 const MIRRORED_LINE_STYLE_PROPS = [
@@ -2049,7 +1685,6 @@ export function disableOverlay(): void {
         doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
 
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
@@ -2148,7 +1783,6 @@ export function clearOverlayContent(): void {
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-learning-hidden').forEach(el => el.classList.remove('slt-learning-hidden'));
 
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
         doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
@@ -2327,63 +1961,10 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     padding: 8px 0 16px 0;
 }
 
-.line.slt-learning-hidden {
-    display: none !important;
-}
-
-.slt-original-line {
-    display: block;
-    font-size: inherit;
-    font-weight: 900;
-    line-height: 1.15;
-    padding: 4px 0 2px 0;
-    color: rgba(255, 255, 255, 0.9);
-    text-align: left;
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    letter-spacing: 0;
-    pointer-events: none;
-    opacity: 0.55;
-    filter: blur(var(--BlurAmount, 0px));
-    transition: opacity 0.25s ease, filter 0.25s ease;
-}
-
-.slt-original-line.OppositeAligned,
-.slt-original-line.rtl {
-    text-align: end;
-}
-
-.line.Active ~ .slt-original-line,
-.slt-original-line.active,
-.slt-original-line.Active {
-    opacity: 1 !important;
-    filter: none !important;
-}
-
-.spicy-pip-wrapper .slt-original-line {
-    font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
-}
-
-.Cinema--Container .slt-original-line,
-.Root__cinema-view .slt-original-line,
-#SpicyLyricsPage.ForcedCompactMode .slt-original-line {
-    font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-original-line {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
-}
-
-body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-original-line,
-#SpicyLyricsPage.CardMode .slt-original-line {
-    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
-    padding: 2px 0;
-}
-
 .slt-romanization-line {
     display: block;
+    width: 100%;
+    flex: 0 0 100%;
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     font-weight: 600;
     font-style: italic;
@@ -2415,12 +1996,24 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-original-line,
     color: rgba(255, 224, 150, 0.95);
 }
 
-.line.Sung + .slt-romanization-line {
+.line.Sung + .slt-romanization-line,
+.slt-romanization-line.Sung {
     opacity: 0.45;
 }
 
-.line.NotSung + .slt-romanization-line {
+.line.NotSung + .slt-romanization-line,
+.slt-romanization-line.NotSung {
     opacity: 0.55;
+}
+
+.slt-interleaved-translation.Sung,
+.slt-replace-line.Sung {
+    opacity: var(--Vocal-Sung-opacity, 0.497);
+}
+
+.slt-interleaved-translation.NotSung,
+.slt-replace-line.NotSung {
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
 .spicy-pip-wrapper .slt-romanization-line {
@@ -2456,6 +2049,8 @@ export default {
     isOverlayActive,
     getOverlayConfig,
     setOverlayConfig,
+    setOverlayRomanization,
+    updateOverlayConfig,
     setLineTimingData,
     setRomanizationData,
     setOriginalTextData,

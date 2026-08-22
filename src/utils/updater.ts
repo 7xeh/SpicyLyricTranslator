@@ -139,11 +139,11 @@ function resetBackoff(): void {
 function parseVersion(version: string): VersionInfo | null {
     const cleanVersion = version.replace(/^v/, '');
     const match = cleanVersion.match(/^(\d+)\.(\d+)\.(\d+)/);
-    
+
     if (!match) {
         return null;
     }
-    
+
     return {
         major: parseInt(match[1], 10),
         minor: parseInt(match[2], 10),
@@ -191,7 +191,7 @@ export function getContentHashShort(length: number = 8): string {
 export async function getLatestVersion(): Promise<{ version: VersionInfo; release: GitHubRelease; downloadUrl: string } | null> {
     let releaseNotes = '';
     let githubRelease: GitHubRelease | null = null;
-    
+
     try {
         const ghResponse = await fetch(GITHUB_API_URL, {
             headers: { 'Accept': 'application/vnd.github.v3+json' }
@@ -202,14 +202,14 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
         }
     } catch (e) {
     }
-    
+
     try {
         const response = await fetchWithTimeout(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
-        
+
         if (response.ok) {
             const data = await response.json();
             const version = parseVersion(data.version);
-            
+
             if (version) {
                 const downloadUrl = typeof data.download_url === 'string' && data.download_url.length > 0
                     ? data.download_url
@@ -237,7 +237,7 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
     } catch (error) {
         warn('Self-hosted API unavailable, trying GitHub:', error);
     }
-    
+
     if (githubRelease) {
         const version = parseVersion(githubRelease.tag_name);
         if (version) {
@@ -246,30 +246,30 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
             return { version, release: githubRelease, downloadUrl };
         }
     }
-    
+
     try {
         const response = await fetchWithTimeout(GITHUB_API_URL, {
             headers: {
                 'Accept': 'application/vnd.github.v3+json'
             }
         });
-        
+
         if (!response.ok) {
             warn('Failed to fetch latest version:', response.status);
             return null;
         }
-        
+
         const release: GitHubRelease = await response.json();
         const version = parseVersion(release.tag_name);
-        
+
         if (!version) {
             warn('Failed to parse version from tag:', release.tag_name);
             return null;
         }
-        
+
         const jsAsset = release.assets?.find(a => a.name.endsWith('.js'));
         const downloadUrl = jsAsset?.browser_download_url || '';
-        
+
         return { version, release, downloadUrl };
     } catch (error) {
         logError('Error fetching latest version:', error);
@@ -280,7 +280,7 @@ export async function getLatestVersion(): Promise<{ version: VersionInfo; releas
 export async function isUpdateAvailable(): Promise<boolean> {
     const latest = await getLatestVersion();
     if (!latest) return false;
-    
+
     const current = getCurrentVersion();
     return compareVersions(latest.version, current) > 0;
 }
@@ -289,39 +289,39 @@ function getExtensionDownloadUrl(release: GitHubRelease): string | null {
     if (!release.assets || release.assets.length === 0) {
         return null;
     }
-    
-    const jsAsset = release.assets.find(asset => 
-        asset.name.endsWith('.js') && 
+
+    const jsAsset = release.assets.find(asset =>
+        asset.name.endsWith('.js') &&
         (asset.name.includes('spicy-lyric-translator') || asset.name.includes('spicylyrictranslator'))
     );
-    
+
     if (jsAsset) {
         return jsAsset.browser_download_url;
     }
-    
+
     const anyJs = release.assets.find(asset => asset.name.endsWith('.js'));
     return anyJs ? anyJs.browser_download_url : null;
 }
 
 async function performUpdate(release: GitHubRelease, version: VersionInfo, modalContent: HTMLElement): Promise<void> {
     if (updateState.isUpdating) return;
-    
+
     updateState.isUpdating = true;
     updateState.progress = 0;
     updateState.status = 'Preparing update...';
-    
+
     const progressContainer = modalContent.querySelector('.update-progress');
     const progressBar = modalContent.querySelector('.progress-bar-fill') as HTMLElement;
     const progressText = modalContent.querySelector('.progress-text');
     const buttonsContainer = modalContent.querySelector('.update-buttons');
-    
+
     if (progressContainer) {
         (progressContainer as HTMLElement).style.display = 'block';
     }
     if (buttonsContainer) {
         (buttonsContainer as HTMLElement).style.display = 'none';
     }
-    
+
     const updateProgress = () => {
         if (progressBar) {
             progressBar.style.width = `${updateState.progress}%`;
@@ -330,40 +330,40 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
             progressText.textContent = updateState.status;
         }
     };
-    
+
     try {
         storage.set('pending-update-version', version.text);
         storage.set('pending-update-timestamp', Date.now().toString());
         storage.set('pending-update-changelog', release.body || '');
-        
+
         updateState.progress = 30;
         updateState.status = 'Preparing to update...';
         updateProgress();
-        
+
         await new Promise(r => setTimeout(r, 500));
-        
+
         updateState.progress = 60;
         updateState.status = 'Ready to reload...';
         updateProgress();
-        
+
         await new Promise(r => setTimeout(r, 500));
-        
+
         updateState.progress = 100;
         updateState.status = 'Reloading Spotify...';
         updateProgress();
-        
+
         await new Promise(r => setTimeout(r, 300));
-        
+
         clearLoaderMetadata();
-        
+
         window.location.reload();
-        
+
     } catch (error) {
         logError('Update failed:', error);
-        
+
         updateState.status = 'Update failed';
         updateProgress();
-        
+
         if (progressContainer && buttonsContainer) {
             (progressContainer as HTMLElement).innerHTML = `
                 <div class="update-error">
@@ -371,24 +371,24 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
                     <span class="error-text">Update failed. Please try restarting Spotify.</span>
                 </div>
             `;
-            
+
             (buttonsContainer as HTMLElement).style.display = 'flex';
             (buttonsContainer as HTMLElement).innerHTML = `
                 <button class="update-btn secondary" id="slt-update-cancel">Cancel</button>
                 <button class="update-btn primary" id="slt-reload-now">Reload Now</button>
             `;
-            
+
             setTimeout(() => {
                 const cancelBtn = document.getElementById('slt-update-cancel');
                 const reloadBtn = document.getElementById('slt-reload-now');
-                
+
                 if (cancelBtn) {
                     cancelBtn.addEventListener('click', () => {
                         hideModal();
                         updateState.isUpdating = false;
                     });
                 }
-                
+
                 if (reloadBtn) {
                     reloadBtn.addEventListener('click', () => {
                         window.location.reload();
@@ -396,7 +396,7 @@ async function performUpdate(release: GitHubRelease, version: VersionInfo, modal
                 }
             }, 100);
         }
-        
+
         updateState.isUpdating = false;
     }
 }
@@ -742,24 +742,24 @@ function showUpdateModal(currentVersion: VersionInfo, latestVersion: VersionInfo
             <button class="update-btn primary" id="slt-update-now">Install Update</button>
         </div>
     `;
-    
+
     if (Spicetify.PopupModal) {
         displayModal({
             title: 'Spicy Lyric Translator',
             content: content,
             isLarge: true
         });
-        
+
         setTimeout(() => {
             const laterBtn = document.getElementById('slt-update-later');
             const updateBtn = document.getElementById('slt-update-now');
-            
+
             if (laterBtn) {
                 laterBtn.addEventListener('click', () => {
                     hideModal();
                 });
             }
-            
+
             if (updateBtn) {
                 updateBtn.addEventListener('click', () => {
                     performUpdate(release, latestVersion, content);
@@ -924,16 +924,16 @@ export async function checkForUpdates(force: boolean = false): Promise<void> {
 
     lastCheckTime = now;
     checkInProgress = true;
-    
+
     try {
         const latest = await getLatestVersion();
         if (!latest) {
             increaseBackoff();
             return;
         }
-        
+
         const current = getCurrentVersion();
-        
+
         if (compareVersions(latest.version, current) > 0) {
             if (!hasShownUpdateNotice) {
                 hasShownUpdateNotice = true;
@@ -987,7 +987,7 @@ export async function getUpdateInfo(): Promise<{
     try {
         const current = getCurrentVersion();
         const latest = await getLatestVersion();
-        
+
         if (!latest) {
             return {
                 hasUpdate: false,
@@ -996,7 +996,7 @@ export async function getUpdateInfo(): Promise<{
                 releaseUrl: null
             };
         }
-        
+
         return {
             hasUpdate: compareVersions(latest.version, current) > 0,
             currentVersion: current.text,

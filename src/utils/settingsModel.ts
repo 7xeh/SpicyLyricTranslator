@@ -5,7 +5,7 @@ import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolv
 import type { ApiPreference, CustomApiFormat } from './translator';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
-export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'vocabularyModeClass' | 'connectionIndicatorClass';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay';
 
 export interface SettingsOption {
     value: string;
@@ -105,6 +105,17 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         options: OVERLAY_MODE_OPTIONS,
         description: 'How translated lyrics are displayed',
         effects: ['reapplyTranslations']
+    },
+    {
+        id: 'show-romanization',
+        section: 'Translation',
+        keywords: 'romanization romaji pinyin transliteration pronunciation reading sing along',
+        label: 'Show Romanization',
+        type: 'toggle',
+        storageKey: 'show-romanization',
+        defaultValue: false,
+        description: 'Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one',
+        effects: ['romanizationDisplay']
     },
     {
         id: 'preferred-api',
@@ -374,16 +385,6 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         effects: ['qualityIndicatorClass']
     },
     {
-        id: 'vocabulary-mode',
-        section: 'Behaviour',
-        keywords: 'vocabulary learning study word by word',
-        label: 'Vocabulary / Learning Mode',
-        type: 'toggle',
-        storageKey: 'vocabulary-mode',
-        defaultValue: false,
-        effects: ['vocabularyModeClass', 'reapplyTranslations']
-    },
-    {
         id: 'hide-connection-indicator',
         section: 'Interface',
         keywords: 'connection status indicator hide ping',
@@ -511,6 +512,9 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'overlay-mode':
             state.overlayMode = String(value) as OverlayMode;
             break;
+        case 'show-romanization':
+            state.showRomanization = Boolean(value);
+            break;
         case 'preferred-api':
             state.preferredApi = String(value) as ApiPreference;
             state.targetLanguage = getResolvedTargetLanguage();
@@ -592,9 +596,6 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'show-quality-indicator':
             state.showQualityIndicator = Boolean(value);
-            break;
-        case 'vocabulary-mode':
-            state.vocabularyMode = Boolean(value);
             break;
         case 'hide-connection-indicator':
             state.hideConnectionIndicator = Boolean(value);

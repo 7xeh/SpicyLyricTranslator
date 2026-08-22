@@ -1,12 +1,13 @@
 import { storage } from './storage';
 import { state } from './state';
 import { clearTranslationCache } from './translator';
-import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache } from './trackCache';
+import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
-import { reapplyTranslations, forceRetranslate } from './core';
+import { forceRetranslate } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
+import { setOverlayRomanization } from './translationOverlay';
 import {
     SETTINGS_SCHEMA,
     SETTINGS_CATEGORIES,
@@ -14,6 +15,7 @@ import {
     SettingsEffect,
     SettingsField,
     getCurrentApiPreference,
+    getSettingField,
     getSectionsForCategory,
     isSettingAtDefault,
     isSettingFieldVisible,
@@ -94,7 +96,6 @@ export function bindModalCacheActions(container: ParentNode): void {
     });
 }
 
-
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
@@ -111,10 +112,10 @@ function createNativeToggle(id: string, label: string, checked: boolean, onChang
             </label>
         </div>
     `;
-    
+
     const input = row.querySelector('input') as HTMLInputElement;
     input?.addEventListener('change', () => onChange(input.checked));
-    
+
     return row;
 }
 
@@ -133,10 +134,10 @@ function createNativeDropdown(id: string, label: string, options: { value: strin
             </span>
         </div>
     `;
-    
+
     const select = row.querySelector('select') as HTMLSelectElement;
     select?.addEventListener('change', () => onChange(select.value));
-    
+
     return row;
 }
 
@@ -151,10 +152,10 @@ function createNativeButton(id: string, label: string, buttonText: string, onCli
             <button id="${id}" class="encore-text-body-small-bold e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary e-10310-overflow-wrap-anywhere x-settings-button" data-encore-id="buttonSecondary" type="button">${buttonText}</button>
         </div>
     `;
-    
+
     const button = row.querySelector('button') as HTMLButtonElement;
     button?.addEventListener('click', onClick);
-    
+
     return row;
 }
 
@@ -181,18 +182,23 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
     if (effects.includes('qualityIndicatorClass')) {
         document.body.classList.toggle('slt-hide-quality-indicator', !Boolean(value));
     }
-    if (effects.includes('vocabularyModeClass')) {
-        document.body.classList.toggle('slt-vocabulary-mode', Boolean(value));
-    }
     if (effects.includes('connectionIndicatorClass')) {
         setConnectionIndicatorHidden(Boolean(value));
     }
-    if (effects.includes('reapplyTranslations')) {
-        reapplyTranslations();
+    if (effects.includes('romanizationDisplay')) {
+        setOverlayRomanization(Boolean(value));
     }
-    if (effects.includes('retranslate')) {
+
+    if (effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate')) {
         forceRetranslate();
     }
+}
+
+export function applySettingById(id: string, value: string | boolean): void {
+    const field = getSettingField(id);
+    if (!field) return;
+    const effects = writeSettingValue(field, value);
+    runSettingEffects(effects, value);
 }
 
 function updateSettingFieldVisibility(root: ParentNode, visibleDisplay: string): void {
@@ -263,7 +269,7 @@ function createNativeSettingsSection(): HTMLElement {
             <h2 class="e-10310-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
-    
+
     const sectionContent = section.querySelector('.x-settings-section.fNaaQ0Cp8Yzy19j8') as HTMLElement;
 
     renderNativeSettingsFields(sectionContent);
@@ -281,7 +287,7 @@ function createNativeSettingsSection(): HTMLElement {
         'Clear Cache',
         clearAllCachedTranslations
     ));
-    
+
     sectionContent.appendChild(createNativeButton(
         'slt-settings.view-changelog',
         `What's New in v${VERSION}`,
@@ -319,7 +325,7 @@ function createNativeSettingsSection(): HTMLElement {
                 btn.textContent = 'Checking...';
                 btn.disabled = true;
             }
-            
+
             try {
                 const updateInfo = await getUpdateInfo();
                 if (updateInfo?.hasUpdate) {
@@ -353,7 +359,7 @@ function createNativeSettingsSection(): HTMLElement {
             }
         }
     ));
-    
+
     const githubRow = document.createElement('div');
     githubRow.className = 'x-settings-row';
     githubRow.innerHTML = `
@@ -365,7 +371,7 @@ function createNativeSettingsSection(): HTMLElement {
         </div>
     `;
     sectionContent.appendChild(githubRow);
-    
+
     const shortcutRow = document.createElement('div');
     shortcutRow.className = 'x-settings-row';
     shortcutRow.innerHTML = `
@@ -374,12 +380,12 @@ function createNativeSettingsSection(): HTMLElement {
         </div>
     `;
     sectionContent.appendChild(shortcutRow);
-    
+
     return section;
 }
 
 function injectSettingsIntoPage(): void {
-    const settingsContainer = document.querySelector('.x-settings-container') || 
+    const settingsContainer = document.querySelector('.x-settings-container') ||
                               document.querySelector('[data-testid="settings-page"]') ||
                               document.querySelector('main.x-settings-container');
     if (!settingsContainer) {
@@ -391,12 +397,12 @@ function injectSettingsIntoPage(): void {
     if (sectionAlreadyInContainer) {
         return;
     }
-    
+
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
-    
+
     const spicyLyricsSettings = document.getElementById('spicy-lyrics-settings');
     const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');
-    
+
     if (spicyLyricsDevSettings) {
         spicyLyricsDevSettings.after(settingsSection);
     } else if (spicyLyricsSettings) {
@@ -411,29 +417,29 @@ function injectSettingsIntoPage(): void {
             settingsContainer.appendChild(settingsSection);
         }
     }
-    
+
 }
 
 function isOnSettingsPage(): boolean {
     const hasSettingsContainer = !!document.querySelector('.x-settings-container');
     const hasSettingsTestId = !!document.querySelector('[data-testid="settings-page"]');
-    const pathCheck = window.location.pathname.includes('preferences') || 
+    const pathCheck = window.location.pathname.includes('preferences') ||
                       window.location.pathname.includes('settings') ||
                       window.location.href.includes('preferences') ||
                       window.location.href.includes('settings');
-    
+
     let historyCheck = false;
     try {
         const location = Spicetify.Platform?.History?.location;
         if (location) {
-            historyCheck = location.pathname?.includes('preferences') || 
+            historyCheck = location.pathname?.includes('preferences') ||
                           location.pathname?.includes('settings') ||
                           false;
         }
     } catch (e) {
 
     }
-    
+
     return hasSettingsContainer || hasSettingsTestId || pathCheck || historyCheck;
 }
 
@@ -442,7 +448,7 @@ function watchForSettingsPage(): void {
         setTimeout(injectSettingsIntoPage, 100);
         setTimeout(injectSettingsIntoPage, 500);
     }
-    
+
     if (Spicetify.Platform?.History) {
         Spicetify.Platform.History.listen((location: any) => {
             if (location?.pathname?.includes('preferences') || location?.pathname?.includes('settings')) {
@@ -453,21 +459,21 @@ function watchForSettingsPage(): void {
             }
         });
     }
-    
+
     const observer = new MutationObserver((mutations) => {
-        const settingsContainer = document.querySelector('.x-settings-container') || 
+        const settingsContainer = document.querySelector('.x-settings-container') ||
                                   document.querySelector('[data-testid="settings-page"]');
         if (settingsContainer && !document.getElementById(SETTINGS_ID)) {
             injectSettingsIntoPage();
         }
-        
+
         const ourSettings = document.getElementById(SETTINGS_ID);
         const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');
         if (ourSettings && spicyLyricsDevSettings && ourSettings.previousElementSibling !== spicyLyricsDevSettings) {
             spicyLyricsDevSettings.after(ourSettings);
         }
     });
-    
+
     observer.observe(document.body, {
         childList: true,
         subtree: true
@@ -1135,7 +1141,7 @@ function createSettingsUI(): HTMLElement {
                 }
             }
         </style>
-        
+
         <div id="slt-settings-panel-mount"></div>
 
         ${renderConnectionStatusMarkup()}
@@ -1150,7 +1156,7 @@ function createSettingsUI(): HTMLElement {
                 <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
             </div>
         </div>
-        
+
         <div class="slt-modal-footer">
             <div>
                 <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
@@ -1163,10 +1169,10 @@ function createSettingsUI(): HTMLElement {
                 <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
             </div>
         </div>
-        
+
         <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
     `;
-    
+
     const settingsMount = container.querySelector('#slt-settings-panel-mount');
     settingsMount?.replaceWith(buildModalSettingsPanel());
 
@@ -1181,7 +1187,7 @@ function createSettingsUI(): HTMLElement {
             hideModal();
             setTimeout(() => openCacheViewer(), 150);
         });
-        
+
         viewChangelogPopupButton?.addEventListener('click', async () => {
             viewChangelogPopupButton.textContent = 'Loading...';
             viewChangelogPopupButton.disabled = true;
@@ -1197,11 +1203,11 @@ function createSettingsUI(): HTMLElement {
                 viewChangelogPopupButton.disabled = false;
             }
         });
-        
+
         checkUpdatesButton?.addEventListener('click', async () => {
             checkUpdatesButton.textContent = 'Checking...';
             checkUpdatesButton.disabled = true;
-            
+
             try {
                 const updateInfo = await getUpdateInfo();
                 if (updateInfo?.hasUpdate) {
@@ -1232,7 +1238,7 @@ function createSettingsUI(): HTMLElement {
             }
         });
     }, 0);
-    
+
     return container;
 }
 
@@ -1434,7 +1440,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             return `
                 <div class="slt-lyrics-row">
                     <div class="slt-lyrics-col">${sourceText || '&nbsp;'}</div>
-                    <div class="slt-lyrics-col">${translatedText || '&nbsp;'}</div>
+                    <div class="slt-lyrics-col slt-lyrics-col-editable" contenteditable="plaintext-only" spellcheck="false" data-line-index="${idx}" role="textbox" aria-label="Translated line ${idx + 1}">${translatedText}</div>
                 </div>
             `;
         }).join('');
@@ -1571,6 +1577,37 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
                 color: var(--spice-subtext);
                 font-weight: 700;
             }
+            .slt-lyrics-col-editable {
+                min-height: 19px;
+                padding: 2px 6px;
+                margin: -2px -6px;
+                border-radius: 4px;
+                border: 1px solid transparent;
+                cursor: text;
+                transition: background 0.15s, border-color 0.15s;
+            }
+            .slt-lyrics-col-editable:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: var(--slt-hairline-strong);
+            }
+            .slt-lyrics-col-editable:focus {
+                outline: none;
+                background: rgba(255, 255, 255, 0.08);
+                border-color: #1db954;
+            }
+            .slt-lyrics-col-editable.slt-line-dirty {
+                border-color: rgba(29, 185, 84, 0.55);
+            }
+            .slt-lyrics-save[disabled] {
+                opacity: 0.4;
+                cursor: default;
+            }
+            .slt-lyrics-edit-hint {
+                font-size: 11px;
+                color: var(--spice-subtext);
+                align-self: center;
+                margin-right: auto;
+            }
             @media (max-width: 620px) {
                 .slt-lyrics-viewer {
                     width: min(100%, 90vw);
@@ -1585,6 +1622,8 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             }
         </style>
         <div class="slt-lyrics-toolbar">
+            <span class="slt-lyrics-edit-hint">Click a translated line to edit it</span>
+            <button id="slt-lyrics-save" class="slt-lyrics-copy slt-lyrics-save" type="button" disabled>Save Edits</button>
             <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">Copy Lyrics</button>
             <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">&lt; Back to Cache</button>
         </div>
@@ -1666,21 +1705,95 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
         }
     });
 
+    const saveBtn = content.querySelector('#slt-lyrics-save') as HTMLButtonElement | null;
+    let hasUnsavedEdits = false;
+
+    const bindEditableCells = (): void => {
+        content.querySelectorAll('.slt-lyrics-col-editable').forEach(node => {
+            const cell = node as HTMLElement;
+            if (cell.dataset.bound === 'true') return;
+            cell.dataset.bound = 'true';
+
+            cell.addEventListener('input', () => {
+                cell.classList.add('slt-line-dirty');
+                hasUnsavedEdits = true;
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Edits';
+                    saveBtn.classList.remove('slt-copied');
+                }
+            });
+
+            cell.addEventListener('keydown', event => {
+                const keyEvent = event as KeyboardEvent;
+                if (keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
+                    keyEvent.preventDefault();
+                    cell.blur();
+                }
+            });
+        });
+    };
+
+    const renderInto = (sourceLines: string[], emptyMessage: string): void => {
+        if (hasUnsavedEdits) return;
+        const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
+        if (!rowsContainer) return;
+        rowsContainer.innerHTML = renderRows(sourceLines) || emptyMessage;
+        bindEditableCells();
+    };
+
+    bindEditableCells();
+
+    saveBtn?.addEventListener('click', () => {
+        const cells = Array.from(content.querySelectorAll('.slt-lyrics-col-editable')) as HTMLElement[];
+        const editedLines = cells
+            .sort((a, b) => Number(a.dataset.lineIndex || 0) - Number(b.dataset.lineIndex || 0))
+            .map(cell => (cell.textContent || '').replace(/\s+/g, ' ').trim());
+
+        while (editedLines.length > 0 && !editedLines[editedLines.length - 1]) editedLines.pop();
+
+        if (editedLines.length === 0) {
+            saveBtn.textContent = 'Nothing to save';
+            setTimeout(() => { saveBtn.textContent = 'Save Edits'; }, 2000);
+            return;
+        }
+
+        const saved = updateTrackCacheLines(trackUri, targetLang, editedLines);
+        if (!saved) {
+            saveBtn.textContent = 'Save failed';
+            setTimeout(() => { saveBtn.textContent = 'Save Edits'; }, 2500);
+            return;
+        }
+
+        translatedLines.length = 0;
+        translatedLines.push(...editedLines);
+
+        hasUnsavedEdits = false;
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saved!';
+        saveBtn.classList.add('slt-copied');
+        content.querySelectorAll('.slt-line-dirty').forEach(el => el.classList.remove('slt-line-dirty'));
+        setTimeout(() => {
+            saveBtn.textContent = 'Save Edits';
+            saveBtn.classList.remove('slt-copied');
+        }, 2000);
+
+        if (getCurrentTrackUri() === trackUri) {
+            forceRetranslate();
+        }
+    });
+
     const cachedSourceLines = trackCache.sourceLines || [];
 
     if (cachedSourceLines.length > 0) {
-        const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
-        if (rowsContainer) {
-            rowsContainer.innerHTML = renderRows(cachedSourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
-        }
+        renderInto(cachedSourceLines, '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>');
     }
 
     try {
         const sourceLyrics = await fetchLyricsForTrackUri(trackUri);
         const sourceLines = sourceLyrics?.lines?.length ? sourceLyrics.lines : cachedSourceLines;
-        const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
-        if (rowsContainer && sourceLines.length > 0) {
-            rowsContainer.innerHTML = renderRows(sourceLines) || '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>';
+        if (sourceLines.length > 0) {
+            renderInto(sourceLines, '<div class="slt-lyrics-row"><div class="slt-lyrics-col">No source lyrics found</div><div class="slt-lyrics-col">No cached lines</div></div>');
         }
 
         if (sourceLyrics?.language) {
@@ -1691,10 +1804,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
         }
     } catch (e) {
         if (cachedSourceLines.length === 0) {
-            const rowsContainer = content.querySelector('#slt-lyrics-rows') as HTMLElement;
-            if (rowsContainer) {
-                rowsContainer.innerHTML = renderRows([]);
-            }
+            renderInto([], renderRows([]));
         }
     }
 }
@@ -1702,7 +1812,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
 function createCacheViewerUI(): HTMLElement {
     const stats = getTrackCacheStats();
     const cachedTracks = getAllCachedTracks();
-    
+
     const container = document.createElement('div');
     container.className = 'slt-cache-viewer';
     container.innerHTML = `
@@ -1937,7 +2047,7 @@ function createCacheViewerUI(): HTMLElement {
         <div class="slt-cache-toolbar">
             <button id="slt-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
-        
+
         <div class="slt-cache-stats">
             <div class="slt-stat">
                 <span class="slt-stat-label">Cached Tracks</span>
@@ -1956,9 +2066,9 @@ function createCacheViewerUI(): HTMLElement {
                 <span class="slt-stat-value">${stats.oldestTimestamp ? formatDate(stats.oldestTimestamp) : 'N/A'}</span>
             </div>
         </div>
-        
+
         <div class="slt-cache-list" id="slt-cache-list">
-            ${cachedTracks.length === 0 ? 
+            ${cachedTracks.length === 0 ?
                 '<div class="slt-empty-cache">No cached translations</div>' :
                 cachedTracks
                     .sort((a, b) => b.timestamp - a.timestamp)
@@ -1998,14 +2108,14 @@ function createCacheViewerUI(): HTMLElement {
                     `}).join('')
             }
         </div>
-        
+
         ${cachedTracks.length > 0 ? `
         <div class="slt-cache-actions">
             <button class="slt-cache-delete-all" id="slt-delete-all-cache">Delete All Cached Translations</button>
         </div>
         ` : ''}
     `;
-    
+
     setTimeout(() => {
         const backToSettingsBtn = container.querySelector('#slt-cache-back-to-settings') as HTMLButtonElement;
         backToSettingsBtn?.addEventListener('click', () => {
@@ -2073,7 +2183,7 @@ function createCacheViewerUI(): HTMLElement {
                     if (uri) {
                         deleteTrackCache(uri, lang);
                         item.remove();
-                        
+
                         const newStats = getTrackCacheStats();
                         const tracksEl = container.querySelector('#slt-stat-tracks');
                         const linesEl = container.querySelector('#slt-stat-lines');
@@ -2081,7 +2191,7 @@ function createCacheViewerUI(): HTMLElement {
                         if (tracksEl) tracksEl.textContent = String(newStats.trackCount);
                         if (linesEl) linesEl.textContent = String(newStats.totalLines);
                         if (sizeEl) sizeEl.textContent = formatBytes(newStats.sizeBytes);
-                        
+
                         const list = container.querySelector('#slt-cache-list');
                         if (list && list.querySelectorAll('.slt-cache-item').length === 0) {
                             list.innerHTML = '<div class="slt-empty-cache">No cached translations</div>';
@@ -2092,26 +2202,26 @@ function createCacheViewerUI(): HTMLElement {
                 }
             });
         });
-        
+
         const deleteAllBtn = container.querySelector('#slt-delete-all-cache');
         deleteAllBtn?.addEventListener('click', () => {
             clearAllCachedTranslations();
-            
+
             const tracksEl = container.querySelector('#slt-stat-tracks');
             const linesEl = container.querySelector('#slt-stat-lines');
             const sizeEl = container.querySelector('#slt-stat-size');
             if (tracksEl) tracksEl.textContent = '0';
             if (linesEl) linesEl.textContent = '0';
             if (sizeEl) sizeEl.textContent = '0 B';
-            
+
             const list = container.querySelector('#slt-cache-list');
             if (list) list.innerHTML = '<div class="slt-empty-cache">No cached translations</div>';
-            
+
             const actionsDiv = container.querySelector('.slt-cache-actions');
             if (actionsDiv) actionsDiv.remove();
         });
     }, 0);
-    
+
     return container;
 }
 
@@ -2126,9 +2236,9 @@ function openCacheViewer(): void {
 }async function createSpicyLyricsCacheViewerUI(): Promise<HTMLElement> {
     const container = document.createElement('div');
     container.className = 'slt-cache-viewer';
-    
+
     container.innerHTML = `<div style="padding: 20px; text-align: center;">Loading cache...</div>`;
-    
+
     try {
         let cacheItems: any[] = [];
         let totalSize = 0;
@@ -2202,7 +2312,7 @@ function openCacheViewer(): void {
         }
 
         let currentTotalSize = totalSize;
-        
+
         container.innerHTML = `
         <style>
             .slt-cache-viewer {
@@ -2428,7 +2538,7 @@ function openCacheViewer(): void {
         <div class="slt-cache-toolbar">
             <button id="slt-sl-cache-back-to-settings" class="slt-cache-back" type="button">&lt; Back to Settings</button>
         </div>
-        
+
         <div class="slt-cache-stats">
             <div class="slt-stat">
                 <span class="slt-stat-label">Cached Requests</span>
@@ -2439,9 +2549,9 @@ function openCacheViewer(): void {
                 <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes(totalSize)}</span>
             </div>
         </div>
-        
+
         <div class="slt-cache-list" id="slt-sl-cache-list">
-            ${cacheItems.length === 0 ? 
+            ${cacheItems.length === 0 ?
                 '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>' :
                 cacheItems.map((item, index) => {
                     const displayTitle = item.isTrackId ? 'Track ID: ' + item.trackId : item.url.pathname;
@@ -2477,14 +2587,14 @@ function openCacheViewer(): void {
                 `}).join('')
             }
         </div>
-        
+
         ${cacheItems.length > 0 ? `
         <div class="slt-cache-actions">
             <button class="slt-cache-delete-all" id="slt-sl-delete-all-cache">Delete All Spicy Lyrics Cache</button>
         </div>
         ` : ''}
     `;
-    
+
     setTimeout(() => {
         const backToSettingsBtn = container.querySelector('#slt-sl-cache-back-to-settings') as HTMLButtonElement;
         backToSettingsBtn?.addEventListener('click', () => {
@@ -2538,21 +2648,21 @@ function openCacheViewer(): void {
                         try {
                             const cache = await caches.open(cacheName);
                             await cache.delete(url);
-                            
+
                             const itemSize = parseInt(item.dataset.size || '0', 10);
                             currentTotalSize = Math.max(0, currentTotalSize - itemSize);
-                            
+
                             item.remove();
-                            
+
                             const tracksEl = container.querySelector('#slt-sl-stat-tracks');
                             if (tracksEl) {
                                 const current = parseInt(tracksEl.textContent || '0', 10);
                                 tracksEl.textContent = String(Math.max(0, current - 1));
                             }
-                            
+
                             const sizeEl = container.querySelector('#slt-sl-stat-size');
                             if (sizeEl) sizeEl.textContent = formatBytes(currentTotalSize);
-                            
+
                             const list = container.querySelector('#slt-sl-cache-list');
                             if (list && list.querySelectorAll('.slt-cache-item').length === 0) {
                                 list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
@@ -2566,30 +2676,30 @@ function openCacheViewer(): void {
                 }
             });
         });
-        
+
         const deleteAllBtn = container.querySelector('#slt-sl-delete-all-cache');
         deleteAllBtn?.addEventListener('click', async () => {
             await clearSpicyLyricsCachedLyrics();
-            
+
             currentTotalSize = 0;
             const tracksEl = container.querySelector('#slt-sl-stat-tracks');
             if (tracksEl) tracksEl.textContent = '0';
-            
+
             const sizeEl = container.querySelector('#slt-sl-stat-size');
             if (sizeEl) sizeEl.textContent = '0 B';
-            
+
             const list = container.querySelector('#slt-sl-cache-list');
             if (list) list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
-            
+
             const actionsDiv = container.querySelector('.slt-cache-actions');
             if (actionsDiv) actionsDiv.remove();
         });
     }, 0);
-    
+
     } catch (e) {
         container.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff7373;">Failed to load cache</div>`;
     }
-    
+
     return container;
 };
 
@@ -2778,9 +2888,9 @@ async function openSpicyLyricsCacheViewer(): Promise<void> {
             })(),
             isLarge: true
         });
-        
+
         const ui = await createSpicyLyricsCacheViewerUI();
-        
+
         displayModal({
             title: 'Spicy Lyrics Cache',
             content: ui,
@@ -2824,7 +2934,7 @@ export async function registerSettings(): Promise<void> {
             }
             return false;
         };
-        
+
         if (!registerMenuItem()) {
             setTimeout(registerMenuItem, 2000);
         }

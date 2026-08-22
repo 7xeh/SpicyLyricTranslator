@@ -51,5 +51,4 @@ The full lyrics view, the sidebar lyrics view, and picture-in-picture lyrics whe
 ## Next steps
 
 - Want better quality than Google? Add an API key — see [Providers](providers.md)
-- Learning the language? Try [Vocabulary / Learning Mode](features.md#vocabulary--learning-mode)
 - Something not working? See [Troubleshooting](troubleshooting.md)

@@ -3,7 +3,7 @@
 Settings live in two places, with the same options in both:
 
 - **Spotify settings** — the full panel, grouped into Translation, Providers, and Interface
-- **Quick popup** — right-click the translate button in the Spicy Lyrics controls
+- **Quick popup** — right-click the translate button in the Spicy Lyrics controls for display mode and romanization, without opening the full panel
 
 ## Translation
 
@@ -12,6 +12,7 @@ Settings live in two places, with the same options in both:
 | **Target Language** | The language to translate into. Full Google Translate language list |
 | **Use Regional Variant** | Asks for a regional variant of the target language (currently Valencian for Catalan). Only shown when the language has a variant *and* the provider is OpenAI, Gemini, Grok, Claude, or Custom — code-based providers have no variant model, so the option hides rather than silently returning the standard language |
 | **Translation Display** | Replace, or Below each line |
+| **Show Romanization** | Adds a pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one |
 | **Translation API** | Google, LibreTranslate, DeepL, OpenAI, Gemini, Grok, Claude, or Custom |
 | **Parallel Translation Requests** | 1–6 concurrent requests on LLM providers. Faster on long songs; higher values increase API usage and can hit free-tier rate limits |
 
@@ -42,7 +43,6 @@ Only the fields for your selected provider are shown. See [Providers](providers.
 | Setting | What it does |
 | --- | --- |
 | **Show Translation Quality Indicator** | Per-line confidence indicator on translated lines |
-| **Vocabulary / Learning Mode** | Word-by-word paired flashcards — see [Features](features.md#vocabulary--learning-mode) |
 | **Hide Connection Status** | Hides the latency and installed-users indicator |
 
 ## Actions

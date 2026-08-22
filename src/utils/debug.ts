@@ -43,7 +43,7 @@ export function debugTag(tag: string, ...args: unknown[]): void {
 
 export function createLogger(moduleName: string) {
     const moduleTag = `${TAG} [${moduleName}]`;
-    
+
     return {
         debug: (...args: unknown[]) => {
             if (debugMode) {

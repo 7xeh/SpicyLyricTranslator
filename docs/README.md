@@ -8,7 +8,7 @@ Full documentation for the extension. If you just installed it, start with [Gett
 | --- | --- |
 | [Getting Started](getting-started.md) | Requirements, first run, your first translation, keyboard shortcut |
 | [Installation](installation.md) | Manual install — loader script and Windows installer |
-| [Features](features.md) | Display modes, quality indicator, Vocabulary / Learning Mode |
+| [Features](features.md) | Display modes, romanization, quality indicator |
 | [Providers](providers.md) | All eight translation backends, keys, models, and per-provider notes |
 | [Settings](settings.md) | Every setting, credential field, toggle, and action |
 | [How It Works](how-it-works.md) | Romanization handling, source lyric priority, caching and data |

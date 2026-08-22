@@ -9,13 +9,12 @@ import { getResolvedTargetLanguage } from './settingsModel';
 import { initConnectionIndicator, getConnectionState, refreshConnection, setConnectionIndicatorHidden } from './connectivity';
 import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
 
-
-import { 
-    translateCurrentLyrics, 
-    removeTranslations, 
-    handleTranslateToggle, 
-    isSpicyLyricsOpen, 
-    onSpicyLyricsOpen, 
+import {
+    translateCurrentLyrics,
+    removeTranslations,
+    handleTranslateToggle,
+    isSpicyLyricsOpen,
+    onSpicyLyricsOpen,
     onSpicyLyricsClose,
     waitForLyricsAndTranslate,
     getLyricsFirstLineText,
@@ -56,12 +55,12 @@ export async function initialize(): Promise<void> {
     initConnectionIndicator();
 
     await registerSettings();
-    
+
     startUpdateChecker(30 * 60 * 1000);
     setupKeyboardShortcut();
 
     showPostUpdateChangelog().catch(() => {});
-    
+
     let wasSpicyLyricsOpen = false;
     const observer = new MutationObserver((mutations) => {
         const isOpen = isSpicyLyricsOpen();
@@ -74,10 +73,10 @@ export async function initialize(): Promise<void> {
         }
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-    
+
     setupViewModeObserver();
     let lastPlayerTrackUri = getCurrentTrackUri();
-    
+
     if (Spicetify.Player?.addEventListener) {
         Spicetify.Player.addEventListener('songchange', () => {
             const previousFirstLine = getLyricsFirstLineText();
@@ -94,7 +93,7 @@ export async function initialize(): Promise<void> {
             state.lastTranslatedSongUri = null;
             clearLyricsCache();
             removeTranslations();
-            
+
             if (state.isEnabled || state.autoTranslate) {
                 if (!state.isEnabled) {
                     state.isEnabled = true;
@@ -105,7 +104,7 @@ export async function initialize(): Promise<void> {
             }
         });
     }
-    
+
     (window as any).SpicyLyricTranslator = {
         enable: () => {
             state.isEnabled = true;
@@ -138,5 +137,5 @@ export async function initialize(): Promise<void> {
             refresh: refreshConnection
         }
     };
-    
+
 }

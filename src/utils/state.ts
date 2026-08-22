@@ -81,8 +81,8 @@ export interface ExtensionState {
     detectedLanguage: string | null;
     syncWordHighlight: boolean;
     showQualityIndicator: boolean;
-    vocabularyMode: boolean;
     hideConnectionIndicator: boolean;
+    showRomanization: boolean;
     _translationsByIndex?: Map<number, string>;
     _qualityByIndex?: Map<number, TranslationQualityMeta>;
 }
@@ -119,7 +119,7 @@ export const state: ExtensionState = {
     detectedLanguage: null,
     syncWordHighlight: storage.get('sync-word-highlight') !== 'false',
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',
-    vocabularyMode: storage.get('vocabulary-mode') === 'true',
     hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
+    showRomanization: storage.get('show-romanization') === 'true',
     _qualityByIndex: undefined
 };

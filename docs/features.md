@@ -9,18 +9,21 @@
 
 Both work in the full lyrics view, the sidebar lyrics view, and picture-in-picture lyrics where available.
 
+Right-click the translate button to switch mode without opening the full settings panel.
+
+## Romanization alongside translation
+
+Turn on **Show Romanization** to get the pronunciation *and* the meaning at the same time. For a Chinese
+song you get the original characters, the pinyin underneath, and the translation below that — so you can
+follow what the song means and still sing along.
+
+The romanization comes from the lyrics provider, so it appears on tracks that ship transliterated text
+(most Chinese, Japanese and Korean songs with synced lyrics). If Spicy Lyrics' own romanization toggle is
+already on, the extra line shows the original script instead, so you never see the same text twice.
+
 ## Translation quality indicator
 
 Each translated line can show a quality indicator, so you can tell at a glance where the provider was confident and where it struggled. Toggle it with **Show Translation Quality Indicator**.
-
-## Vocabulary / Learning Mode
-
-Turns lyric lines into word-by-word paired flashcards:
-
-- Original words are blurred by default and reveal on hover, next to their translated counterpart
-- The pairs hook into the karaoke gradient sync, so translated words highlight in time with the music
-
-Enable it under **Vocabulary / Learning Mode** in settings.
 
 ## Accuracy
 
