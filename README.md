@@ -9,7 +9,7 @@ Translate any song as it plays — replace the lines or stack translations under
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/fXK34DeDW5)
 
 ![Spicetify](https://img.shields.io/badge/Spicetify-Extension-1DB954?style=flat-square&logo=spotify&logoColor=white)
-![Version](https://img.shields.io/badge/Version-2.1.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-2.1.4-blue?style=flat-square)
 ![License](https://img.shields.io/badge/License-Source%20Available-blue?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Online-success?style=flat-square)
 
