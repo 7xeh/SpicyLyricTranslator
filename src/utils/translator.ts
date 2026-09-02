@@ -11,6 +11,7 @@ import {
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
 import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
+import { buildBreakdownPrompt, parseModelBreakdown, breakdownCacheKey, BreakdownToken } from './wordBreakdown';
 
 export interface TranslationResult {
     originalText: string;
@@ -355,7 +356,18 @@ function shouldInvalidateTrackCacheForMixedContent(
     return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
 }
 
-function hasMeaningfulTranslationDifference(source: string, translated: string, targetLang: string): boolean {
+function isUsableSourceLangHint(sourceLang: string | undefined): sourceLang is string {
+    if (!sourceLang) return false;
+    const normalized = sourceLang.toLowerCase().trim();
+    return normalized !== '' && normalized !== 'auto' && normalized !== 'unknown' && normalized !== 'mixed';
+}
+
+function hasMeaningfulTranslationDifference(
+    source: string,
+    translated: string,
+    targetLang: string,
+    knownSourceLang?: string
+): boolean {
     const sourceNorm = normalizeComparisonText(source);
     const translatedNorm = normalizeComparisonText(translated);
 
@@ -364,6 +376,10 @@ function hasMeaningfulTranslationDifference(source: string, translated: string, 
     }
 
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+        return true;
+    }
+
+    if (isUsableSourceLangHint(knownSourceLang) && !isSameLanguage(knownSourceLang, targetLang)) {
         return true;
     }
 
@@ -2543,7 +2559,7 @@ async function translateLyricsInner(
     }
 
     const meaningfulCount = results.reduce(
-        (count, r) => (r.wasTranslated && hasMeaningfulTranslationDifference(r.originalText, r.translatedText, targetLang) ? count + 1 : count),
+        (count, r) => (r.wasTranslated && hasMeaningfulTranslationDifference(r.originalText, r.translatedText, targetLang, detectedLang) ? count + 1 : count),
         0
     );
 
@@ -2663,6 +2679,204 @@ export function deleteCachedTranslation(original: string, language: string): boo
 
 export function deleteTrackCacheEntry(trackUri: string, targetLang?: string): void {
     deleteTrackCache(trackUri, targetLang);
+}
+
+export function providerSupportsWordBreakdown(api: ApiPreference = preferredApi): boolean {
+    return VARIANT_CAPABLE_APIS.includes(api);
+}
+
+async function requestModelCompletion(prompt: string, maxTokens: number): Promise<string> {
+    if (preferredApi === 'openai') {
+        if (!openaiApiKey) throw createProviderConfigError('OpenAI API key not configured. Set it in Settings.');
+        const data = await postJsonProvider(
+            'https://api.openai.com/v1/chat/completions',
+            {
+                model: normalizeOpenAIModelName(openaiModel),
+                messages: [{ role: 'user', content: prompt }],
+                max_completion_tokens: maxTokens
+            },
+            { 'Authorization': `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
+            'OpenAI breakdown',
+            { preferCosmos: true }
+        );
+        recordApiUsage(extractOpenAIUsage(data));
+        return data?.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (preferredApi === 'gemini') {
+        if (!geminiApiKey) throw createProviderConfigError('Gemini API key not configured. Set it in Settings.');
+        const data = await postJsonProvider(
+            appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+            {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
+            },
+            { 'Content-Type': 'application/json' },
+            'Gemini breakdown',
+            { preferCosmos: true }
+        );
+        recordApiUsage(extractGeminiUsage(data));
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+    }
+
+    if (preferredApi === 'grok') {
+        if (!grokApiKey) throw createProviderConfigError('Grok (xAI) API key not configured. Set it in Settings.');
+        const data = await postJsonProvider(
+            'https://api.x.ai/v1/chat/completions',
+            {
+                model: normalizeGrokModelName(grokModel),
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0,
+                max_tokens: maxTokens
+            },
+            { 'Authorization': `Bearer ${grokApiKey}`, 'Content-Type': 'application/json' },
+            'Grok breakdown',
+            { preferCosmos: true }
+        );
+        recordApiUsage(extractOpenAIUsage(data));
+        return data?.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (preferredApi === 'anthropic') {
+        if (!anthropicApiKey) throw createProviderConfigError('Claude (Anthropic) API key not configured. Set it in Settings.');
+        const model = normalizeAnthropicModelName(anthropicModel);
+        const body: Record<string, unknown> = {
+            model,
+            max_tokens: maxTokens,
+            messages: [{ role: 'user', content: prompt }]
+        };
+        if (anthropicModelSupportsThinkingToggle(model)) {
+            body.thinking = { type: 'disabled' };
+        }
+        const data = await postJsonProvider(
+            'https://api.anthropic.com/v1/messages',
+            body,
+            {
+                'x-api-key': anthropicApiKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true',
+                'Content-Type': 'application/json'
+            },
+            'Claude breakdown',
+            { preferCosmos: true }
+        );
+        recordApiUsage(extractAnthropicUsage(data));
+        if (Array.isArray(data.content)) {
+            const textBlock = data.content.find((block: any) => block?.type === 'text' && typeof block.text === 'string');
+            return textBlock?.text?.trim() || '';
+        }
+        return '';
+    }
+
+    if (preferredApi === 'custom') {
+        const url = validateCustomApiUrl();
+        if (!url) throw createProviderConfigError('Custom API URL not configured. Set it in Settings.');
+        if (customApiFormat === 'gemini') {
+            const data = await postJsonProvider(
+                url,
+                {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
+                },
+                getCustomApiHeaders('gemini'),
+                'Custom breakdown',
+                { preferCosmos: true }
+            );
+            recordApiUsage(extractGeminiUsage(data));
+            return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        }
+        const data = await postJsonProvider(
+            url,
+            {
+                model: customApiModel || undefined,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: maxTokens
+            },
+            getCustomApiHeaders('openai'),
+            'Custom breakdown',
+            { preferCosmos: true }
+        );
+        recordApiUsage(extractOpenAIUsage(data));
+        return data?.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    throw new Error(`Word breakdown is not supported by the ${preferredApi} provider`);
+}
+
+interface BreakdownCacheEntry {
+    tokens: BreakdownToken[];
+    timestamp: number;
+}
+
+type BreakdownCache = Record<string, BreakdownCacheEntry>;
+
+const BREAKDOWN_CACHE_KEY = 'breakdown-cache';
+const BREAKDOWN_CACHE_LIMIT = 400;
+const inFlightBreakdowns = new Map<string, Promise<BreakdownToken[] | null>>();
+
+export function getCachedWordBreakdown(sourceText: string, targetLang: string): BreakdownToken[] | null {
+    const cache = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
+    const entry = cache[breakdownCacheKey(sourceText, targetLang)];
+    return entry?.tokens?.length ? entry.tokens : null;
+}
+
+function storeWordBreakdown(sourceText: string, targetLang: string, tokens: BreakdownToken[]): void {
+    const cache = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
+    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
+
+    const keys = Object.keys(cache);
+    if (keys.length > BREAKDOWN_CACHE_LIMIT) {
+        keys
+            .sort((a, b) => (cache[a].timestamp || 0) - (cache[b].timestamp || 0))
+            .slice(0, keys.length - BREAKDOWN_CACHE_LIMIT)
+            .forEach(key => delete cache[key]);
+    }
+
+    storage.setJSON(BREAKDOWN_CACHE_KEY, cache);
+}
+
+export function clearWordBreakdownCache(): void {
+    storage.remove(BREAKDOWN_CACHE_KEY);
+}
+
+export async function fetchWordBreakdown(
+    sourceText: string,
+    sourceLang: string | undefined,
+    targetLang: string
+): Promise<BreakdownToken[] | null> {
+    const trimmed = (sourceText || '').trim();
+    if (!trimmed) return null;
+    if (!providerSupportsWordBreakdown()) return null;
+    if (isOffline()) return null;
+
+    const cached = getCachedWordBreakdown(trimmed, targetLang);
+    if (cached) return cached;
+
+    const key = breakdownCacheKey(trimmed, targetLang);
+    const pending = inFlightBreakdowns.get(key);
+    if (pending) return pending;
+
+    const request = (async (): Promise<BreakdownToken[] | null> => {
+        try {
+            const prompt = buildBreakdownPrompt(
+                trimmed,
+                getTranslationLanguageName(sourceLang || 'auto'),
+                getTranslationLanguageName(targetLang)
+            );
+            const raw = await requestModelCompletion(prompt, Math.max(600, trimmed.length * 12));
+            const tokens = parseModelBreakdown(raw);
+            if (tokens) storeWordBreakdown(trimmed, targetLang, tokens);
+            return tokens;
+        } catch (breakdownError) {
+            warn('Word breakdown request failed:', breakdownError);
+            return null;
+        } finally {
+            inFlightBreakdowns.delete(key);
+        }
+    })();
+
+    inFlightBreakdowns.set(key, request);
+    return request;
 }
 
 export function isOffline(): boolean {

@@ -8,6 +8,7 @@ import { registerSettings } from './settings';
 import { getResolvedTargetLanguage } from './settingsModel';
 import { initConnectionIndicator, getConnectionState, refreshConnection, setConnectionIndicatorHidden } from './connectivity';
 import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
+import { setDebugMode, isDebugEnabled } from './debug';
 
 import {
     translateCurrentLyrics,
@@ -100,7 +101,7 @@ export async function initialize(): Promise<void> {
                     storage.set('translation-enabled', 'true');
                     updateButtonState();
                 }
-                waitForLyricsAndTranslate(20, 800, previousFirstLine, previousTrackUri);
+                waitForLyricsAndTranslate(60, 250, previousFirstLine, previousTrackUri);
             }
         });
     }
@@ -129,6 +130,8 @@ export async function initialize(): Promise<void> {
         getCachedTranslations: getCachedTranslations,
         deleteCachedTranslation: deleteCachedTranslation,
         getState: () => ({ ...state }),
+        setDebugMode,
+        isDebugEnabled,
         checkForUpdates: () => checkForUpdates(true),
         getUpdateInfo: getUpdateInfo,
         version: VERSION,

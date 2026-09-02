@@ -242,3 +242,75 @@ test('romanized Japanese detection requires a distinctly Japanese token, not bar
     assert.ok(detectRomanizedJapanese('kimi no koe wa yume no naka de kikoeru'));
     assert.ok(detectRomanizedJapanese('kokoro ga itai kara namida wo mita'));
 });
+
+test('Swedish lyrics are detected locally instead of falling through as unknown', () => {
+    assert.equal(detectLanguageHeuristic('Jag vet inte vad du gör med mig')?.code, 'sv');
+    assert.equal(detectLanguageHeuristic('Och sen är du bara borta igen')?.code, 'sv');
+    assert.equal(detectLanguageHeuristic('Du är mitt hjärta och jag är din')?.code, 'sv');
+});
+
+test('short Swedish lyric lines are recognised as non-English', () => {
+    for (const line of ['Jag saknar dig', 'Du är borta nu', 'Kom hem till mig', 'Vi springer bort']) {
+        assert.equal(isLikelyNonTargetLine(line, 'en'), true, line);
+    }
+});
+
+test('Swedish lyrics are not skipped when translating to English', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const lyrics = [
+            'Jag vet inte vad du gör med mig',
+            'Och sen är du bara borta igen',
+            'Du är mitt hjärta och jag är din'
+        ];
+        const result = await shouldSkipTranslation(lyrics, 'en');
+        assert.equal(result.skip, false);
+        assert.equal(result.detectedLanguage, 'sv');
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('Swedish lyrics are skipped when Swedish is the target language', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const lyrics = [
+            'Jag vet inte vad du gör med mig',
+            'Och sen är du bara borta igen',
+            'Du är mitt hjärta och jag är din'
+        ];
+        const result = await shouldSkipTranslation(lyrics, 'sv');
+        assert.equal(result.skip, true);
+        assert.equal(result.detectedLanguage, 'sv');
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
+});
+
+test('a Swedish track counts as mixed content when the target is English', () => {
+    const lyrics = [
+        'Jag saknar dig',
+        'Du är borta nu',
+        'Kom hem till mig',
+        'Vi springer bort'
+    ];
+    assert.equal(assessMixedLanguageContent(lyrics, 'en').hasMixedContent, true);
+});
+
+test('Nordic word lists do not steal detection from neighbouring languages', () => {
+    assert.equal(detectLanguageHeuristic('I know that you were the only one for me')?.code, 'en');
+    assert.equal(detectLanguageHeuristic('Und dann bist du einfach nicht mehr da')?.code, 'de');
+    assert.equal(detectLanguageHeuristic('Je ne sais pas ce que tu fais de moi')?.code, 'fr');
+    assert.equal(detectLanguageHeuristic('En dat is niet wat ik voor ons wil')?.code, 'nl');
+    assert.equal(detectLanguageHeuristic('Jeg vet ikke hva du gjør med meg')?.code, 'no');
+    assert.equal(detectLanguageHeuristic('En tiedä mitä sinä teet minulle nyt')?.code, 'fi');
+});
+
+test('Norwegian Bokmal/Nynorsk codes fold into "no"', () => {
+    assert.equal(normalizeLanguageCode('nb'), 'no');
+    assert.equal(normalizeLanguageCode('nn-NO'), 'no');
+    assert.equal(normalizeLanguageCode('Swedish'), 'sv');
+    assert.equal(isSameLanguage('nb', 'no'), true);
+});

@@ -5,7 +5,8 @@ import {
     SETTINGS_CATEGORIES,
     getSectionsForCategory,
     matchesSettingQuery,
-    isSettingFieldVisible
+    isSettingFieldVisible,
+    OVERLAY_MODE_OPTIONS
 } from '../src/utils/settingsModel';
 
 test('every setting belongs to a section that a category renders', () => {
@@ -73,4 +74,52 @@ test('the regional variant toggle is hidden unless the provider and language bot
 
     setTargetLanguage('es');
     assert.equal(isSettingFieldVisible(field, 'openai'), false, 'Spanish has no variant to offer');
+});
+
+test('learning mode is registered as a discoverable toggle', () => {
+    const field = SETTINGS_SCHEMA.find(f => f.id === 'learning-mode');
+
+    assert.ok(field, 'learning-mode setting is missing');
+    assert.equal(field!.type, 'toggle');
+    assert.equal(field!.storageKey, 'learning-mode');
+    assert.equal(field!.defaultValue, false);
+    assert.ok(field!.effects?.includes('learningModeClass'));
+    assert.ok(field!.effects?.includes('reapplyTranslations'));
+});
+
+test('learning mode is findable by the words a user would search', () => {
+    for (const query of ['learning', 'vocabulary', 'word by word', 'breakdown', 'lemma']) {
+        const field = SETTINGS_SCHEMA.find(f => f.id === 'learning-mode');
+        assert.equal(matchesSettingQuery(field!, query), true, `query "${query}" did not match`);
+    }
+});
+
+test('translation display offers a none mode alongside replace and below-line', () => {
+    assert.deepEqual(
+        OVERLAY_MODE_OPTIONS.map(option => option.value),
+        ['replace', 'interleaved', 'none']
+    );
+});
+
+test('every display mode option has a unique value and visible text', () => {
+    const values = OVERLAY_MODE_OPTIONS.map(option => option.value);
+    assert.equal(new Set(values).size, values.length);
+    assert.ok(OVERLAY_MODE_OPTIONS.every(option => option.text.trim().length > 0));
+});
+
+test('the display mode setting exposes the none option to the UI', () => {
+    const field = SETTINGS_SCHEMA.find(f => f.id === 'overlay-mode');
+
+    assert.ok(field);
+    assert.equal(field!.type, 'select');
+    assert.ok(field!.options?.some(option => option.value === 'none'));
+    assert.equal(field!.defaultValue, 'replace');
+});
+
+test('the none display mode is findable by the words a user would search', () => {
+    const field = SETTINGS_SCHEMA.find(f => f.id === 'overlay-mode');
+
+    for (const query of ['none', 'hide', 'original only', 'off']) {
+        assert.equal(matchesSettingQuery(field!, query), true, `query "${query}" did not match`);
+    }
 });

@@ -83,6 +83,7 @@ export interface ExtensionState {
     showQualityIndicator: boolean;
     hideConnectionIndicator: boolean;
     showRomanization: boolean;
+    learningMode: boolean;
     _translationsByIndex?: Map<number, string>;
     _qualityByIndex?: Map<number, TranslationQualityMeta>;
 }
@@ -121,5 +122,6 @@ export const state: ExtensionState = {
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',
     hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
     showRomanization: storage.get('show-romanization') === 'true',
+    learningMode: storage.get('learning-mode') === 'true',
     _qualityByIndex: undefined
 };

@@ -1,7 +1,7 @@
 import { state, TranslationQualityMeta } from './state';
 import { Icons } from './icons';
 import { storage } from './storage';
-import { translateLyrics, isOffline, getCacheStats } from './translator';
+import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown } from './translator';
 import { getCurrentTrackUri, getTrackCache } from './trackCache';
 import {
     enableOverlay,
@@ -20,13 +20,18 @@ import {
     updateOverlayConfig,
     isSidebarLyricsActive,
     findSidebarLyricsPage,
+    pauseActiveSync,
+    resumeActiveSync,
+    setBreakdownLookup,
+    invalidateLearningRow,
+    setLearningTargetLanguage,
     CINEMA_CONTAINER_SELECTOR,
     CINEMA_LYRICS_CONTENT_SELECTOR
 } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
 import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
-import { warn, error } from './debug';
+import { warn, error, debug } from './debug';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 
 let viewControlsObserver: MutationObserver | null = null;
@@ -123,30 +128,39 @@ function rememberSkippedTranslation(
     if (detectedLanguage) state.detectedLanguage = detectedLanguage;
 }
 
-function lookupWithFallback<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
-    if (!text) return undefined;
-    const norm = normalizeMatchKey(text);
+interface MatchKeys {
+    norm: string;
+    nonLatinNorm: string;
+    latinNorm: string;
+}
+
+function buildMatchKeys(text: string): MatchKeys {
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    return {
+        norm: normalizeMatchKey(text),
+        nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeMatchKey(nonLatinOnly) : '',
+        latinNorm: latinOnly && latinOnly !== text ? normalizeMatchKey(latinOnly) : ''
+    };
+}
+
+function lookupWithKeys<V>(map: Map<string, V>, keys: MatchKeys): V | undefined {
+    const { norm, nonLatinNorm, latinNorm } = keys;
+
     if (norm) {
         const direct = map.get(norm);
         if (direct) return direct;
     }
 
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (nonLatinOnly && nonLatinOnly !== text) {
-        const nNorm = normalizeMatchKey(nonLatinOnly);
-        if (nNorm) {
-            const match = map.get(nNorm);
-            if (match) return match;
-        }
+    if (nonLatinNorm) {
+        const match = map.get(nonLatinNorm);
+        if (match) return match;
     }
 
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (latinOnly && latinOnly !== text) {
-        const lNorm = normalizeMatchKey(latinOnly);
-        if (lNorm) {
-            const match = map.get(lNorm);
-            if (match) return match;
-        }
+    if (latinNorm) {
+        const match = map.get(latinNorm);
+        if (match) return match;
     }
 
     if (norm && norm.length >= 4) {
@@ -163,6 +177,11 @@ function lookupWithFallback<V>(map: Map<string, V>, text: string | undefined | n
     }
 
     return undefined;
+}
+
+function lookupWithFallback<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
+    if (!text) return undefined;
+    return lookupWithKeys(map, buildMatchKeys(text));
 }
 
 function getPIPWindow(): Window | null {
@@ -631,6 +650,8 @@ export function getLyricsFirstLineText(): string | null {
     return null;
 }
 
+const LYRICS_SETTLE_DELAY_MS = 150;
+
 export async function waitForLyricsAndTranslate(retries: number = 10, delay: number = 500, previousFirstLine?: string | null, _previousTrackUri?: string | null): Promise<void> {
     const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
 
@@ -646,9 +667,9 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
                     continue;
                 }
                 setupLyricsObserver();
-                 await new Promise(resolve => setTimeout(resolve, delay));
-                 await translateCurrentLyrics();
-                 return;
+                await new Promise(resolve => setTimeout(resolve, LYRICS_SETTLE_DELAY_MS));
+                await translateCurrentLyrics();
+                return;
             }
         }
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -701,6 +722,8 @@ export async function translateCurrentLyrics(): Promise<void> {
 
     state.isTranslating = true;
     let buttonsLoading = false;
+    const phaseStart = Date.now();
+    const sincePhaseStart = (): string => `${Date.now() - phaseStart}ms`;
 
     try {
         let domLineTexts: string[] = [];
@@ -745,6 +768,8 @@ export async function translateCurrentLyrics(): Promise<void> {
             }
         }
 
+        debug(`translate: skip-check done at ${sincePhaseStart()} (detected=${state.detectedLanguage ?? 'none'})`);
+
         setTranslateButtonsLoading(true);
         buttonsLoading = true;
 
@@ -763,6 +788,8 @@ export async function translateCurrentLyrics(): Promise<void> {
         } catch (apiErr) {
             warn('SpicyLyrics API fetch failed, falling back to DOM:', apiErr);
         }
+
+        debug(`translate: lyrics API fetch done at ${sincePhaseStart()}`);
 
         if (romanizationOn && currentTrackUri) {
             const trackCache = getTrackCache(currentTrackUri, state.targetLanguage);
@@ -787,23 +814,6 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length > 0);
 
-        if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
-            for (let retryAttempt = 0; retryAttempt < 2; retryAttempt++) {
-                await new Promise(resolve => setTimeout(resolve, 400));
-                lines = getLyricsLines();
-                if (lines.length === 0) break;
-
-                domLineTexts = [];
-                lines.forEach(line => domLineTexts.push(extractLineText(line)));
-
-                if (apiVocalTexts.length === lines.length) {
-                    useApiLines = true;
-                    break;
-                }
-            }
-
-        }
-
         let sourceSelection = resolveTranslationSourceLines({
             domLineTexts,
             romanizationOn,
@@ -824,73 +834,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         apiVocalLineData = sourceSelection.apiVocalLineData;
         useApiLines = sourceSelection.useApiLines;
 
-        if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
-            for (let retryAttempt = 0; retryAttempt < 3; retryAttempt++) {
-                await new Promise(resolve => setTimeout(resolve, 600));
-                lines = getLyricsLines();
-                if (lines.length === 0) break;
-
-                domLineTexts = [];
-                lines.forEach(line => domLineTexts.push(extractLineText(line)));
-
-                if (apiVocalTexts.length === lines.length) {
-                    useApiLines = true;
-                    break;
-                }
-
-                const apiTextSet = new Set(apiVocalTexts.map(t => t.trim().toLowerCase()));
-                const domMatchCount = domLineTexts.filter(t => apiTextSet.has(t.trim().toLowerCase())).length;
-                if (domMatchCount > domLineTexts.length * 0.3) {
-                    break;
-                }
-            }
-
-            sourceSelection = resolveTranslationSourceLines({
-                domLineTexts,
-                romanizationOn,
-                apiVocalTexts,
-                apiVocalLineData,
-                cachedSourceLines
-            });
-            apiVocalTexts = sourceSelection.apiVocalTexts;
-            apiVocalLineData = sourceSelection.apiVocalLineData;
-            useApiLines = sourceSelection.useApiLines;
-        }
-
-        let matchedTimingData: LyricLineData[] | null = null;
-        if (!useApiLines && apiVocalTexts && apiVocalLineData && apiVocalTexts.length > 0) {
-            const apiTextMap = new Map<string, LyricLineData>();
-            for (let i = 0; i < apiVocalTexts.length; i++) {
-                const norm = apiVocalTexts[i].trim().toLowerCase();
-                if (norm && !apiTextMap.has(norm)) {
-                    apiTextMap.set(norm, apiVocalLineData[i]);
-                }
-            }
-
-            matchedTimingData = [];
-            let matchCount = 0;
-            for (let i = 0; i < domLineTexts.length; i++) {
-                const domNorm = domLineTexts[i].trim().toLowerCase();
-                const matched = apiTextMap.get(domNorm);
-                if (matched) {
-                    matchedTimingData.push(matched);
-                    matchCount++;
-                } else {
-                    matchedTimingData.push({
-                        text: domLineTexts[i],
-                        startTime: 0,
-                        endTime: 0,
-                        isInstrumental: false,
-                    });
-                }
-            }
-        }
-
         const lineTexts = sourceSelection.lineTexts;
-
-        if (useApiLines) {
-        } else if (apiVocalTexts) {
-        }
 
         const nonEmptyTexts = lineTexts.filter(t => t.trim().length > 0);
         if (nonEmptyTexts.length === 0) {
@@ -1009,6 +953,8 @@ export async function translateCurrentLyrics(): Promise<void> {
             return;
         }
 
+        debug(`translate: provider done at ${sincePhaseStart()}`);
+
         const hasMeaningfulTranslation = translations.some(result =>
             result.wasTranslated &&
             normalizeForComparison(result.originalText) !== normalizeForComparison(result.translatedText)
@@ -1086,8 +1032,6 @@ export async function translateCurrentLyrics(): Promise<void> {
         let timingDataForOverlay: LyricLineData[] | null = null;
         if (useApiLines && apiVocalLineData) {
             timingDataForOverlay = apiVocalLineData;
-        } else if (matchedTimingData) {
-            timingDataForOverlay = matchedTimingData;
         } else if (apiLineData) {
             timingDataForOverlay = apiLineData;
         }
@@ -1159,13 +1103,15 @@ export async function translateCurrentLyrics(): Promise<void> {
                 const domText = extractLineText(line);
                 if (!domText) return;
 
-                let translation = lookupWithFallback(translationByContent, domText);
+                const matchKeys = buildMatchKeys(domText);
+
+                let translation = lookupWithKeys(translationByContent, matchKeys);
                 if (!translation && allowIndexFallback && translations[domIdx]) {
                     translation = translations[domIdx].translatedText;
                 }
                 if (translation) translationsByIdx.set(domIdx, translation);
 
-                let meta = lookupWithFallback(qualityByContent, domText);
+                let meta = lookupWithKeys(qualityByContent, matchKeys);
                 if (!meta && allowIndexFallback) {
                     const result = translations[domIdx];
                     if (result?.wasTranslated) {
@@ -1178,13 +1124,13 @@ export async function translateCurrentLyrics(): Promise<void> {
                 }
                 if (meta) qualityByIdx.set(domIdx, meta);
 
-                let rom = lookupWithFallback(romanizationByContent, domText);
+                let rom = lookupWithKeys(romanizationByContent, matchKeys);
                 if (!rom && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.romanizedText) {
                     rom = apiVocalLineData[domIdx].romanizedText;
                 }
                 if (rom) romanizationByIdx.set(domIdx, rom);
 
-                let orig = lookupWithFallback(originalByContent, domText);
+                let orig = lookupWithKeys(originalByContent, matchKeys);
                 if (!orig && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.text) {
                     orig = apiVocalLineData[domIdx].text;
                 }
@@ -1212,6 +1158,8 @@ export async function translateCurrentLyrics(): Promise<void> {
         } else {
             applyTranslations(lines);
         }
+
+        debug(`translate: first render at ${sincePhaseStart()}`);
 
         scheduleTranslationReapply(currentTrackUri);
 
@@ -1301,15 +1249,14 @@ function looseLatinSkeleton(text: string): string {
     return (text || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-function applyTranslations(lines: NodeListOf<Element>): void {
+function applyTranslations(lines: NodeListOf<Element>): number {
     const translationMapByIndex = new Map<number, string>();
     lines.forEach((line, index) => {
+        const originalText = extractLineText(line);
         let translatedText = state._translationsByIndex?.get(index);
         if (!translatedText) {
-            const originalText = extractLineText(line);
             translatedText = state.translatedLyrics.get(originalText);
         }
-        const originalText = extractLineText(line);
         if (!translatedText) return;
         if (translatedText === originalText) return;
         if (normalizeForComparison(translatedText) === normalizeForComparison(originalText)) return;
@@ -1324,7 +1271,8 @@ function applyTranslations(lines: NodeListOf<Element>): void {
     const overlaySettings = {
         mode: state.overlayMode,
         syncWordHighlight: state.syncWordHighlight,
-        showRomanization: state.showRomanization
+        showRomanization: state.showRomanization,
+        learningMode: state.learningMode
     };
 
     if (!isOverlayActive()) {
@@ -1336,6 +1284,8 @@ function applyTranslations(lines: NodeListOf<Element>): void {
         setQualityMetadata(state._qualityByIndex);
     }
     updateOverlayContent(translationMapByIndex);
+    debug(`applyTranslations: matched ${translationMapByIndex.size}/${lines.length} DOM lines`);
+    return translationMapByIndex.size;
 }
 
 function clearReapplyTimers(): void {
@@ -1345,21 +1295,23 @@ function clearReapplyTimers(): void {
     reapplyTimers = [];
 }
 
+function reapplyTranslationsToCurrentLines(trackUri?: string | null): void {
+    if (!state.isEnabled || state.isTranslating) return;
+    if (trackUri && getCurrentTrackUri() !== trackUri) return;
+    if (state.translatedLyrics.size === 0 && contentTranslation.size === 0) return;
+
+    const lines = getLyricsLines();
+    if (lines.length === 0) return;
+    applyTranslations(lines);
+}
+
+const REAPPLY_DELAYS_MS = [60, 200, 500, 1000, 1800, 3000, 5000];
+
 function scheduleTranslationReapply(trackUri: string | null): void {
     clearReapplyTimers();
 
-    const reapply = () => {
-        if (!state.isEnabled || state.isTranslating) return;
-        if (trackUri && getCurrentTrackUri() !== trackUri) return;
-        if (state.translatedLyrics.size === 0 && contentTranslation.size === 0) return;
-
-        const lines = getLyricsLines();
-        if (lines.length === 0) return;
-        applyTranslations(lines);
-    };
-
-    for (const delay of [120, 400, 900]) {
-        reapplyTimers.push(setTimeout(reapply, delay));
+    for (const delay of REAPPLY_DELAYS_MS) {
+        reapplyTimers.push(setTimeout(() => reapplyTranslationsToCurrentLines(trackUri), delay));
     }
 }
 
@@ -1384,6 +1336,9 @@ async function fillVisibleGaps(): Promise<void> {
     });
 
     if (missing.length === 0) return;
+
+    debug(`fillVisibleGaps: ${missing.length} uncovered DOM lines, requesting translation`);
+    const gapsStart = Date.now();
 
     fillGapsInFlight = true;
     try {
@@ -1416,6 +1371,7 @@ async function fillVisibleGaps(): Promise<void> {
             const fresh = getLyricsLines();
             if (fresh.length > 0) applyTranslations(fresh);
         }
+        debug(`fillVisibleGaps: completed in ${Date.now() - gapsStart}ms`);
     } catch (err) {
         warn('Failed to fill visible translation gaps:', err);
     } finally {
@@ -1589,6 +1545,7 @@ export async function onSpicyLyricsOpen(): Promise<void> {
     if (!viewControls) viewControls = await waitForElement('.ViewControls', 2000);
 
     if (viewControls) insertTranslateButton();
+    resumeActiveSync();
     setupLyricsObserver();
     setupRomanizationWatcher();
 
@@ -1602,12 +1559,12 @@ export async function onSpicyLyricsOpen(): Promise<void> {
     if (state.isEnabled) {
         updateButtonState();
         state.lastTranslatedSongUri = null;
-        waitForLyricsAndTranslate(20, 600);
+        waitForLyricsAndTranslate(50, 250);
     } else if (state.autoTranslate) {
         state.isEnabled = true;
         storage.set('translation-enabled', 'true');
         updateButtonState();
-        waitForLyricsAndTranslate(20, 600);
+        waitForLyricsAndTranslate(50, 250);
     }
 }
 
@@ -1621,6 +1578,7 @@ export function onSpicyLyricsClose(): void {
         rerenderDebounceTimer = null;
     }
     clearReapplyTimers();
+    pauseActiveSync();
     state.isTranslating = false;
     if (lyricsObserver) {
         lyricsObserver.disconnect();
@@ -1645,7 +1603,7 @@ function setupRomanizationWatcher(): void {
                 removeTranslations();
                 setupLyricsObserver();
                 state.lastTranslatedSongUri = null;
-                await waitForLyricsAndTranslate(15, 500);
+                await waitForLyricsAndTranslate(40, 250);
             }
         }, 1200);
     };
@@ -1668,7 +1626,37 @@ function cleanupRomanizationWatcher(): void {
     }
 }
 
+const requestedBreakdowns = new Set<string>();
+
+function registerBreakdownLookup(): void {
+    setBreakdownLookup((sourceText: string) => {
+        if (!state.learningMode) return null;
+        setLearningTargetLanguage(state.targetLanguage);
+
+        const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
+        if (cached) return cached;
+
+        if (!providerSupportsWordBreakdown()) return null;
+
+        const key = `${state.targetLanguage}:${sourceText}`;
+        if (requestedBreakdowns.has(key)) return null;
+        requestedBreakdowns.add(key);
+
+        void fetchWordBreakdown(sourceText, state.detectedLanguage || undefined, state.targetLanguage)
+            .then(tokens => {
+                if (tokens) invalidateLearningRow();
+            })
+            .catch(() => {})
+            .finally(() => {
+                requestedBreakdowns.delete(key);
+            });
+
+        return null;
+    });
+}
+
 export function setupViewModeObserver(): void {
+    registerBreakdownLookup();
     if (viewModeIntervalId) clearInterval(viewModeIntervalId);
 
     viewModeIntervalId = setInterval(() => {
@@ -1687,7 +1675,8 @@ export function setupViewModeObserver(): void {
                 setupRomanizationWatcher();
             }
 
-            if (observedLyricsContent && !observedLyricsContent.isConnected) {
+            const observedContentReplaced = Boolean(observedLyricsContent && !observedLyricsContent.isConnected);
+            if (observedContentReplaced) {
                 if (lyricsObserver) {
                     lyricsObserver.disconnect();
                     lyricsObserver = null;
@@ -1696,6 +1685,7 @@ export function setupViewModeObserver(): void {
             }
             if (!lyricsObserver && state.isEnabled) {
                 setupLyricsObserver();
+                if (observedContentReplaced) reapplyTranslationsToCurrentLines();
             }
 
             const currentRomanization = isRomanizationActive();
@@ -1705,7 +1695,7 @@ export function setupViewModeObserver(): void {
                         removeTranslations();
                         setupLyricsObserver();
                         state.lastTranslatedSongUri = null;
-                        waitForLyricsAndTranslate(15, 500);
+                        waitForLyricsAndTranslate(40, 250);
                     }
                 }
             }

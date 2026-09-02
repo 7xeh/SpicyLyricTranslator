@@ -194,6 +194,21 @@ var SpicyLyricTranslater = (() => {
   var debugMode = storage.get("debug-mode") === "true";
   var TAG = "%c[SpicyLyricTranslator]";
   var TAG_STYLE = "color: #FF69B4; font-weight: bold;";
+  function isDebugEnabled() {
+    return debugMode;
+  }
+  function setDebugMode(enabled) {
+    debugMode = enabled;
+    storage.set("debug-mode", enabled.toString());
+    if (enabled) {
+      console.log(TAG, TAG_STYLE, "Debug mode enabled");
+    }
+  }
+  function debug(...args) {
+    if (debugMode) {
+      console.log(TAG, TAG_STYLE, ...args);
+    }
+  }
   function warn(...args) {
     console.warn(TAG, TAG_STYLE, ...args);
   }
@@ -740,6 +755,10 @@ var SpicyLyricTranslater = (() => {
     { code: "pl", words: ["i", "w", "na", "nie", "do", "to", "\u017Ce", "co", "jest", "si\u0119", "ja", "ty", "on", "my", "wy", "ale", "jak", "tak", "dalej", "sk\u0105d", "niby", "z\u0142o", "b\xF3l", "n\xF3\u017C", "da\u0107", "gar\u015B\u0107", "nigdy", "we", "nikt", "kolejny", "raz", "boli", "mnie", "wiesz", "dosi\u0119gnie", "moja", "psychika", "zabija", "ostry", "wezm\u0119", "lek\xF3w", "chcia\u0142abym", "nic", "czu\u0107", "b\u0119d\u0119", "pod", "go\u0142ym", "niebem", "gwiazd", "mie\u0107", "ju\u017C", "\u017Cadnych", "ran", "przy", "sko\u0144czysz", "ca\u0142a", "\u0142zach"] },
     { code: "lt", words: ["\u012F", "n\u0117ra", "\u010Dia", "ta\u010Diau", "kod\u0117l", "tod\u0117l", "ka\u017Ekas", "sutrikimas", "\u017Emogus", "\u0161irdis", "meil\u0117", "\u017Emon\u0117s", "gyvenimas", "akys", "rankos", "namuose", "namas", "namai", "namie", "i\u0161", "rytoj", "ryt", "\u0161iandien", "niekada", "visada", "atrodo", "kalb\u0117ti", "nebegaliu", "li\u016Bdna", "li\u016Bdnas", "skausmas", "neb\u0117ra", "kai", "kaip", "bybis", "byb\u012F", "dabar", "\u017Eodis", "\u017Eod\u017Eiai", "noriu"] },
     { code: "lv", words: ["un", "ir", "nav", "ja", "kas", "k\u0101", "t\u0101", "tas", "\u0161is", "\u0161\u012B", "pa", "uz", "ar", "par", "bet", "vai", "n\u0113", "j\u0101", "man", "mans", "mana", "man\u0101", "tev", "tevs", "tavs", "tava", "tevi", "mani", "mums", "jums", "vi\u0146\u0161", "vi\u0146a", "vi\u0146i", "m\u0113s", "j\u016Bs", "tikai", "ar\u012B", "v\u0113l", "jau", "tagad", "kur", "kad", "k\u0101p\u0113c", "viss", "visi", "labi", "labie", "labs", "esi", "esmu", "b\u016Bt", "b\u016Bs", "biju", "sirds", "m\u012Blu", "dz\u012Bve", "nees", "\u010Doms", "pus\u0113"] },
+    { code: "sv", words: ["och", "att", "det", "som", "den", "\xE4r", "av", "f\xF6r", "med", "till", "har", "inte", "om", "ett", "men", "jag", "du", "ni", "vi", "han", "hon", "var", "sig", "fr\xE5n", "n\xE4r", "efter", "kan", "ska", "skulle", "\xE4n", "h\xE4r", "d\xE4r", "nu", "s\xE5", "vad", "vem", "hur", "varf\xF6r", "mig", "dig", "din", "ditt", "min", "mitt", "oss", "dem", "aldrig", "alltid", "bara", "hela", "igen", "ingen", "inget", "inga", "ingenting", "n\xE5got", "n\xE5gon", "alla", "allt", "vill", "ville", "kommer", "kom", "gick", "blir", "blev", "s\xE4ger", "vet", "tror", "k\xE4nner", "saknar", "hem", "\xF6ver", "under", "mot", "utan", "genom", "eller", "ocks\xE5", "\xE4nd\xE5", "kanske", "hj\xE4rta", "hj\xE4rtat", "k\xE4rlek", "natt", "natten", "dag", "dagen", "liv", "livet", "v\xE4rld", "v\xE4rlden", "tid", "tiden", "\xF6gon", "\xF6gonen", "ser", "g\xE5r", "f\xE5r", "g\xF6r", "st\xE5r", "h\xE5ller", "sedan", "bort", "borta", "tillbaka", "tyst"] },
+    { code: "da", words: ["og", "det", "til", "som", "p\xE5", "de", "med", "af", "ikke", "der", "var", "mig", "men", "har", "om", "vi", "min", "mit", "havde", "ham", "hun", "nu", "da", "fra", "du", "ud", "sig", "n\xE5r", "v\xE6ret", "hvor", "hvad", "hvem", "hvorfor", "jeg", "dig", "kan", "skal", "ved", "hjerte", "hjertet", "k\xE6rlighed", "aldrig", "altid", "bare", "noget", "nogen", "ingen", "igen", "\xF8jne", "nat", "natten", "liv", "livet", "verden", "tid", "tiden", "alt", "alle", "meget", "s\xE5dan", "tilbage", "hjem", "selv", "dem", "jer", "deres", "denne", "dette", "sammen", "kun", "ogs\xE5", "eller", "uden", "gennem", "over", "under", "mod", "siger", "kommer", "blev", "bliver"] },
+    { code: "no", words: ["og", "det", "den", "til", "som", "p\xE5", "de", "med", "av", "ikke", "ikkje", "der", "s\xE5", "var", "meg", "seg", "men", "har", "om", "vi", "min", "mitt", "hadde", "hun", "n\xE5", "over", "da", "ved", "fra", "du", "ut", "dem", "oss", "opp", "n\xE5r", "hvor", "hvem", "hva", "hvorfor", "jeg", "deg", "skal", "kan", "vil", "ville", "kommer", "kom", "gikk", "blir", "ble", "sier", "vet", "tror", "hjerte", "hjertet", "kj\xE6rlighet", "aldri", "alltid", "bare", "noe", "noen", "ingen", "ingenting", "igjen", "\xF8yne", "natt", "natten", "liv", "livet", "verden", "tid", "tiden", "alt", "alle", "mye", "slik", "tilbake", "hjem", "selv", "deres", "denne", "dette", "sammen", "ogs\xE5", "eller", "uten", "gjennom", "under", "mot", "borte", "stille"] },
+    { code: "fi", words: ["ett\xE4", "mutta", "kun", "niin", "vain", "my\xF6s", "viel\xE4", "nyt", "sitten", "t\xE4ss\xE4", "siell\xE4", "t\xE4\xE4ll\xE4", "miss\xE4", "mit\xE4", "miksi", "kuinka", "kuka", "min\xE4", "sin\xE4", "h\xE4n", "me", "te", "he", "olen", "olet", "olemme", "ovat", "oli", "ollut", "olla", "syd\xE4n", "syd\xE4men", "rakkaus", "rakastan", "y\xF6", "y\xF6n", "y\xF6ss\xE4", "p\xE4iv\xE4", "p\xE4iv\xE4n", "el\xE4m\xE4", "el\xE4m\xE4n", "maailma", "maailman", "aika", "ajan", "silm\xE4t", "silmien", "kaikki", "kaiken", "mit\xE4\xE4n", "kukaan", "ilman", "kanssa", "kautta", "takaisin", "koti", "kotiin", "tule", "tulee", "menee", "sanoi", "tied\xE4n", "uskon", "muista", "muistan", "en\xE4\xE4", "aina", "koskaan", "j\xE4lkeen", "yksin", "pois"] },
     { code: "hi", words: ["hai", "hain", "hoon", "tha", "thi", "nahi", "nahin", "kya", "kaise", "kaisa", "kaisi", "kahan", "kyun", "kab", "mera", "meri", "tera", "teri", "tere", "tumhara", "hamara", "apna", "apni", "apne", "tujhe", "mujhe", "mujhko", "tujhko", "tumhe", "hume", "unhe", "isko", "usko", "uski", "iski", "iske", "uske", "dil", "pyar", "ishq", "mohabbat", "zindagi", "duniya", "sapna", "sapne", "raat", "din", "aankh", "aankhein", "ankhiyo", "nazar", "waqt", "gham", "khushi", "dard", "rang", "dhoop", "chand", "sitara", "dekho", "dekh", "dekhna", "suno", "sun", "sunna", "bolo", "bol", "bolna", "chalo", "chal", "chalna", "jao", "jana", "aao", "aaja", "aana", "karo", "karna", "milna", "mila", "milo", "ruk", "ruko", "rukna", "jeena", "jee", "nach", "nachle", "gaana", "gana", "bajao", "baja", "dikha", "dikhao", "dikhaa", "parda", "nakhre", "mein", "pe", "par", "wala", "wali", "wale", "bhi", "aur", "lekin", "magar", "phir", "abhi", "kabhi", "hamesha", "humesha", "sirf", "bas", "bahut", "bohot", "zyada", "kuch", "sab", "koi", "kaun", "yahan", "wahan", "udhar", "idhar", "accha", "acha", "theek", "bilkul", "zaroor", "sach", "jhooth", "alag", "saath", "mann", "mehboob", "dilbar", "sanam", "jannat", "husn", "jaane", "jaana", "toh", "se", "ke", "ka", "ki", "ko", "ne", "tu", "hum", "tum", "main", "yeh", "woh", "ab", "jab", "tab", "agar", "mat", "ya"] },
     { code: "en", words: ["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "his", "her", "our", "their", "do", "did", "not", "no", "have", "has", "had", "be", "been", "will", "would", "can", "could", "just", "like", "so", "this", "that", "what", "when", "how", "all", "if", "there", "them", "from", "about", "up", "out", "know", "only", "into", "than", "then", "its", "who", "which", "more", "some", "these", "those", "here"] }
   ];
@@ -1198,6 +1217,13 @@ var SpicyLyricTranslater = (() => {
     dutch: "nl",
     polish: "pl",
     lithuanian: "lt",
+    latvian: "lv",
+    swedish: "sv",
+    danish: "da",
+    norwegian: "no",
+    "norwegian bokmal": "no",
+    "norwegian nynorsk": "no",
+    finnish: "fi",
     turkish: "tr",
     japanese: "ja",
     chinese: "zh",
@@ -1210,6 +1236,7 @@ var SpicyLyricTranslater = (() => {
     greek: "el"
   };
   var ENGLISH_EQUIVALENT_CODES = /* @__PURE__ */ new Set(["pcm", "sco", "jam", "cpe"]);
+  var NORWEGIAN_EQUIVALENT_CODES = /* @__PURE__ */ new Set(["nb", "nn", "nob", "nno"]);
   var CHINESE_SUBTAG_TO_VARIANT = {
     hans: "zh-hans",
     chs: "zh-hans",
@@ -1247,6 +1274,8 @@ var SpicyLyricTranslater = (() => {
       return normalizeChineseCode(subtags.slice(1));
     if (ENGLISH_EQUIVALENT_CODES.has(base))
       return "en";
+    if (NORWEGIAN_EQUIVALENT_CODES.has(base))
+      return "no";
     return base;
   }
   function normalizeTargetLanguageCode(code) {
@@ -1839,6 +1868,374 @@ var SpicyLyricTranslater = (() => {
     };
   }
 
+  // src/utils/wordBreakdown.ts
+  var HAN_RANGE = /[一-鿿㐀-䶿]/;
+  var HIRAGANA_RANGE = /[぀-ゟ]/;
+  var KATAKANA_RANGE = /[゠-ヿㇰ-ㇿ]/;
+  var HANGUL_RANGE = /[가-힯ᄀ-ᇿ㄰-㆏]/;
+  var CJK_RANGE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯ᄀ-ᇿ]/;
+  var TRIM_EDGE_PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+  function classifyChar(ch) {
+    if (/\s/.test(ch))
+      return "space";
+    if (HAN_RANGE.test(ch))
+      return "han";
+    if (HIRAGANA_RANGE.test(ch))
+      return "hiragana";
+    if (KATAKANA_RANGE.test(ch))
+      return "katakana";
+    if (HANGUL_RANGE.test(ch))
+      return "hangul";
+    if (/[\p{L}\p{N}]/u.test(ch))
+      return "word";
+    return "other";
+  }
+  function hasCjk(text) {
+    return CJK_RANGE.test(text || "");
+  }
+  function splitHanRun(run) {
+    if (run.length <= 3)
+      return [run];
+    const parts = [];
+    for (let i = 0; i < run.length; i += 2) {
+      parts.push(run.slice(i, i + 2));
+    }
+    if (parts.length > 1 && parts[parts.length - 1].length === 1) {
+      parts[parts.length - 2] += parts[parts.length - 1];
+      parts.pop();
+    }
+    return parts;
+  }
+  function segmentSourceText(text) {
+    const raw = (text || "").trim();
+    if (!raw)
+      return [];
+    if (!hasCjk(raw)) {
+      return raw.split(/\s+/).map((token) => token.replace(TRIM_EDGE_PUNCT, "")).filter(Boolean);
+    }
+    const tokens = [];
+    let current = "";
+    let currentClass = null;
+    let sawHiragana = false;
+    const flush = () => {
+      const trimmed = current.replace(TRIM_EDGE_PUNCT, "");
+      if (trimmed) {
+        if (currentClass === "han" && !sawHiragana) {
+          tokens.push(...splitHanRun(trimmed));
+        } else {
+          tokens.push(trimmed);
+        }
+      }
+      current = "";
+      currentClass = null;
+      sawHiragana = false;
+    };
+    for (const ch of raw) {
+      const cls = classifyChar(ch);
+      if (cls === "space" || cls === "other") {
+        if (cls === "other" && current) {
+          current += ch;
+          continue;
+        }
+        flush();
+        continue;
+      }
+      if (cls === "hiragana" && (currentClass === "han" || currentClass === "hiragana")) {
+        current += ch;
+        sawHiragana = true;
+        continue;
+      }
+      if (cls === currentClass && !(cls === "han" && sawHiragana)) {
+        current += ch;
+        continue;
+      }
+      flush();
+      current = ch;
+      currentClass = cls;
+      sawHiragana = cls === "hiragana";
+    }
+    flush();
+    return tokens.filter(Boolean);
+  }
+  function segmentTargetText(text) {
+    return (text || "").trim().split(/\s+/).filter(Boolean);
+  }
+  function normalizeToken(text) {
+    return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  }
+  function bigrams(value) {
+    if (value.length < 2)
+      return value ? [value] : [];
+    const grams = [];
+    for (let i = 0; i < value.length - 1; i++) {
+      grams.push(value.slice(i, i + 2));
+    }
+    return grams;
+  }
+  function similarity(a, b) {
+    const left = normalizeToken(a);
+    const right = normalizeToken(b);
+    if (!left || !right)
+      return 0;
+    if (left === right)
+      return 1;
+    if (left.length < 3 || right.length < 3)
+      return 0;
+    const leftGrams = bigrams(left);
+    const rightPool = /* @__PURE__ */ new Map();
+    for (const gram of bigrams(right)) {
+      rightPool.set(gram, (rightPool.get(gram) || 0) + 1);
+    }
+    let hits = 0;
+    for (const gram of leftGrams) {
+      const available = rightPool.get(gram) || 0;
+      if (available > 0) {
+        hits++;
+        rightPool.set(gram, available - 1);
+      }
+    }
+    return 2 * hits / (leftGrams.length + bigrams(right).length);
+  }
+  var ANCHOR_THRESHOLD = 0.62;
+  function findAnchorCandidates(sourceTokens, targetTokens) {
+    const candidates = [];
+    for (let s = 0; s < sourceTokens.length; s++) {
+      const sourceNorm = normalizeToken(sourceTokens[s]);
+      if (!sourceNorm)
+        continue;
+      let best = null;
+      for (let t = 0; t < targetTokens.length; t++) {
+        const score = similarity(sourceTokens[s], targetTokens[t]);
+        if (score < ANCHOR_THRESHOLD)
+          continue;
+        if (!best || score > best.score) {
+          best = { sourceIndex: s, targetIndex: t, score };
+        }
+      }
+      if (best)
+        candidates.push(best);
+    }
+    return candidates;
+  }
+  function monotonicAnchors(candidates) {
+    if (candidates.length === 0)
+      return [];
+    const ordered = [...candidates].sort((a, b) => a.sourceIndex - b.sourceIndex);
+    const best = new Array(ordered.length).fill(1);
+    const previous = new Array(ordered.length).fill(-1);
+    let bestEnd = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (ordered[j].targetIndex < ordered[i].targetIndex && best[j] + 1 > best[i]) {
+          best[i] = best[j] + 1;
+          previous[i] = j;
+        }
+      }
+      if (best[i] > best[bestEnd])
+        bestEnd = i;
+    }
+    const chain = [];
+    for (let i = bestEnd; i >= 0; i = previous[i]) {
+      chain.push(ordered[i]);
+      if (previous[i] === -1)
+        break;
+    }
+    return chain.reverse();
+  }
+  var TARGET_FUNCTION_WORDS = {
+    en: ["the", "a", "an", "of", "to", "will", "would", "shall", "should", "is", "are", "am", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did"],
+    es: ["el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al"],
+    fr: ["le", "la", "les", "un", "une", "des", "du", "de", "au", "aux"],
+    de: ["der", "die", "das", "den", "dem", "ein", "eine", "einen", "einem", "zu"],
+    pt: ["o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "ao"],
+    it: ["il", "lo", "la", "i", "gli", "le", "un", "una", "di", "del", "della", "al"],
+    nl: ["de", "het", "een", "van", "te"],
+    sv: ["en", "ett", "att", "av"]
+  };
+  function targetFunctionWords(targetLang) {
+    const base = (targetLang || "").toLowerCase().split(/[-_]/)[0];
+    return new Set(TARGET_FUNCTION_WORDS[base] || []);
+  }
+  function chunkTargetSpan(words, targetLang) {
+    const functionWords = targetFunctionWords(targetLang);
+    if (functionWords.size === 0 || words.length < 2)
+      return words.slice();
+    const chunks = [];
+    let pending = [];
+    for (const word of words) {
+      pending.push(word);
+      if (!functionWords.has(normalizeToken(word))) {
+        chunks.push(pending.join(" "));
+        pending = [];
+      }
+    }
+    if (pending.length > 0) {
+      if (chunks.length > 0) {
+        chunks[chunks.length - 1] += ` ${pending.join(" ")}`;
+      } else {
+        chunks.push(pending.join(" "));
+      }
+    }
+    return chunks;
+  }
+  function distributeProportional(sourceSpan, targetSpan, targetLang) {
+    if (sourceSpan.length === 0 && targetSpan.length === 0)
+      return [];
+    if (sourceSpan.length === 0)
+      return [{ source: "", target: targetSpan.join(" "), exact: false }];
+    if (targetSpan.length === 0)
+      return sourceSpan.map((source) => ({ source, target: "", exact: false }));
+    if (sourceSpan.length === targetSpan.length) {
+      return sourceSpan.map((source, index) => ({ source, target: targetSpan[index], exact: true }));
+    }
+    const chunks = chunkTargetSpan(targetSpan, targetLang);
+    if (sourceSpan.length === chunks.length) {
+      return sourceSpan.map((source, index) => ({ source, target: chunks[index], exact: true }));
+    }
+    const weights = sourceSpan.map((token) => Math.max(normalizeToken(token).length, 1));
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const pairs = [];
+    let consumed = 0;
+    sourceSpan.forEach((source, index) => {
+      const isLast = index === sourceSpan.length - 1;
+      const share = isLast ? chunks.length - consumed : Math.max(0, Math.round(weights[index] / totalWeight * chunks.length));
+      const take = isLast ? Math.max(share, 0) : Math.min(share, chunks.length - consumed);
+      pairs.push({ source, target: chunks.slice(consumed, consumed + take).join(" "), exact: false });
+      consumed += take;
+    });
+    if (consumed < chunks.length && pairs.length > 0) {
+      const tail = chunks.slice(consumed).join(" ");
+      const last = pairs[pairs.length - 1];
+      last.target = last.target ? `${last.target} ${tail}` : tail;
+    }
+    const merged = mergeEmptyTargets(pairs);
+    if (merged.length === chunks.length && merged.every((pair) => pair.target)) {
+      return merged.map((pair) => ({ ...pair, exact: true }));
+    }
+    return merged;
+  }
+  function mergeEmptyTargets(pairs) {
+    const merged = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const pair = pairs[i];
+      if (pair.target || !pair.source) {
+        merged.push({ ...pair });
+        continue;
+      }
+      const next = pairs[i + 1];
+      if (next) {
+        next.source = `${pair.source} ${next.source}`.trim();
+        continue;
+      }
+      if (merged.length > 0) {
+        const previous = merged[merged.length - 1];
+        previous.source = `${previous.source} ${pair.source}`.trim();
+        continue;
+      }
+      merged.push({ ...pair });
+    }
+    return merged;
+  }
+  function buildHeuristicBreakdown(sourceText, targetText, targetLang) {
+    const sourceTokens = segmentSourceText(sourceText);
+    const targetTokens = segmentTargetText(targetText);
+    if (sourceTokens.length === 0 || targetTokens.length === 0) {
+      return { tokens: [], origin: "heuristic" };
+    }
+    const anchors = monotonicAnchors(findAnchorCandidates(sourceTokens, targetTokens));
+    const tokens = [];
+    let sourceCursor = 0;
+    let targetCursor = 0;
+    const pushSpan = (sourceEnd, targetEnd) => {
+      const sourceSpan = sourceTokens.slice(sourceCursor, sourceEnd);
+      const targetSpan = targetTokens.slice(targetCursor, targetEnd);
+      if (sourceSpan.length === 0 && targetSpan.length === 0)
+        return;
+      for (const pair of distributeProportional(sourceSpan, targetSpan, targetLang)) {
+        if (!pair.source && !pair.target)
+          continue;
+        tokens.push({ source: pair.source, target: pair.target, confidence: pair.exact ? "medium" : "low" });
+      }
+    };
+    for (const anchor of anchors) {
+      pushSpan(anchor.sourceIndex, anchor.targetIndex);
+      tokens.push({
+        source: sourceTokens[anchor.sourceIndex],
+        target: targetTokens[anchor.targetIndex],
+        confidence: "high"
+      });
+      sourceCursor = anchor.sourceIndex + 1;
+      targetCursor = anchor.targetIndex + 1;
+    }
+    pushSpan(sourceTokens.length, targetTokens.length);
+    return { tokens: tokens.filter((token) => token.source || token.target), origin: "heuristic" };
+  }
+  function coerceConfidence(value) {
+    return value === "high" || value === "medium" || value === "low" ? value : "high";
+  }
+  function coerceString(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+  function optionalString(value) {
+    const text = coerceString(value);
+    return text ? text : void 0;
+  }
+  function parseModelBreakdown(raw) {
+    const text = (raw || "").trim();
+    if (!text)
+      return null;
+    const withoutFences = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const start = withoutFences.indexOf("[");
+    const end = withoutFences.lastIndexOf("]");
+    if (start === -1 || end === -1 || end <= start)
+      return null;
+    let parsed;
+    try {
+      parsed = JSON.parse(withoutFences.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(parsed))
+      return null;
+    const tokens = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object")
+        continue;
+      const record = entry;
+      const source = coerceString(record.source ?? record.s);
+      const target = coerceString(record.target ?? record.t);
+      if (!source && !target)
+        continue;
+      tokens.push({
+        source,
+        target,
+        lemma: optionalString(record.lemma ?? record.l),
+        pos: optionalString(record.pos ?? record.p),
+        note: optionalString(record.note ?? record.n),
+        confidence: coerceConfidence(record.confidence)
+      });
+    }
+    return tokens.length > 0 ? tokens : null;
+  }
+  function buildBreakdownPrompt(sourceText, sourceLangName, targetLangName) {
+    return [
+      `Break this ${sourceLangName} song lyric down word by word for a learner whose target language is ${targetLangName}.`,
+      "Return ONLY a JSON array, no prose and no code fences.",
+      "Each element must be an object with these keys:",
+      '"source" (the token exactly as it appears in the lyric, in order),',
+      `"target" (its meaning in ${targetLangName} in this context),`,
+      '"lemma" (the dictionary form of the source token),',
+      '"pos" (a short part-of-speech tag such as noun, verb, adj, adv, pron, prep, conj, part, num),',
+      '"note" (a short note only when the token is idiomatic, slang, or grammatically notable; otherwise omit).',
+      "Cover every meaningful token in order. Merge tokens only when they form one fixed expression.",
+      "",
+      sourceText
+    ].join("\n");
+  }
+  function breakdownCacheKey(sourceText, targetLang) {
+    return `${targetLang}:${(sourceText || "").replace(/\s+/g, " ").trim().toLowerCase()}`;
+  }
+
   // src/utils/translator.ts
   var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
   var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
@@ -2111,13 +2508,22 @@ var SpicyLyricTranslater = (() => {
     }
     return suspiciousUnchanged >= 1 || suspiciousDebris >= 1;
   }
-  function hasMeaningfulTranslationDifference(source, translated, targetLang) {
+  function isUsableSourceLangHint(sourceLang) {
+    if (!sourceLang)
+      return false;
+    const normalized = sourceLang.toLowerCase().trim();
+    return normalized !== "" && normalized !== "auto" && normalized !== "unknown" && normalized !== "mixed";
+  }
+  function hasMeaningfulTranslationDifference(source, translated, targetLang, knownSourceLang) {
     const sourceNorm = normalizeComparisonText(source);
     const translatedNorm = normalizeComparisonText(translated);
     if (!sourceNorm || !translatedNorm || sourceNorm === translatedNorm) {
       return false;
     }
     if (sourceHasNonLatinScript(source) && targetLangIsLatinScript(targetLang)) {
+      return true;
+    }
+    if (isUsableSourceLangHint(knownSourceLang) && !isSameLanguage(knownSourceLang, targetLang)) {
       return true;
     }
     const detected = detectLanguageHeuristic(source);
@@ -3950,7 +4356,7 @@ ${text}`
       results.push(cachedResults.get(i));
     }
     const meaningfulCount = results.reduce(
-      (count, r) => r.wasTranslated && hasMeaningfulTranslationDifference(r.originalText, r.translatedText, targetLang) ? count + 1 : count,
+      (count, r) => r.wasTranslated && hasMeaningfulTranslationDifference(r.originalText, r.translatedText, targetLang, detectedLang) ? count + 1 : count,
       0
     );
     if (meaningfulCount === 0) {
@@ -4044,6 +4450,183 @@ ${text}`
     }
     return false;
   }
+  function providerSupportsWordBreakdown(api = preferredApi) {
+    return VARIANT_CAPABLE_APIS.includes(api);
+  }
+  async function requestModelCompletion(prompt, maxTokens) {
+    if (preferredApi === "openai") {
+      if (!openaiApiKey)
+        throw createProviderConfigError("OpenAI API key not configured. Set it in Settings.");
+      const data = await postJsonProvider(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: normalizeOpenAIModelName(openaiModel),
+          messages: [{ role: "user", content: prompt }],
+          max_completion_tokens: maxTokens
+        },
+        { "Authorization": `Bearer ${openaiApiKey}`, "Content-Type": "application/json" },
+        "OpenAI breakdown",
+        { preferCosmos: true }
+      );
+      recordApiUsage(extractOpenAIUsage(data));
+      return data?.choices?.[0]?.message?.content?.trim() || "";
+    }
+    if (preferredApi === "gemini") {
+      if (!geminiApiKey)
+        throw createProviderConfigError("Gemini API key not configured. Set it in Settings.");
+      const data = await postJsonProvider(
+        appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
+        },
+        { "Content-Type": "application/json" },
+        "Gemini breakdown",
+        { preferCosmos: true }
+      );
+      recordApiUsage(extractGeminiUsage(data));
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+    }
+    if (preferredApi === "grok") {
+      if (!grokApiKey)
+        throw createProviderConfigError("Grok (xAI) API key not configured. Set it in Settings.");
+      const data = await postJsonProvider(
+        "https://api.x.ai/v1/chat/completions",
+        {
+          model: normalizeGrokModelName(grokModel),
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0,
+          max_tokens: maxTokens
+        },
+        { "Authorization": `Bearer ${grokApiKey}`, "Content-Type": "application/json" },
+        "Grok breakdown",
+        { preferCosmos: true }
+      );
+      recordApiUsage(extractOpenAIUsage(data));
+      return data?.choices?.[0]?.message?.content?.trim() || "";
+    }
+    if (preferredApi === "anthropic") {
+      if (!anthropicApiKey)
+        throw createProviderConfigError("Claude (Anthropic) API key not configured. Set it in Settings.");
+      const model = normalizeAnthropicModelName(anthropicModel);
+      const body = {
+        model,
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }]
+      };
+      if (anthropicModelSupportsThinkingToggle(model)) {
+        body.thinking = { type: "disabled" };
+      }
+      const data = await postJsonProvider(
+        "https://api.anthropic.com/v1/messages",
+        body,
+        {
+          "x-api-key": anthropicApiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "Content-Type": "application/json"
+        },
+        "Claude breakdown",
+        { preferCosmos: true }
+      );
+      recordApiUsage(extractAnthropicUsage(data));
+      if (Array.isArray(data.content)) {
+        const textBlock = data.content.find((block) => block?.type === "text" && typeof block.text === "string");
+        return textBlock?.text?.trim() || "";
+      }
+      return "";
+    }
+    if (preferredApi === "custom") {
+      const url = validateCustomApiUrl();
+      if (!url)
+        throw createProviderConfigError("Custom API URL not configured. Set it in Settings.");
+      if (customApiFormat === "gemini") {
+        const data2 = await postJsonProvider(
+          url,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
+          },
+          getCustomApiHeaders("gemini"),
+          "Custom breakdown",
+          { preferCosmos: true }
+        );
+        recordApiUsage(extractGeminiUsage(data2));
+        return data2?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      }
+      const data = await postJsonProvider(
+        url,
+        {
+          model: customApiModel || void 0,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: maxTokens
+        },
+        getCustomApiHeaders("openai"),
+        "Custom breakdown",
+        { preferCosmos: true }
+      );
+      recordApiUsage(extractOpenAIUsage(data));
+      return data?.choices?.[0]?.message?.content?.trim() || "";
+    }
+    throw new Error(`Word breakdown is not supported by the ${preferredApi} provider`);
+  }
+  var BREAKDOWN_CACHE_KEY = "breakdown-cache";
+  var BREAKDOWN_CACHE_LIMIT = 400;
+  var inFlightBreakdowns = /* @__PURE__ */ new Map();
+  function getCachedWordBreakdown(sourceText, targetLang) {
+    const cache = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
+    const entry = cache[breakdownCacheKey(sourceText, targetLang)];
+    return entry?.tokens?.length ? entry.tokens : null;
+  }
+  function storeWordBreakdown(sourceText, targetLang, tokens) {
+    const cache = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
+    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > BREAKDOWN_CACHE_LIMIT) {
+      keys.sort((a, b) => (cache[a].timestamp || 0) - (cache[b].timestamp || 0)).slice(0, keys.length - BREAKDOWN_CACHE_LIMIT).forEach((key) => delete cache[key]);
+    }
+    storage_default.setJSON(BREAKDOWN_CACHE_KEY, cache);
+  }
+  function clearWordBreakdownCache() {
+    storage_default.remove(BREAKDOWN_CACHE_KEY);
+  }
+  async function fetchWordBreakdown(sourceText, sourceLang, targetLang) {
+    const trimmed = (sourceText || "").trim();
+    if (!trimmed)
+      return null;
+    if (!providerSupportsWordBreakdown())
+      return null;
+    if (isOffline())
+      return null;
+    const cached = getCachedWordBreakdown(trimmed, targetLang);
+    if (cached)
+      return cached;
+    const key = breakdownCacheKey(trimmed, targetLang);
+    const pending = inFlightBreakdowns.get(key);
+    if (pending)
+      return pending;
+    const request = (async () => {
+      try {
+        const prompt = buildBreakdownPrompt(
+          trimmed,
+          getTranslationLanguageName(sourceLang || "auto"),
+          getTranslationLanguageName(targetLang)
+        );
+        const raw = await requestModelCompletion(prompt, Math.max(600, trimmed.length * 12));
+        const tokens = parseModelBreakdown(raw);
+        if (tokens)
+          storeWordBreakdown(trimmed, targetLang, tokens);
+        return tokens;
+      } catch (breakdownError) {
+        warn("Word breakdown request failed:", breakdownError);
+        return null;
+      } finally {
+        inFlightBreakdowns.delete(key);
+      }
+    })();
+    inFlightBreakdowns.set(key, request);
+    return request;
+  }
   function isOffline() {
     return typeof navigator !== "undefined" && !navigator.onLine;
   }
@@ -4119,6 +4702,7 @@ ${text}`
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
     hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
     showRomanization: storage.get("show-romanization") === "true",
+    learningMode: storage.get("learning-mode") === "true",
     _qualityByIndex: void 0
   };
 
@@ -4522,7 +5106,8 @@ ${text}`
     opacity: 0.85,
     fontSize: 0.9,
     syncWordHighlight: true,
-    showRomanization: false
+    showRomanization: false,
+    learningMode: false
   };
   var isOverlayEnabled = false;
   var translationMap = /* @__PURE__ */ new Map();
@@ -4538,32 +5123,33 @@ ${text}`
   function normalizeCompare(text) {
     return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "").trim();
   }
-  function lookupByContent(map, text) {
-    if (!text || map.size === 0)
+  function buildContentLookupKeys(text) {
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
+    return {
+      norm: normalizeCompare(text),
+      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeCompare(nonLatinOnly) : "",
+      latinNorm: latinOnly && latinOnly !== text ? normalizeCompare(latinOnly) : ""
+    };
+  }
+  function lookupByKeys(map, keys) {
+    if (map.size === 0)
       return void 0;
-    const norm = normalizeCompare(text);
+    const { norm, nonLatinNorm, latinNorm } = keys;
     if (norm) {
       const direct = map.get(norm);
       if (direct !== void 0)
         return direct;
     }
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-    if (nonLatinOnly && nonLatinOnly !== text) {
-      const nNorm = normalizeCompare(nonLatinOnly);
-      if (nNorm) {
-        const match = map.get(nNorm);
-        if (match !== void 0)
-          return match;
-      }
+    if (nonLatinNorm) {
+      const match = map.get(nonLatinNorm);
+      if (match !== void 0)
+        return match;
     }
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
-    if (latinOnly && latinOnly !== text) {
-      const lNorm = normalizeCompare(latinOnly);
-      if (lNorm) {
-        const match = map.get(lNorm);
-        if (match !== void 0)
-          return match;
-      }
+    if (latinNorm) {
+      const match = map.get(latinNorm);
+      if (match !== void 0)
+        return match;
     }
     if (norm && norm.length >= 4) {
       let best = null;
@@ -4584,10 +5170,15 @@ ${text}`
     }
     return void 0;
   }
+  function lookupByContent(map, text) {
+    if (!text || map.size === 0)
+      return void 0;
+    return lookupByKeys(map, buildContentLookupKeys(text));
+  }
   function hasContentData() {
     return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
   }
-  function rebuildPerLineMaps(lines) {
+  function rebuildPerLineMaps(lines, lineTexts) {
     if (!hasContentData())
       return;
     const nextTranslation = /* @__PURE__ */ new Map();
@@ -4598,25 +5189,26 @@ ${text}`
     let contentLines = 0;
     let matchedLines = 0;
     for (let index = 0; index < lines.length; index++) {
-      const text = extractLineText(lines[index]);
+      const text = lineTexts[index];
       if (!text)
         continue;
       contentLines++;
-      const t = lookupByContent(translationByContent, text);
+      const keys = buildContentLookupKeys(text);
+      const t = lookupByKeys(translationByContent, keys);
       if (t) {
         nextTranslation.set(index, t);
         matchedLines++;
       }
-      const r = lookupByContent(romanizationByContent, text);
+      const r = lookupByKeys(romanizationByContent, keys);
       if (r)
         nextRomanization.set(index, r);
-      const o = lookupByContent(originalByContent, text);
+      const o = lookupByKeys(originalByContent, keys);
       if (o)
         nextOriginal.set(index, o);
-      const q = lookupByContent(qualityByContent, text);
+      const q = lookupByKeys(qualityByContent, keys);
       if (q)
         nextQuality.set(index, q);
-      const tim = lookupByContent(timingByContent, text);
+      const tim = lookupByKeys(timingByContent, keys);
       if (tim)
         nextTiming[index] = tim;
     }
@@ -4645,14 +5237,23 @@ ${text}`
     timingByContent = new Map(data);
   }
   var lastRenderSigMap = /* @__PURE__ */ new WeakMap();
-  function computeRenderSignature(lines) {
+  var lastRenderedLinesMap = /* @__PURE__ */ new WeakMap();
+  var lastRenderedOutputMap = /* @__PURE__ */ new WeakMap();
+  function extractLineTexts(lines) {
+    const texts = [];
+    for (let i = 0; i < lines.length; i++) {
+      texts.push(extractLineText(lines[i]));
+    }
+    return texts;
+  }
+  function computeRenderSignature(lines, lineTexts) {
     const parts = [
       currentConfig.mode,
       currentConfig.syncWordHighlight ? "1" : "0",
       currentConfig.showRomanization ? "1" : "0"
     ];
     for (let i = 0; i < lines.length; i++) {
-      const text = extractLineText(lines[i]);
+      const text = lineTexts[i];
       const tr = translationMap.get(i) || "";
       const rom = romanizationMap.get(i) || "";
       const orig = originalTextMap.get(i) || "";
@@ -4660,16 +5261,36 @@ ${text}`
     }
     return parts.join("");
   }
-  function renderSignatureUnchanged(doc, lines) {
-    const sig = computeRenderSignature(lines);
-    if (lastRenderSigMap.get(doc) === sig)
+  var RENDERED_OUTPUT_SELECTOR = ".slt-interleaved-translation, .slt-replace-line, .slt-romanization-line, .slt-original-line";
+  function countRenderedOutput(doc) {
+    return doc.querySelectorAll(RENDERED_OUTPUT_SELECTOR).length;
+  }
+  function renderedTargetsIntact(doc, lines) {
+    const previous = lastRenderedLinesMap.get(doc);
+    if (!previous || previous.length !== lines.length)
+      return false;
+    for (let i = 0; i < previous.length; i++) {
+      const line = previous[i];
+      if (line !== lines[i] || !line.isConnected)
+        return false;
+    }
+    return lastRenderedOutputMap.get(doc) === countRenderedOutput(doc);
+  }
+  function renderSignatureUnchanged(doc, lines, lineTexts) {
+    const sig = computeRenderSignature(lines, lineTexts);
+    if (lastRenderSigMap.get(doc) === sig && renderedTargetsIntact(doc, lines))
       return true;
     lastRenderSigMap.set(doc, sig);
+    lastRenderedLinesMap.set(doc, Array.from(lines));
     return false;
   }
-  var docCacheMap = /* @__PURE__ */ new WeakMap();
-  function resetDocCache(doc) {
-    docCacheMap.set(doc, { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 });
+  function markRenderComplete(doc) {
+    lastRenderedOutputMap.set(doc, countRenderedOutput(doc));
+  }
+  function forgetRenderState(doc) {
+    lastRenderSigMap.delete(doc);
+    lastRenderedLinesMap.delete(doc);
+    lastRenderedOutputMap.delete(doc);
   }
   function buildRomanizationLine(doc, index, timingInfo, line, text) {
     const romanized = text !== void 0 ? text : romanizationMap.get(index);
@@ -4836,7 +5457,19 @@ ${text}`
     }
     return line.textContent?.trim() || "";
   }
+  var wordUnitsCache = /* @__PURE__ */ new WeakMap();
+  function invalidateWordUnitsCache() {
+    wordUnitsCache = /* @__PURE__ */ new WeakMap();
+  }
   function getWordUnits(line) {
+    const cached = wordUnitsCache.get(line);
+    if (cached)
+      return cached;
+    const units = computeWordUnits(line);
+    wordUnitsCache.set(line, units);
+    return units;
+  }
+  function computeWordUnits(line) {
     const units = [];
     const allElements = line.querySelectorAll(".word:not(.dot), .letterGroup, .syllable");
     for (const el of Array.from(allElements)) {
@@ -4889,18 +5522,19 @@ ${text}`
     return findOriginalLineForTranslation(el);
   }
   function applyReplaceMode(doc) {
+    invalidateWordUnitsCache();
     const lines = getLyricLines(doc);
-    rebuildPerLineMaps(lines);
-    if (renderSignatureUnchanged(doc, lines))
+    const lineTexts = extractLineTexts(lines);
+    rebuildPerLineMaps(lines, lineTexts);
+    if (renderSignatureUnchanged(doc, lines, lineTexts))
       return;
-    resetDocCache(doc);
     const lyricsContainer = doc.querySelector(".SpicyLyricsScrollContainer");
     const lyricsType = lyricsContainer?.getAttribute("data-lyrics-type") || "Line";
     const claimed = /* @__PURE__ */ new Set();
     lines.forEach((line, index) => {
       const lineEl = line;
       const translation = translationMap.get(index);
-      const originalText = extractLineText(line);
+      const originalText = lineTexts[index];
       let existing = siblingSkippingRomanization(line, "next");
       if (existing && !existing.classList.contains("slt-replace-line"))
         existing = null;
@@ -5021,6 +5655,7 @@ ${text}`
       if (!claimed.has(el))
         el.remove();
     });
+    markRenderComplete(doc);
   }
   function appendTranslationWordSpans(doc, container, translation, originalLine, wordClassName) {
     const translatedWords = translation.trim().split(/\s+/).filter(Boolean);
@@ -5121,38 +5756,8 @@ ${text}`
       } else if (isWordSung) {
         yShift = -0.015;
       }
-      letterEl.style.setProperty("--slt-letter-shift", `${yShift.toFixed(3)}em`);
+      setStyleProp(letterEl, "--slt-letter-shift", `${yShift.toFixed(3)}em`);
     });
-  }
-  var interleavedScrollHandler = null;
-  var interleavedResizeObserver = null;
-  var interleavedAnimationFrame = null;
-  function setupInterleavedTracking(doc) {
-    cleanupInterleavedTracking();
-  }
-  function cleanupInterleavedTracking() {
-    if (interleavedAnimationFrame) {
-      cancelAnimationFrame(interleavedAnimationFrame);
-      interleavedAnimationFrame = null;
-    }
-    if (interleavedScrollHandler) {
-      const docs = [document];
-      const pipWin = getPIPWindow();
-      if (pipWin)
-        docs.push(pipWin.document);
-      docs.forEach((doc) => {
-        const container = findLyricsContainer(doc);
-        if (container) {
-          container.removeEventListener("scroll", interleavedScrollHandler);
-        }
-      });
-      window.removeEventListener("resize", interleavedScrollHandler);
-      interleavedScrollHandler = null;
-    }
-    if (interleavedResizeObserver) {
-      interleavedResizeObserver.disconnect();
-      interleavedResizeObserver = null;
-    }
   }
   function hasWrappedSyncWords(translationEl) {
     const words = Array.from(translationEl.querySelectorAll(":scope > .slt-sync-word"));
@@ -5173,20 +5778,21 @@ ${text}`
   }
   function applyInterleavedMode(doc) {
     try {
+      invalidateWordUnitsCache();
       const lines = getLyricLines(doc);
       if (!lines || lines.length === 0) {
         return;
       }
-      rebuildPerLineMaps(lines);
-      if (renderSignatureUnchanged(doc, lines))
+      const lineTexts = extractLineTexts(lines);
+      rebuildPerLineMaps(lines, lineTexts);
+      if (renderSignatureUnchanged(doc, lines, lineTexts))
         return;
-      resetDocCache(doc);
       const claimed = /* @__PURE__ */ new Set();
       lines.forEach((line, index) => {
         try {
           const lineEl = line;
           const translation = translationMap.get(index);
-          const originalText = extractLineText(line);
+          const originalText = lineTexts[index];
           const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
           let existing = siblingSkippingRomanization(line, "next");
           if (existing && !existing.classList.contains("slt-interleaved-translation"))
@@ -5292,7 +5898,7 @@ ${text}`
         if (!claimed.has(el))
           el.remove();
       });
-      setupInterleavedTracking(doc);
+      markRenderComplete(doc);
     } catch (err) {
       warn("Failed to apply interleaved mode:", err);
     }
@@ -5312,8 +5918,33 @@ ${text}`
   function setOverlayRomanization(show) {
     currentConfig.showRomanization = show;
   }
+  function setOverlayLearningMode(enabled) {
+    currentConfig.learningMode = enabled;
+    invalidateLearningRow();
+    if (!enabled) {
+      removeLearningRows(document);
+      const pip = getPIPWindow();
+      if (pip)
+        removeLearningRows(pip.document);
+    }
+  }
   function updateOverlayConfig(config) {
     currentConfig = { ...currentConfig, ...config };
+  }
+  function setStyleProp(el, prop, value) {
+    if (el.style.getPropertyValue(prop) !== value) {
+      el.style.setProperty(prop, value);
+    }
+  }
+  function clearStyleProp(el, prop) {
+    if (el.style.getPropertyValue(prop) !== "") {
+      el.style.removeProperty(prop);
+    }
+  }
+  function setDataProp(el, key, value) {
+    if (el.dataset[key] !== value) {
+      el.dataset[key] = value;
+    }
   }
   var MIRRORED_LINE_STYLE_PROPS = [
     "--gradient-position",
@@ -5336,22 +5967,22 @@ ${text}`
     translatedLine.classList.toggle("NotSung", !isActive && isNotSung);
     translatedLine.classList.toggle("OppositeAligned", originalLine.classList.contains("OppositeAligned"));
     translatedLine.classList.toggle("rtl", originalLine.classList.contains("rtl"));
-    translatedLine.style.setProperty("--gradient-degrees", "180deg");
+    setStyleProp(translatedLine, "--gradient-degrees", "180deg");
     for (const prop of MIRRORED_LINE_STYLE_PROPS) {
       if (prop === "--gradient-degrees")
         continue;
       const value = originalLine.style.getPropertyValue(prop);
       if (value && value.trim() !== "") {
-        translatedLine.style.setProperty(prop, value);
+        setStyleProp(translatedLine, prop, value);
       } else {
-        translatedLine.style.removeProperty(prop);
+        clearStyleProp(translatedLine, prop);
       }
     }
     if (!originalLine.style.getPropertyValue("--gradient-position")) {
       if (isSung) {
-        translatedLine.style.setProperty("--gradient-position", "100%");
+        setStyleProp(translatedLine, "--gradient-position", "100%");
       } else if (isNotSung) {
-        translatedLine.style.setProperty("--gradient-position", "-20%");
+        setStyleProp(translatedLine, "--gradient-position", "-20%");
       }
     }
   }
@@ -5463,9 +6094,9 @@ ${text}`
       const lineGradient = lineGradientRaw ? parseFloat(lineGradientRaw) : NaN;
       const fallbackGradient = !isNaN(lineGradient) ? Math.max(-20, Math.min(100, lineGradient)) : isSung ? 100 : isNotSung ? -20 : isActive ? 40 : -20;
       translatedWords.forEach((wordEl) => {
-        wordEl.style.setProperty("--gradient-degrees", perWordGradientDegrees);
-        wordEl.dataset.sltGradientPos = fallbackGradient.toString();
-        wordEl.style.setProperty("--gradient-position", `${fallbackGradient}%`);
+        setStyleProp(wordEl, "--gradient-degrees", perWordGradientDegrees);
+        setDataProp(wordEl, "sltGradientPos", fallbackGradient.toString());
+        setStyleProp(wordEl, "--gradient-position", `${fallbackGradient}%`);
         const isWordSung = fallbackGradient >= 90;
         const isWordActive = fallbackGradient > -15 && fallbackGradient < 90;
         wordEl.classList.toggle("slt-word-past", isWordSung);
@@ -5480,7 +6111,7 @@ ${text}`
       return true;
     }
     translatedWords.forEach((wordEl, i) => {
-      wordEl.style.setProperty("--gradient-degrees", perWordGradientDegrees);
+      setStyleProp(wordEl, "--gradient-degrees", perWordGradientDegrees);
       let gradientPosition = -20;
       const previousGradient = parseFloat(wordEl.dataset.sltGradientPos || "NaN");
       const wasLatchedWhite = wordEl.dataset.sltLatchedWhite === "1";
@@ -5527,7 +6158,7 @@ ${text}`
         }
         if (wasLatchedWhite || gradientPosition >= LATCH_WHITE_THRESHOLD) {
           gradientPosition = 100;
-          wordEl.dataset.sltLatchedWhite = "1";
+          setDataProp(wordEl, "sltLatchedWhite", "1");
         } else if (!isNaN(previousGradient)) {
           const delta = gradientPosition - previousGradient;
           if (delta > PROGRESSION_SNAP_DELTA) {
@@ -5540,8 +6171,8 @@ ${text}`
         }
       }
       const clamped = Math.max(-20, Math.min(100, gradientPosition));
-      wordEl.dataset.sltGradientPos = clamped.toString();
-      wordEl.style.setProperty("--gradient-position", `${clamped}%`);
+      setDataProp(wordEl, "sltGradientPos", clamped.toString());
+      setStyleProp(wordEl, "--gradient-position", `${clamped}%`);
       const isWordSung = clamped >= 90;
       const isWordActive = clamped > -15 && clamped < 90;
       wordEl.classList.toggle("slt-word-past", isWordSung);
@@ -5586,32 +6217,32 @@ ${text}`
       syncTranslationLineFromOriginal(originalLine, transLineEl, lyricsType);
       const updatedByWords = updateTranslatedWordGradients(transLineEl, originalLine);
       if (updatedByWords) {
-        transLineEl.style.removeProperty("--gradient-position");
+        clearStyleProp(transLineEl, "--gradient-position");
         return;
       }
       if (originalGradient !== "") {
         return;
       }
       if (!isActive) {
-        transLineEl.style.setProperty("--gradient-position", isSung ? "100%" : isNotSung ? "-20%" : "-20%");
+        setStyleProp(transLineEl, "--gradient-position", isSung ? "100%" : isNotSung ? "-20%" : "-20%");
         return;
       }
       const wordProgress = getOverallWordGradientProgress(originalLine);
       if (wordProgress !== null) {
-        transLineEl.style.setProperty("--gradient-position", `${-20 + wordProgress * 120}%`);
+        setStyleProp(transLineEl, "--gradient-position", `${-20 + wordProgress * 120}%`);
         return;
       }
       const lineStartTime = parseFloat(transLineEl.dataset.startTime || "0");
       const lineEndTime = parseFloat(transLineEl.dataset.endTime || "0");
       if (lineEndTime > 0 && lineStartTime >= 0) {
         if (currentTime >= lineEndTime) {
-          transLineEl.style.setProperty("--gradient-position", "100%");
+          setStyleProp(transLineEl, "--gradient-position", "100%");
         } else if (currentTime < lineStartTime) {
-          transLineEl.style.setProperty("--gradient-position", "-20%");
+          setStyleProp(transLineEl, "--gradient-position", "-20%");
         } else {
           const total = lineEndTime - lineStartTime;
           const pct = total <= 0 ? 1 : (currentTime - lineStartTime) / total;
-          transLineEl.style.setProperty("--gradient-position", `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
+          setStyleProp(transLineEl, "--gradient-position", `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
         }
       }
     });
@@ -5637,15 +6268,239 @@ ${text}`
       if (lineEl) {
         const blurAmount = lineEl.style.getPropertyValue("--BlurAmount");
         if (blurAmount) {
-          transHtml.style.setProperty("--BlurAmount", blurAmount);
+          setStyleProp(transHtml, "--BlurAmount", blurAmount);
         } else {
-          transHtml.style.removeProperty("--BlurAmount");
+          clearStyleProp(transHtml, "--BlurAmount");
         }
       }
     });
   }
+  var breakdownLookup = null;
+  var lastLearningKey = "";
+  var lastLearningLine = null;
+  var currentTargetLanguage = "";
+  var lastLearningCheck = 0;
+  var LEARNING_THROTTLE_MS = 120;
+  function setBreakdownLookup(lookup) {
+    breakdownLookup = lookup;
+    lastLearningKey = "";
+  }
+  function setLearningTargetLanguage(lang) {
+    if (currentTargetLanguage === lang)
+      return;
+    currentTargetLanguage = lang;
+    invalidateLearningRow();
+  }
+  function invalidateLearningRow() {
+    lastLearningKey = "";
+    lastLearningLine = null;
+    lastLearningCheck = 0;
+  }
+  function findActiveLine(doc) {
+    const lines = getLyricLines(doc);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.classList.contains("Active") || line.classList.contains("active"))
+        return line;
+    }
+    return null;
+  }
+  function removeLearningRows(doc) {
+    doc.querySelectorAll(".slt-learning-row").forEach((el) => el.remove());
+  }
+  function buildLearningRow(doc, tokens, origin) {
+    const row = doc.createElement("div");
+    row.className = "slt-learning-row";
+    row.dataset.origin = origin;
+    for (const token of tokens) {
+      if (!token.source && !token.target)
+        continue;
+      const cell = doc.createElement("span");
+      cell.className = "slt-learning-token";
+      cell.dataset.confidence = token.confidence;
+      const source = doc.createElement("span");
+      source.className = "slt-learning-source";
+      source.textContent = token.source || "\u2014";
+      cell.appendChild(source);
+      const target = doc.createElement("span");
+      target.className = "slt-learning-target";
+      target.textContent = token.target || "\u2014";
+      cell.appendChild(target);
+      const showLemma = token.lemma && token.lemma !== token.source;
+      if (showLemma || token.pos) {
+        const meta = doc.createElement("span");
+        meta.className = "slt-learning-meta";
+        if (showLemma) {
+          const lemma = doc.createElement("span");
+          lemma.className = "slt-learning-lemma";
+          lemma.textContent = token.lemma;
+          meta.appendChild(lemma);
+        }
+        if (token.pos) {
+          const pos = doc.createElement("span");
+          pos.className = "slt-learning-pos";
+          pos.textContent = token.pos;
+          meta.appendChild(pos);
+        }
+        cell.appendChild(meta);
+      }
+      const tip = [token.lemma ? `lemma: ${token.lemma}` : "", token.pos || "", token.note || ""].filter(Boolean).join(" \xB7 ");
+      if (tip)
+        cell.title = tip;
+      row.appendChild(cell);
+    }
+    return row;
+  }
+  function updateLearningRow(doc) {
+    if (!currentConfig.learningMode) {
+      if (lastLearningKey) {
+        removeLearningRows(doc);
+        invalidateLearningRow();
+      }
+      return;
+    }
+    const now = Date.now();
+    if (now - lastLearningCheck < LEARNING_THROTTLE_MS)
+      return;
+    lastLearningCheck = now;
+    if (lastLearningLine && lastLearningKey && lastLearningLine.isConnected && (lastLearningLine.classList.contains("Active") || lastLearningLine.classList.contains("active"))) {
+      const existingRow = doc.querySelector(".slt-learning-row");
+      if (existingRow && existingRow.isConnected)
+        return;
+    }
+    const activeLine = findActiveLine(doc);
+    if (!activeLine)
+      return;
+    const sourceText = extractLineText(activeLine);
+    if (!sourceText)
+      return;
+    const index = parseInt(activeLine.dataset.sltIndex || "-1", 10);
+    const translated = (index >= 0 ? translationMap.get(index) : void 0) || lookupByContent(translationByContent, sourceText) || "";
+    if (!translated)
+      return;
+    const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
+    const origin = modelTokens ? "model" : "heuristic";
+    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
+    if (tokens.length === 0)
+      return;
+    const key = `${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const anchor = learningAnchorFor(activeLine);
+    if (!anchor || !anchor.parentNode)
+      return;
+    const existing = doc.querySelector(".slt-learning-row");
+    if (existing && existing.isConnected && lastLearningKey === key && existing.previousElementSibling === anchor) {
+      lastLearningLine = activeLine;
+      return;
+    }
+    removeLearningRows(doc);
+    const row = buildLearningRow(doc, tokens, origin);
+    anchor.parentNode.insertBefore(row, anchor.nextSibling);
+    lastLearningKey = key;
+    lastLearningLine = activeLine;
+  }
+  function learningAnchorFor(line) {
+    let node = line.nextElementSibling;
+    let anchor = line;
+    while (node) {
+      if (node.classList.contains("slt-interleaved-translation") || node.classList.contains("slt-replace-line") || node.classList.contains("slt-romanization-line") || node.classList.contains("slt-original-line")) {
+        anchor = node;
+        node = node.nextElementSibling;
+        continue;
+      }
+      break;
+    }
+    return anchor;
+  }
+  function restoreOriginalLines(doc) {
+    doc.querySelectorAll(".slt-interleaved-translation").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-sync-translation").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-romanization-line").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-original-line").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
+    doc.querySelectorAll("[data-slt-original-html]").forEach((el) => {
+      const original = el.dataset.sltOriginalHtml;
+      if (original !== void 0) {
+        el.innerHTML = original;
+        delete el.dataset.sltOriginalHtml;
+      }
+    });
+    doc.querySelectorAll("[data-slt-original-text]").forEach((el) => {
+      const original = el.dataset.sltOriginalText;
+      if (original !== void 0) {
+        el.textContent = original;
+        delete el.dataset.sltOriginalText;
+      }
+    });
+    doc.querySelectorAll("[data-slt-replaced-with]").forEach((el) => {
+      delete el.dataset.sltReplacedWith;
+    });
+    doc.querySelectorAll(".spicy-translation-container").forEach((el) => el.remove());
+    doc.querySelectorAll(".spicy-hidden-original").forEach((el) => {
+      el.classList.remove("spicy-hidden-original");
+    });
+    doc.querySelectorAll(".spicy-original-wrapper").forEach((wrapper) => {
+      const parent = wrapper.parentElement;
+      if (parent) {
+        const originalContent = wrapper.innerHTML;
+        wrapper.remove();
+        if (parent.innerHTML.trim() === "" || !parent.querySelector(".word, .syllable, .letterGroup, .letter")) {
+          parent.innerHTML = originalContent;
+        }
+      }
+    });
+    doc.querySelectorAll(".slt-overlay-parent, .spicy-translated").forEach((el) => {
+      el.classList.remove("slt-overlay-parent", "spicy-translated");
+    });
+    doc.querySelectorAll(".slt-sync-word").forEach((el) => {
+      el.classList.remove("slt-word-past", "slt-word-active", "slt-word-future");
+    });
+  }
+  function applyNoneMode(doc) {
+    invalidateWordUnitsCache();
+    const lines = getLyricLines(doc);
+    if (!lines || lines.length === 0) {
+      restoreOriginalLines(doc);
+      return;
+    }
+    const lineTexts = extractLineTexts(lines);
+    rebuildPerLineMaps(lines, lineTexts);
+    if (renderSignatureUnchanged(doc, lines, lineTexts))
+      return;
+    restoreOriginalLines(doc);
+    if (currentConfig.showRomanization) {
+      const claimed = /* @__PURE__ */ new Set();
+      lines.forEach((line, index) => {
+        const lineEl = line;
+        lineEl.dataset.sltIndex = index.toString();
+        const romanizationText = romanizationCompanionText(line, index, "none");
+        if (!romanizationText)
+          return;
+        const romanEl = buildRomanizationLine(doc, index, lineTimingData[index], line, romanizationText);
+        if (!romanEl || !line.parentNode)
+          return;
+        line.parentNode.insertBefore(romanEl, line.nextSibling);
+        claimed.add(romanEl);
+      });
+      doc.querySelectorAll(".slt-romanization-line").forEach((el) => {
+        if (!claimed.has(el))
+          el.remove();
+      });
+    } else {
+      lines.forEach((line, index) => {
+        line.dataset.sltIndex = index.toString();
+      });
+    }
+    markRenderComplete(doc);
+  }
   function renderTranslations(doc) {
-    if (!isOverlayEnabled || translationMap.size === 0 && !hasContentData())
+    if (!isOverlayEnabled)
+      return;
+    if (currentConfig.mode === "none") {
+      applyNoneMode(doc);
+      return;
+    }
+    if (translationMap.size === 0 && !hasContentData())
       return;
     switch (currentConfig.mode) {
       case "replace":
@@ -5685,7 +6540,7 @@ ${text}`
     }
     lastActiveLineUpdate = now;
     try {
-      if (currentConfig.mode === "interleaved" || currentConfig.mode === "replace") {
+      if (currentConfig.mode === "interleaved" || currentConfig.mode === "replace" || currentConfig.mode === "none") {
         doc.querySelectorAll(".slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line").forEach((el) => {
           const orig = adjacentOriginalLine(el);
           el.classList.toggle("active", !!orig && isLineActive(orig));
@@ -5707,7 +6562,9 @@ ${text}`
       return;
     }
     try {
+      invalidateWordUnitsCache();
       onActiveLineChanged(document);
+      updateLearningRow(document);
       updateWordSyncStates(document);
       syncBlurToTranslations(document);
       const pipWindow = getPIPWindow();
@@ -5716,7 +6573,7 @@ ${text}`
           const pipDoc = pipWindow.document;
           if (pipDoc && pipDoc.body) {
             ensurePIPStyles(pipDoc);
-            if (translationMap.size > 0) {
+            if (translationMap.size > 0 && currentConfig.mode !== "none") {
               const hasTranslations = pipDoc.querySelector(".slt-replace-line, .slt-interleaved-translation");
               if (!hasTranslations) {
                 renderTranslations(pipDoc);
@@ -5731,6 +6588,16 @@ ${text}`
           }
         } catch (pipErr) {
         }
+      } else if (activeLineObservers.size > 1) {
+        for (const [observedDoc, observer] of activeLineObservers) {
+          if (observedDoc === document)
+            continue;
+          try {
+            observer.disconnect();
+          } catch {
+          }
+          activeLineObservers.delete(observedDoc);
+        }
       }
     } catch (e) {
     }
@@ -5740,6 +6607,16 @@ ${text}`
     if (activeSyncRafId)
       return;
     activeSyncRafId = requestAnimationFrame(syncLoop);
+  }
+  function pauseActiveSync() {
+    if (getPIPWindow())
+      return;
+    stopActiveSyncInterval();
+  }
+  function resumeActiveSync() {
+    if (!isOverlayEnabled)
+      return;
+    startActiveSyncInterval();
   }
   function stopActiveSyncInterval() {
     if (activeSyncRafId) {
@@ -5778,10 +6655,10 @@ ${text}`
       const observer = new MutationObserver((mutations) => {
         try {
           let activeChanged = false;
-          let structureChanged = false;
           for (const mutation of mutations) {
+            if (activeChanged)
+              break;
             if (mutation.type === "childList") {
-              structureChanged = true;
               if (mutation.addedNodes.length > 0)
                 activeChanged = true;
             } else if (mutation.type === "attributes") {
@@ -5790,9 +6667,6 @@ ${text}`
                 activeChanged = true;
               }
             }
-          }
-          if (structureChanged) {
-            resetDocCache(doc);
           }
           if (activeChanged) {
             onActiveLineChanged(doc);
@@ -5842,63 +6716,21 @@ ${text}`
   }
   function disableOverlay() {
     isOverlayEnabled = false;
-    cleanupInterleavedTracking();
     stopActiveSyncInterval();
     activeLineObservers.forEach((observer, doc) => {
       observer.disconnect();
     });
     activeLineObservers.clear();
     const cleanup = (doc) => {
-      lastRenderSigMap.delete(doc);
+      forgetRenderState(doc);
       const overlay = doc.getElementById("spicy-translate-overlay");
       if (overlay)
         overlay.remove();
       const interleavedOverlay = doc.getElementById("slt-interleaved-overlay");
       if (interleavedOverlay)
         interleavedOverlay.remove();
-      doc.querySelectorAll(".slt-interleaved-translation").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-sync-translation").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-romanization-line").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-original-line").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
-      doc.querySelectorAll("[data-slt-original-html]").forEach((el) => {
-        const original = el.dataset.sltOriginalHtml;
-        if (original !== void 0) {
-          el.innerHTML = original;
-          delete el.dataset.sltOriginalHtml;
-        }
-      });
-      doc.querySelectorAll("[data-slt-original-text]").forEach((el) => {
-        const original = el.dataset.sltOriginalText;
-        if (original !== void 0) {
-          el.textContent = original;
-          delete el.dataset.sltOriginalText;
-        }
-      });
-      doc.querySelectorAll("[data-slt-replaced-with]").forEach((el) => {
-        delete el.dataset.sltReplacedWith;
-      });
-      doc.querySelectorAll(".spicy-translation-container").forEach((el) => el.remove());
-      doc.querySelectorAll(".spicy-hidden-original").forEach((el) => {
-        el.classList.remove("spicy-hidden-original");
-      });
-      doc.querySelectorAll(".spicy-original-wrapper").forEach((wrapper) => {
-        const parent = wrapper.parentElement;
-        if (parent) {
-          const originalContent = wrapper.innerHTML;
-          wrapper.remove();
-          if (parent.innerHTML.trim() === "" || !parent.querySelector(".word, .syllable, .letterGroup, .letter")) {
-            parent.innerHTML = originalContent;
-          }
-        }
-      });
-      doc.querySelectorAll(".slt-overlay-parent, .spicy-translated").forEach((el) => {
-        el.classList.remove("slt-overlay-parent", "spicy-translated");
-      });
-      doc.querySelectorAll(".slt-sync-word").forEach((el) => {
-        el.classList.remove("slt-word-past", "slt-word-active", "slt-word-future");
-      });
+      restoreOriginalLines(doc);
+      doc.querySelectorAll(".slt-learning-row").forEach((el) => el.remove());
     };
     cleanup(document);
     const pipWindow = getPIPWindow();
@@ -6091,6 +6923,89 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     padding: 1px 0;
     margin: 0;
+}
+.slt-learning-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 6px 10px;
+    padding: 6px 0 14px 0;
+    pointer-events: auto;
+    user-select: text;
+    text-align: left;
+    letter-spacing: 0;
+    scale: 1;
+    filter: none;
+    animation: slt-learning-in 180ms ease-out;
+}
+
+@keyframes slt-learning-in {
+    from { opacity: 0; transform: translateY(-2px); }
+    to { opacity: 1; transform: none; }
+}
+
+.slt-learning-token {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    border-left: 2px solid rgba(255, 255, 255, 0.28);
+    font-size: calc(0.3em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.25;
+    font-weight: 600;
+    white-space: normal;
+    max-width: 16em;
+}
+
+.slt-learning-token[data-confidence="high"] { border-left-color: rgba(126, 231, 135, 0.85); }
+.slt-learning-token[data-confidence="medium"] { border-left-color: rgba(255, 209, 102, 0.8); }
+.slt-learning-token[data-confidence="low"] { border-left-color: rgba(255, 255, 255, 0.22); }
+
+.slt-learning-row[data-origin="heuristic"] .slt-learning-token {
+    border-left-style: dashed;
+}
+
+.slt-learning-source {
+    color: rgba(255, 255, 255, 0.96);
+    font-weight: 800;
+}
+
+.slt-learning-target {
+    color: rgba(255, 255, 255, 0.74);
+    font-weight: 600;
+}
+
+.slt-learning-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.5em;
+    margin-top: auto;
+    padding-top: 1px;
+}
+
+.slt-learning-lemma {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+    font-style: italic;
+}
+
+.slt-learning-pos {
+    color: rgba(255, 255, 255, 0.42);
+    font-weight: 500;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-token,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
+#SpicyLyricsPage.CardMode .slt-learning-token {
+    font-size: calc(0.42em * var(--slt-overlay-font-scale, 1));
+    padding: 2px 5px;
+    max-width: 12em;
 }
 `;
   }
@@ -7109,14 +8024,32 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const spicetify = globalThis.Spicetify;
     spicetify?.PopupModal?.hide();
   }
+  function createModalHost() {
+    try {
+      const template = document.createElement("template");
+      template.innerHTML = "<sl-generic-modal></sl-generic-modal>";
+      const parsed = template.content.firstElementChild;
+      if (parsed)
+        return parsed;
+    } catch {
+    }
+    try {
+      return document.createElement("sl-generic-modal");
+    } catch {
+    }
+    return document.createElement("div");
+  }
+  function displaySpicetifyModal(options) {
+    const spicetify = globalThis.Spicetify;
+    spicetify?.PopupModal?.display({
+      title: options.title,
+      content: options.content,
+      isLarge: options.isLarge
+    });
+  }
   function displayModal(options) {
     if (!spicyLyricsAvailable()) {
-      const spicetify = globalThis.Spicetify;
-      spicetify?.PopupModal?.display({
-        title: options.title,
-        content: options.content,
-        isLarge: options.isLarge
-      });
+      displaySpicetifyModal(options);
       return;
     }
     if (activeModal) {
@@ -7127,8 +8060,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       activeModal = null;
       activeOnClose = null;
     }
-    const host = document.createElement("sl-generic-modal");
-    host.classList.add("SpicyLyricsModal");
+    let host;
+    try {
+      host = createModalHost();
+      host.classList.add("SpicyLyricsModal");
+      document.body.append(host);
+    } catch (hostError) {
+      displaySpicetifyModal(options);
+      return;
+    }
     const containerClass = options.isLarge ? "sl-modal-container-large" : "sl-modal-container";
     host.innerHTML = `
 <div class="sl-modal-overlay sl-modal-overlay-animated" style="z-index: 100;">
@@ -7160,7 +8100,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (event.target === event.currentTarget)
         hideModal();
     });
-    document.body.append(host);
     setTimeout(() => {
       host.querySelector(".sl-modal-overlay-animated")?.classList.add("Active");
     }, 50);
@@ -7191,7 +8130,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (metadata?.LoadedVersion) {
       return metadata.LoadedVersion;
     }
-    return true ? "2.1.4" : "0.0.0";
+    return true ? "2.1.5" : "0.0.0";
   };
   var CURRENT_VERSION = getLoadedVersion();
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
@@ -8379,7 +9318,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   ];
   var OVERLAY_MODE_OPTIONS = [
     { value: "replace", text: "Replace (default)" },
-    { value: "interleaved", text: "Below each line" }
+    { value: "interleaved", text: "Below each line" },
+    { value: "none", text: "None (original lyrics only)" }
   ];
   var SETTINGS_SCHEMA = [
     {
@@ -8409,13 +9349,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     {
       id: "overlay-mode",
       section: "Translation",
-      keywords: "display overlay replace interleaved below line",
+      keywords: "display overlay replace interleaved below line none hide off original only",
       label: "Translation Display",
       type: "select",
       storageKey: "overlay-mode",
       defaultValue: "replace",
       options: OVERLAY_MODE_OPTIONS,
-      description: "How translated lyrics are displayed",
+      description: "How translated lyrics are displayed. None still translates and caches, but leaves the lyrics untouched - pairs with Learning Mode, which shows the translation itself.",
       effects: ["reapplyTranslations"]
     },
     {
@@ -8687,6 +9627,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       defaultValue: true
     },
     {
+      id: "learning-mode",
+      section: "Behaviour",
+      keywords: "learning vocabulary study word by word breakdown gloss lemma",
+      label: "Learning Mode (word-by-word breakdown)",
+      type: "toggle",
+      storageKey: "learning-mode",
+      defaultValue: false,
+      effects: ["learningModeClass", "reapplyTranslations"]
+    },
+    {
       id: "show-quality-indicator",
       section: "Interface",
       keywords: "quality indicator badge confidence",
@@ -8795,6 +9745,27 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       maxParallelChunks: state.maxParallelChunks
     });
   }
+  function notifySettingCorrection(message) {
+    const spicetify = globalThis.Spicetify;
+    if (state.showNotifications && spicetify?.showNotification) {
+      spicetify.showNotification(message);
+    }
+  }
+  function enforceLearningCoupling(fieldId, value) {
+    if (fieldId === "overlay-mode" && String(value) === "none" && !state.learningMode) {
+      storage.set("learning-mode", "true");
+      state.learningMode = true;
+      notifySettingCorrection("Learning Mode turned on - display None hides translations, so the cards show them instead");
+      return ["learningModeClass"];
+    }
+    if (fieldId === "learning-mode" && !Boolean(value) && state.overlayMode === "none") {
+      storage.set("overlay-mode", "replace");
+      state.overlayMode = "replace";
+      notifySettingCorrection("Translation Display switched back to Replace - display None only makes sense with Learning Mode");
+      return ["reapplyTranslations"];
+    }
+    return [];
+  }
   function writeSettingValue(field, value) {
     if (field.type === "toggle") {
       storage.set(field.storageKey, String(Boolean(value)));
@@ -8898,16 +9869,22 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       case "show-quality-indicator":
         state.showQualityIndicator = Boolean(value);
         break;
+      case "learning-mode":
+        state.learningMode = Boolean(value);
+        break;
       case "hide-connection-indicator":
         state.hideConnectionIndicator = Boolean(value);
         break;
     }
-    return field.effects || [];
+    const coupled = enforceLearningCoupling(field.id, value);
+    if (coupled.length === 0)
+      return field.effects || [];
+    return Array.from(/* @__PURE__ */ new Set([...field.effects || [], ...coupled]));
   }
 
   // src/utils/quickMenu.ts
   var QUICK_MENU_ID = "slt-quick-menu";
-  var QUICK_FIELD_IDS = ["overlay-mode", "show-romanization"];
+  var QUICK_FIELD_IDS = ["overlay-mode", "learning-mode", "show-romanization"];
   var outsideClickHandler = null;
   var keydownHandler = null;
   function escapeHtml2(text) {
@@ -9010,6 +9987,21 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
     `;
   }
+  function syncQuickMenuState(menu) {
+    menu.querySelectorAll("[data-slt-qm-field]").forEach((el) => {
+      const item = el;
+      const id = item.dataset.sltQmField || "";
+      const field = getSettingField(id);
+      if (!field)
+        return;
+      const current = readSettingValue(field);
+      if (item.dataset.sltQmValue !== void 0) {
+        item.setAttribute("aria-checked", String(item.dataset.sltQmValue === String(current)));
+      } else {
+        item.setAttribute("aria-checked", String(Boolean(current)));
+      }
+    });
+  }
   function buildToggleRow(field, onChange) {
     const checked = Boolean(readSettingValue(field));
     const item = document.createElement("button");
@@ -9017,6 +10009,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     item.className = "slt-qm-item";
     item.setAttribute("role", "menuitemcheckbox");
     item.setAttribute("aria-checked", String(checked));
+    item.dataset.sltQmField = field.id;
     item.innerHTML = `
         <span class="slt-qm-check">\u2713</span>
         <span class="slt-qm-label">${escapeHtml2(field.label)}</span>
@@ -9042,6 +10035,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       item.className = "slt-qm-item";
       item.setAttribute("role", "menuitemradio");
       item.setAttribute("aria-checked", String(option.value === current));
+      item.dataset.sltQmField = field.id;
+      item.dataset.sltQmValue = option.value;
       item.innerHTML = `
             <span class="slt-qm-check">\u2713</span>
             <span class="slt-qm-label">${escapeHtml2(option.text)}</span>
@@ -9108,6 +10103,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         sep.className = "slt-qm-sep";
         menu.appendChild(sep);
       };
+      const refresh = () => syncQuickMenuState(menu);
       QUICK_FIELD_IDS.forEach((id, index) => {
         const field = getSettingField(id);
         if (!field)
@@ -9115,14 +10111,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         if (index > 0)
           addSeparator();
         if (field.type === "toggle") {
-          menu.appendChild(buildToggleRow(field, () => {
-          }));
+          menu.appendChild(buildToggleRow(field, refresh));
         } else if (field.id === "overlay-mode") {
-          menu.appendChild(buildModeRows(field, () => {
-          }));
+          menu.appendChild(buildModeRows(field, refresh));
         } else {
-          menu.appendChild(buildSelectRow(field, () => {
-          }));
+          menu.appendChild(buildSelectRow(field, refresh));
         }
       });
       addSeparator();
@@ -9224,32 +10217,31 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (detectedLanguage)
       state.detectedLanguage = detectedLanguage;
   }
-  function lookupWithFallback(map, text) {
-    if (!text)
-      return void 0;
-    const norm = normalizeMatchKey(text);
+  function buildMatchKeys(text) {
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
+    return {
+      norm: normalizeMatchKey(text),
+      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeMatchKey(nonLatinOnly) : "",
+      latinNorm: latinOnly && latinOnly !== text ? normalizeMatchKey(latinOnly) : ""
+    };
+  }
+  function lookupWithKeys(map, keys) {
+    const { norm, nonLatinNorm, latinNorm } = keys;
     if (norm) {
       const direct = map.get(norm);
       if (direct)
         return direct;
     }
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-    if (nonLatinOnly && nonLatinOnly !== text) {
-      const nNorm = normalizeMatchKey(nonLatinOnly);
-      if (nNorm) {
-        const match = map.get(nNorm);
-        if (match)
-          return match;
-      }
+    if (nonLatinNorm) {
+      const match = map.get(nonLatinNorm);
+      if (match)
+        return match;
     }
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
-    if (latinOnly && latinOnly !== text) {
-      const lNorm = normalizeMatchKey(latinOnly);
-      if (lNorm) {
-        const match = map.get(lNorm);
-        if (match)
-          return match;
-      }
+    if (latinNorm) {
+      const match = map.get(latinNorm);
+      if (match)
+        return match;
     }
     if (norm && norm.length >= 4) {
       let best = null;
@@ -9655,6 +10647,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     return null;
   }
+  var LYRICS_SETTLE_DELAY_MS = 150;
   async function waitForLyricsAndTranslate(retries = 10, delay = 500, previousFirstLine, _previousTrackUri) {
     const staleLineRetryLimit = Math.max(3, Math.floor(retries / 3));
     for (let i = 0; i < retries; i++) {
@@ -9669,7 +10662,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             continue;
           }
           setupLyricsObserver();
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, LYRICS_SETTLE_DELAY_MS));
           await translateCurrentLyrics();
           return;
         }
@@ -9719,6 +10712,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return;
     state.isTranslating = true;
     let buttonsLoading = false;
+    const phaseStart = Date.now();
+    const sincePhaseStart = () => `${Date.now() - phaseStart}ms`;
     try {
       let domLineTexts = [];
       lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
@@ -9757,6 +10752,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           return;
         }
       }
+      debug(`translate: skip-check done at ${sincePhaseStart()} (detected=${state.detectedLanguage ?? "none"})`);
       setTranslateButtonsLoading(true);
       buttonsLoading = true;
       let apiLineTexts = null;
@@ -9774,6 +10770,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       } catch (apiErr) {
         warn("SpicyLyrics API fetch failed, falling back to DOM:", apiErr);
       }
+      debug(`translate: lyrics API fetch done at ${sincePhaseStart()}`);
       if (romanizationOn && currentTrackUri2) {
         const trackCache = getTrackCache(currentTrackUri2, state.targetLanguage);
         if (trackCache?.sourceLines && hasOriginalScript(trackCache.sourceLines)) {
@@ -9794,20 +10791,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
       }
       let useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length > 0);
-      if (!useApiLines && romanizationOn && apiVocalTexts && apiVocalTexts.length > 0) {
-        for (let retryAttempt = 0; retryAttempt < 2; retryAttempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 400));
-          lines = getLyricsLines();
-          if (lines.length === 0)
-            break;
-          domLineTexts = [];
-          lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
-          if (apiVocalTexts.length === lines.length) {
-            useApiLines = true;
-            break;
-          }
-        }
-      }
       let sourceSelection = resolveTranslationSourceLines({
         domLineTexts,
         romanizationOn,
@@ -9825,66 +10808,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       apiVocalTexts = sourceSelection.apiVocalTexts;
       apiVocalLineData = sourceSelection.apiVocalLineData;
       useApiLines = sourceSelection.useApiLines;
-      if (!romanizationOn && !useApiLines && apiVocalTexts && apiVocalTexts.length > 0) {
-        for (let retryAttempt = 0; retryAttempt < 3; retryAttempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 600));
-          lines = getLyricsLines();
-          if (lines.length === 0)
-            break;
-          domLineTexts = [];
-          lines.forEach((line) => domLineTexts.push(extractLineText2(line)));
-          if (apiVocalTexts.length === lines.length) {
-            useApiLines = true;
-            break;
-          }
-          const apiTextSet = new Set(apiVocalTexts.map((t) => t.trim().toLowerCase()));
-          const domMatchCount = domLineTexts.filter((t) => apiTextSet.has(t.trim().toLowerCase())).length;
-          if (domMatchCount > domLineTexts.length * 0.3) {
-            break;
-          }
-        }
-        sourceSelection = resolveTranslationSourceLines({
-          domLineTexts,
-          romanizationOn,
-          apiVocalTexts,
-          apiVocalLineData,
-          cachedSourceLines
-        });
-        apiVocalTexts = sourceSelection.apiVocalTexts;
-        apiVocalLineData = sourceSelection.apiVocalLineData;
-        useApiLines = sourceSelection.useApiLines;
-      }
-      let matchedTimingData = null;
-      if (!useApiLines && apiVocalTexts && apiVocalLineData && apiVocalTexts.length > 0) {
-        const apiTextMap = /* @__PURE__ */ new Map();
-        for (let i = 0; i < apiVocalTexts.length; i++) {
-          const norm = apiVocalTexts[i].trim().toLowerCase();
-          if (norm && !apiTextMap.has(norm)) {
-            apiTextMap.set(norm, apiVocalLineData[i]);
-          }
-        }
-        matchedTimingData = [];
-        let matchCount = 0;
-        for (let i = 0; i < domLineTexts.length; i++) {
-          const domNorm = domLineTexts[i].trim().toLowerCase();
-          const matched = apiTextMap.get(domNorm);
-          if (matched) {
-            matchedTimingData.push(matched);
-            matchCount++;
-          } else {
-            matchedTimingData.push({
-              text: domLineTexts[i],
-              startTime: 0,
-              endTime: 0,
-              isInstrumental: false
-            });
-          }
-        }
-      }
       const lineTexts = sourceSelection.lineTexts;
-      if (useApiLines) {
-      } else if (apiVocalTexts) {
-      }
       const nonEmptyTexts = lineTexts.filter((t) => t.trim().length > 0);
       if (nonEmptyTexts.length === 0) {
         return;
@@ -9986,6 +10910,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (currentTrackUri2 && getCurrentTrackUri() !== currentTrackUri2) {
         return;
       }
+      debug(`translate: provider done at ${sincePhaseStart()}`);
       const hasMeaningfulTranslation = translations.some(
         (result) => result.wasTranslated && normalizeForComparison(result.originalText) !== normalizeForComparison(result.translatedText)
       );
@@ -10056,8 +10981,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       let timingDataForOverlay = null;
       if (useApiLines && apiVocalLineData) {
         timingDataForOverlay = apiVocalLineData;
-      } else if (matchedTimingData) {
-        timingDataForOverlay = matchedTimingData;
       } else if (apiLineData) {
         timingDataForOverlay = apiLineData;
       }
@@ -10133,13 +11056,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           const domText = extractLineText2(line);
           if (!domText)
             return;
-          let translation = lookupWithFallback(translationByContent2, domText);
+          const matchKeys = buildMatchKeys(domText);
+          let translation = lookupWithKeys(translationByContent2, matchKeys);
           if (!translation && allowIndexFallback && translations[domIdx]) {
             translation = translations[domIdx].translatedText;
           }
           if (translation)
             translationsByIdx.set(domIdx, translation);
-          let meta = lookupWithFallback(qualityByContent2, domText);
+          let meta = lookupWithKeys(qualityByContent2, matchKeys);
           if (!meta && allowIndexFallback) {
             const result = translations[domIdx];
             if (result?.wasTranslated) {
@@ -10152,13 +11076,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           }
           if (meta)
             qualityByIdx.set(domIdx, meta);
-          let rom = lookupWithFallback(romanizationByContent2, domText);
+          let rom = lookupWithKeys(romanizationByContent2, matchKeys);
           if (!rom && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.romanizedText) {
             rom = apiVocalLineData[domIdx].romanizedText;
           }
           if (rom)
             romanizationByIdx.set(domIdx, rom);
-          let orig = lookupWithFallback(originalByContent2, domText);
+          let orig = lookupWithKeys(originalByContent2, matchKeys);
           if (!orig && allowIndexFallback && apiVocalLineData && apiVocalLineData[domIdx]?.text) {
             orig = apiVocalLineData[domIdx].text;
           }
@@ -10184,6 +11108,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       } else {
         applyTranslations(lines);
       }
+      debug(`translate: first render at ${sincePhaseStart()}`);
       scheduleTranslationReapply(currentTrackUri2);
       void fillVisibleGaps();
       if (state.showNotifications && Spicetify.showNotification) {
@@ -10277,12 +11202,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
     lines.forEach((line, index) => {
+      const originalText = extractLineText2(line);
       let translatedText = state._translationsByIndex?.get(index);
       if (!translatedText) {
-        const originalText2 = extractLineText2(line);
-        translatedText = state.translatedLyrics.get(originalText2);
+        translatedText = state.translatedLyrics.get(originalText);
       }
-      const originalText = extractLineText2(line);
       if (!translatedText)
         return;
       if (translatedText === originalText)
@@ -10298,7 +11222,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const overlaySettings = {
       mode: state.overlayMode,
       syncWordHighlight: state.syncWordHighlight,
-      showRomanization: state.showRomanization
+      showRomanization: state.showRomanization,
+      learningMode: state.learningMode
     };
     if (!isOverlayActive()) {
       enableOverlay(overlaySettings);
@@ -10309,6 +11234,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       setQualityMetadata(state._qualityByIndex);
     }
     updateOverlayContent(translationMapByIndex);
+    debug(`applyTranslations: matched ${translationMapByIndex.size}/${lines.length} DOM lines`);
+    return translationMapByIndex.size;
   }
   function clearReapplyTimers() {
     for (const timer of reapplyTimers) {
@@ -10316,22 +11243,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     reapplyTimers = [];
   }
+  function reapplyTranslationsToCurrentLines(trackUri) {
+    if (!state.isEnabled || state.isTranslating)
+      return;
+    if (trackUri && getCurrentTrackUri() !== trackUri)
+      return;
+    if (state.translatedLyrics.size === 0 && contentTranslation.size === 0)
+      return;
+    const lines = getLyricsLines();
+    if (lines.length === 0)
+      return;
+    applyTranslations(lines);
+  }
+  var REAPPLY_DELAYS_MS = [60, 200, 500, 1e3, 1800, 3e3, 5e3];
   function scheduleTranslationReapply(trackUri) {
     clearReapplyTimers();
-    const reapply = () => {
-      if (!state.isEnabled || state.isTranslating)
-        return;
-      if (trackUri && getCurrentTrackUri() !== trackUri)
-        return;
-      if (state.translatedLyrics.size === 0 && contentTranslation.size === 0)
-        return;
-      const lines = getLyricsLines();
-      if (lines.length === 0)
-        return;
-      applyTranslations(lines);
-    };
-    for (const delay of [120, 400, 900]) {
-      reapplyTimers.push(setTimeout(reapply, delay));
+    for (const delay of REAPPLY_DELAYS_MS) {
+      reapplyTimers.push(setTimeout(() => reapplyTranslationsToCurrentLines(trackUri), delay));
     }
   }
   async function fillVisibleGaps() {
@@ -10360,6 +11288,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
     if (missing.length === 0)
       return;
+    debug(`fillVisibleGaps: ${missing.length} uncovered DOM lines, requesting translation`);
+    const gapsStart = Date.now();
     fillGapsInFlight = true;
     try {
       const currentTrackUri = getCurrentTrackUri();
@@ -10393,6 +11323,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         if (fresh.length > 0)
           applyTranslations(fresh);
       }
+      debug(`fillVisibleGaps: completed in ${Date.now() - gapsStart}ms`);
     } catch (err) {
       warn("Failed to fill visible translation gaps:", err);
     } finally {
@@ -10531,6 +11462,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       viewControls = await waitForElement(".ViewControls", 2e3);
     if (viewControls)
       insertTranslateButton();
+    resumeActiveSync();
     setupLyricsObserver();
     setupRomanizationWatcher();
     const pipWindow = getPIPWindow2();
@@ -10542,12 +11474,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (state.isEnabled) {
       updateButtonState();
       state.lastTranslatedSongUri = null;
-      waitForLyricsAndTranslate(20, 600);
+      waitForLyricsAndTranslate(50, 250);
     } else if (state.autoTranslate) {
       state.isEnabled = true;
       storage.set("translation-enabled", "true");
       updateButtonState();
-      waitForLyricsAndTranslate(20, 600);
+      waitForLyricsAndTranslate(50, 250);
     }
   }
   function onSpicyLyricsClose() {
@@ -10560,6 +11492,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       rerenderDebounceTimer = null;
     }
     clearReapplyTimers();
+    pauseActiveSync();
     state.isTranslating = false;
     if (lyricsObserver) {
       lyricsObserver.disconnect();
@@ -10581,7 +11514,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           removeTranslations();
           setupLyricsObserver();
           state.lastTranslatedSongUri = null;
-          await waitForLyricsAndTranslate(15, 500);
+          await waitForLyricsAndTranslate(40, 250);
         }
       }, 1200);
     };
@@ -10601,7 +11534,33 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       romanizationToggleButton = null;
     }
   }
+  var requestedBreakdowns = /* @__PURE__ */ new Set();
+  function registerBreakdownLookup() {
+    setBreakdownLookup((sourceText) => {
+      if (!state.learningMode)
+        return null;
+      setLearningTargetLanguage(state.targetLanguage);
+      const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
+      if (cached)
+        return cached;
+      if (!providerSupportsWordBreakdown())
+        return null;
+      const key = `${state.targetLanguage}:${sourceText}`;
+      if (requestedBreakdowns.has(key))
+        return null;
+      requestedBreakdowns.add(key);
+      void fetchWordBreakdown(sourceText, state.detectedLanguage || void 0, state.targetLanguage).then((tokens) => {
+        if (tokens)
+          invalidateLearningRow();
+      }).catch(() => {
+      }).finally(() => {
+        requestedBreakdowns.delete(key);
+      });
+      return null;
+    });
+  }
   function setupViewModeObserver() {
+    registerBreakdownLookup();
     if (viewModeIntervalId)
       clearInterval(viewModeIntervalId);
     viewModeIntervalId = setInterval(() => {
@@ -10617,7 +11576,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         if (!romanizationToggleListener && document.querySelector("#RomanizationToggle")) {
           setupRomanizationWatcher();
         }
-        if (observedLyricsContent && !observedLyricsContent.isConnected) {
+        const observedContentReplaced = Boolean(observedLyricsContent && !observedLyricsContent.isConnected);
+        if (observedContentReplaced) {
           if (lyricsObserver) {
             lyricsObserver.disconnect();
             lyricsObserver = null;
@@ -10626,6 +11586,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
         if (!lyricsObserver && state.isEnabled) {
           setupLyricsObserver();
+          if (observedContentReplaced)
+            reapplyTranslationsToCurrentLines();
         }
         const currentRomanization = isRomanizationActive();
         if (lastKnownRomanizationState !== null && currentRomanization !== lastKnownRomanizationState) {
@@ -10634,7 +11596,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
               removeTranslations();
               setupLyricsObserver();
               state.lastTranslatedSongUri = null;
-              waitForLyricsAndTranslate(15, 500);
+              waitForLyricsAndTranslate(40, 250);
             }
           }
         }
@@ -11095,6 +12057,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   function clearAllCachedTranslations() {
     clearTranslationCache();
+    clearWordBreakdownCache();
     showActionNotification("All cached translations deleted!");
   }
   async function clearSpicyLyricsCachedLyrics() {
@@ -11218,6 +12181,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     if (effects.includes("romanizationDisplay")) {
       setOverlayRomanization(Boolean(value));
+    }
+    if (effects.includes("learningModeClass")) {
+      setOverlayLearningMode(state.learningMode);
     }
     if (effects.includes("romanizationDisplay") || effects.includes("reapplyTranslations") || effects.includes("retranslate")) {
       forceRetranslate();
@@ -13890,7 +14856,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             storage.set("translation-enabled", "true");
             updateButtonState();
           }
-          waitForLyricsAndTranslate(20, 800, previousFirstLine, previousTrackUri);
+          waitForLyricsAndTranslate(60, 250, previousFirstLine, previousTrackUri);
         }
       });
     }
@@ -13919,6 +14885,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       getCachedTranslations,
       deleteCachedTranslation,
       getState: () => ({ ...state }),
+      setDebugMode,
+      isDebugEnabled,
       checkForUpdates: () => checkForUpdates(true),
       getUpdateInfo,
       version: VERSION,

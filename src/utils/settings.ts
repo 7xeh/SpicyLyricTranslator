@@ -1,13 +1,13 @@
 import { storage } from './storage';
 import { state } from './state';
-import { clearTranslationCache } from './translator';
+import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
 import { forceRetranslate } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
-import { setOverlayRomanization } from './translationOverlay';
+import { setOverlayRomanization, setOverlayLearningMode } from './translationOverlay';
 import {
     SETTINGS_SCHEMA,
     SETTINGS_CATEGORIES,
@@ -35,6 +35,7 @@ function showActionNotification(message: string, isError: boolean = false): void
 
 export function clearAllCachedTranslations(): void {
     clearTranslationCache();
+    clearWordBreakdownCache();
     showActionNotification('All cached translations deleted!');
 }
 
@@ -187,6 +188,9 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
     }
     if (effects.includes('romanizationDisplay')) {
         setOverlayRomanization(Boolean(value));
+    }
+    if (effects.includes('learningModeClass')) {
+        setOverlayLearningMode(state.learningMode);
     }
 
     if (effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate')) {

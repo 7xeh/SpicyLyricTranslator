@@ -29,6 +29,10 @@ const LATIN_LANGUAGE_WORDS: { code: string; words: string[] }[] = [
     { code: 'pl', words: ['i', 'w', 'na', 'nie', 'do', 'to', 'że', 'co', 'jest', 'się', 'ja', 'ty', 'on', 'my', 'wy', 'ale', 'jak', 'tak', 'dalej', 'skąd', 'niby', 'zło', 'ból', 'nóż', 'dać', 'garść', 'nigdy', 'we', 'nikt', 'kolejny', 'raz', 'boli', 'mnie', 'wiesz', 'dosięgnie', 'moja', 'psychika', 'zabija', 'ostry', 'wezmę', 'leków', 'chciałabym', 'nic', 'czuć', 'będę', 'pod', 'gołym', 'niebem', 'gwiazd', 'mieć', 'już', 'żadnych', 'ran', 'przy', 'skończysz', 'cała', 'łzach'] },
     { code: 'lt', words: ['į', 'nėra', 'čia', 'tačiau', 'kodėl', 'todėl', 'kažkas', 'sutrikimas', 'žmogus', 'širdis', 'meilė', 'žmonės', 'gyvenimas', 'akys', 'rankos', 'namuose', 'namas', 'namai', 'namie', 'iš', 'rytoj', 'ryt', 'šiandien', 'niekada', 'visada', 'atrodo', 'kalbėti', 'nebegaliu', 'liūdna', 'liūdnas', 'skausmas', 'nebėra', 'kai', 'kaip', 'bybis', 'bybį', 'dabar', 'žodis', 'žodžiai', 'noriu'] },
     { code: 'lv', words: ['un', 'ir', 'nav', 'ja', 'kas', 'kā', 'tā', 'tas', 'šis', 'šī', 'pa', 'uz', 'ar', 'par', 'bet', 'vai', 'nē', 'jā', 'man', 'mans', 'mana', 'manā', 'tev', 'tevs', 'tavs', 'tava', 'tevi', 'mani', 'mums', 'jums', 'viņš', 'viņa', 'viņi', 'mēs', 'jūs', 'tikai', 'arī', 'vēl', 'jau', 'tagad', 'kur', 'kad', 'kāpēc', 'viss', 'visi', 'labi', 'labie', 'labs', 'esi', 'esmu', 'būt', 'būs', 'biju', 'sirds', 'mīlu', 'dzīve', 'nees', 'čoms', 'pusē'] },
+    { code: 'sv', words: ['och', 'att', 'det', 'som', 'den', 'är', 'av', 'för', 'med', 'till', 'har', 'inte', 'om', 'ett', 'men', 'jag', 'du', 'ni', 'vi', 'han', 'hon', 'var', 'sig', 'från', 'när', 'efter', 'kan', 'ska', 'skulle', 'än', 'här', 'där', 'nu', 'så', 'vad', 'vem', 'hur', 'varför', 'mig', 'dig', 'din', 'ditt', 'min', 'mitt', 'oss', 'dem', 'aldrig', 'alltid', 'bara', 'hela', 'igen', 'ingen', 'inget', 'inga', 'ingenting', 'något', 'någon', 'alla', 'allt', 'vill', 'ville', 'kommer', 'kom', 'gick', 'blir', 'blev', 'säger', 'vet', 'tror', 'känner', 'saknar', 'hem', 'över', 'under', 'mot', 'utan', 'genom', 'eller', 'också', 'ändå', 'kanske', 'hjärta', 'hjärtat', 'kärlek', 'natt', 'natten', 'dag', 'dagen', 'liv', 'livet', 'värld', 'världen', 'tid', 'tiden', 'ögon', 'ögonen', 'ser', 'går', 'får', 'gör', 'står', 'håller', 'sedan', 'bort', 'borta', 'tillbaka', 'tyst'] },
+    { code: 'da', words: ['og', 'det', 'til', 'som', 'på', 'de', 'med', 'af', 'ikke', 'der', 'var', 'mig', 'men', 'har', 'om', 'vi', 'min', 'mit', 'havde', 'ham', 'hun', 'nu', 'da', 'fra', 'du', 'ud', 'sig', 'når', 'været', 'hvor', 'hvad', 'hvem', 'hvorfor', 'jeg', 'dig', 'kan', 'skal', 'ved', 'hjerte', 'hjertet', 'kærlighed', 'aldrig', 'altid', 'bare', 'noget', 'nogen', 'ingen', 'igen', 'øjne', 'nat', 'natten', 'liv', 'livet', 'verden', 'tid', 'tiden', 'alt', 'alle', 'meget', 'sådan', 'tilbage', 'hjem', 'selv', 'dem', 'jer', 'deres', 'denne', 'dette', 'sammen', 'kun', 'også', 'eller', 'uden', 'gennem', 'over', 'under', 'mod', 'siger', 'kommer', 'blev', 'bliver'] },
+    { code: 'no', words: ['og', 'det', 'den', 'til', 'som', 'på', 'de', 'med', 'av', 'ikke', 'ikkje', 'der', 'så', 'var', 'meg', 'seg', 'men', 'har', 'om', 'vi', 'min', 'mitt', 'hadde', 'hun', 'nå', 'over', 'da', 'ved', 'fra', 'du', 'ut', 'dem', 'oss', 'opp', 'når', 'hvor', 'hvem', 'hva', 'hvorfor', 'jeg', 'deg', 'skal', 'kan', 'vil', 'ville', 'kommer', 'kom', 'gikk', 'blir', 'ble', 'sier', 'vet', 'tror', 'hjerte', 'hjertet', 'kjærlighet', 'aldri', 'alltid', 'bare', 'noe', 'noen', 'ingen', 'ingenting', 'igjen', 'øyne', 'natt', 'natten', 'liv', 'livet', 'verden', 'tid', 'tiden', 'alt', 'alle', 'mye', 'slik', 'tilbake', 'hjem', 'selv', 'deres', 'denne', 'dette', 'sammen', 'også', 'eller', 'uten', 'gjennom', 'under', 'mot', 'borte', 'stille'] },
+    { code: 'fi', words: ['että', 'mutta', 'kun', 'niin', 'vain', 'myös', 'vielä', 'nyt', 'sitten', 'tässä', 'siellä', 'täällä', 'missä', 'mitä', 'miksi', 'kuinka', 'kuka', 'minä', 'sinä', 'hän', 'me', 'te', 'he', 'olen', 'olet', 'olemme', 'ovat', 'oli', 'ollut', 'olla', 'sydän', 'sydämen', 'rakkaus', 'rakastan', 'yö', 'yön', 'yössä', 'päivä', 'päivän', 'elämä', 'elämän', 'maailma', 'maailman', 'aika', 'ajan', 'silmät', 'silmien', 'kaikki', 'kaiken', 'mitään', 'kukaan', 'ilman', 'kanssa', 'kautta', 'takaisin', 'koti', 'kotiin', 'tule', 'tulee', 'menee', 'sanoi', 'tiedän', 'uskon', 'muista', 'muistan', 'enää', 'aina', 'koskaan', 'jälkeen', 'yksin', 'pois'] },
     { code: 'hi', words: ['hai', 'hain', 'hoon', 'tha', 'thi', 'nahi', 'nahin', 'kya', 'kaise', 'kaisa', 'kaisi', 'kahan', 'kyun', 'kab', 'mera', 'meri', 'tera', 'teri', 'tere', 'tumhara', 'hamara', 'apna', 'apni', 'apne', 'tujhe', 'mujhe', 'mujhko', 'tujhko', 'tumhe', 'hume', 'unhe', 'isko', 'usko', 'uski', 'iski', 'iske', 'uske', 'dil', 'pyar', 'ishq', 'mohabbat', 'zindagi', 'duniya', 'sapna', 'sapne', 'raat', 'din', 'aankh', 'aankhein', 'ankhiyo', 'nazar', 'waqt', 'gham', 'khushi', 'dard', 'rang', 'dhoop', 'chand', 'sitara', 'dekho', 'dekh', 'dekhna', 'suno', 'sun', 'sunna', 'bolo', 'bol', 'bolna', 'chalo', 'chal', 'chalna', 'jao', 'jana', 'aao', 'aaja', 'aana', 'karo', 'karna', 'milna', 'mila', 'milo', 'ruk', 'ruko', 'rukna', 'jeena', 'jee', 'nach', 'nachle', 'gaana', 'gana', 'bajao', 'baja', 'dikha', 'dikhao', 'dikhaa', 'parda', 'nakhre', 'mein', 'pe', 'par', 'wala', 'wali', 'wale', 'bhi', 'aur', 'lekin', 'magar', 'phir', 'abhi', 'kabhi', 'hamesha', 'humesha', 'sirf', 'bas', 'bahut', 'bohot', 'zyada', 'kuch', 'sab', 'koi', 'kaun', 'yahan', 'wahan', 'udhar', 'idhar', 'accha', 'acha', 'theek', 'bilkul', 'zaroor', 'sach', 'jhooth', 'alag', 'saath', 'mann', 'mehboob', 'dilbar', 'sanam', 'jannat', 'husn', 'jaane', 'jaana', 'toh', 'se', 'ke', 'ka', 'ki', 'ko', 'ne', 'tu', 'hum', 'tum', 'main', 'yeh', 'woh', 'ab', 'jab', 'tab', 'agar', 'mat', 'ya'] },
     { code: 'en', words: ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'my', 'your', 'his', 'her', 'our', 'their', 'do', 'did', 'not', 'no', 'have', 'has', 'had', 'be', 'been', 'will', 'would', 'can', 'could', 'just', 'like', 'so', 'this', 'that', 'what', 'when', 'how', 'all', 'if', 'there', 'them', 'from', 'about', 'up', 'out', 'know', 'only', 'into', 'than', 'then', 'its', 'who', 'which', 'more', 'some', 'these', 'those', 'here'] },
 ];
@@ -100,6 +104,13 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
     dutch: 'nl',
     polish: 'pl',
     lithuanian: 'lt',
+    latvian: 'lv',
+    swedish: 'sv',
+    danish: 'da',
+    norwegian: 'no',
+    'norwegian bokmal': 'no',
+    'norwegian nynorsk': 'no',
+    finnish: 'fi',
     turkish: 'tr',
     japanese: 'ja',
     chinese: 'zh',
@@ -113,6 +124,8 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
 };
 
 const ENGLISH_EQUIVALENT_CODES = new Set(['pcm', 'sco', 'jam', 'cpe']);
+
+const NORWEGIAN_EQUIVALENT_CODES = new Set(['nb', 'nn', 'nob', 'nno']);
 
 const CHINESE_SUBTAG_TO_VARIANT: Record<string, string> = {
     hans: 'zh-hans',
@@ -153,6 +166,7 @@ export function normalizeLanguageCode(code?: string | null): string {
     const base = subtags[0];
     if (base === 'zh' || base === 'cmn' || base === 'yue') return normalizeChineseCode(subtags.slice(1));
     if (ENGLISH_EQUIVALENT_CODES.has(base)) return 'en';
+    if (NORWEGIAN_EQUIVALENT_CODES.has(base)) return 'no';
     return base;
 }
 

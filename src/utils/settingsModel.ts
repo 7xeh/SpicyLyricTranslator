@@ -5,7 +5,7 @@ import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolv
 import type { ApiPreference, CustomApiFormat } from './translator';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
-export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'learningModeClass';
 
 export interface SettingsOption {
     value: string;
@@ -66,7 +66,8 @@ export const CUSTOM_API_FORMAT_OPTIONS: SettingsOption[] = [
 
 export const OVERLAY_MODE_OPTIONS: SettingsOption[] = [
     { value: 'replace', text: 'Replace (default)' },
-    { value: 'interleaved', text: 'Below each line' }
+    { value: 'interleaved', text: 'Below each line' },
+    { value: 'none', text: 'None (original lyrics only)' }
 ];
 
 export const SETTINGS_SCHEMA: SettingsField[] = [
@@ -97,13 +98,13 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
     {
         id: 'overlay-mode',
         section: 'Translation',
-        keywords: 'display overlay replace interleaved below line',
+        keywords: 'display overlay replace interleaved below line none hide off original only',
         label: 'Translation Display',
         type: 'select',
         storageKey: 'overlay-mode',
         defaultValue: 'replace',
         options: OVERLAY_MODE_OPTIONS,
-        description: 'How translated lyrics are displayed',
+        description: 'How translated lyrics are displayed. None still translates and caches, but leaves the lyrics untouched - pairs with Learning Mode, which shows the translation itself.',
         effects: ['reapplyTranslations']
     },
     {
@@ -375,6 +376,16 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         defaultValue: true
     },
     {
+        id: 'learning-mode',
+        section: 'Behaviour',
+        keywords: 'learning vocabulary study word by word breakdown gloss lemma',
+        label: 'Learning Mode (word-by-word breakdown)',
+        type: 'toggle',
+        storageKey: 'learning-mode',
+        defaultValue: false,
+        effects: ['learningModeClass', 'reapplyTranslations']
+    },
+    {
         id: 'show-quality-indicator',
         section: 'Interface',
         keywords: 'quality indicator badge confidence',
@@ -493,6 +504,31 @@ function configureTranslationApi(): void {
     });
 }
 
+function notifySettingCorrection(message: string): void {
+    const spicetify = (globalThis as any).Spicetify;
+    if (state.showNotifications && spicetify?.showNotification) {
+        spicetify.showNotification(message);
+    }
+}
+
+function enforceLearningCoupling(fieldId: string, value: string | boolean): SettingsEffect[] {
+    if (fieldId === 'overlay-mode' && String(value) === 'none' && !state.learningMode) {
+        storage.set('learning-mode', 'true');
+        state.learningMode = true;
+        notifySettingCorrection('Learning Mode turned on - display None hides translations, so the cards show them instead');
+        return ['learningModeClass'];
+    }
+
+    if (fieldId === 'learning-mode' && !Boolean(value) && state.overlayMode === 'none') {
+        storage.set('overlay-mode', 'replace');
+        state.overlayMode = 'replace';
+        notifySettingCorrection('Translation Display switched back to Replace - display None only makes sense with Learning Mode');
+        return ['reapplyTranslations'];
+    }
+
+    return [];
+}
+
 export function writeSettingValue(field: SettingsField, value: string | boolean): SettingsEffect[] {
     if (field.type === 'toggle') {
         storage.set(field.storageKey, String(Boolean(value)));
@@ -597,10 +633,16 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'show-quality-indicator':
             state.showQualityIndicator = Boolean(value);
             break;
+        case 'learning-mode':
+            state.learningMode = Boolean(value);
+            break;
         case 'hide-connection-indicator':
             state.hideConnectionIndicator = Boolean(value);
             break;
     }
 
-    return field.effects || [];
+    const coupled = enforceLearningCoupling(field.id, value);
+    if (coupled.length === 0) return field.effects || [];
+
+    return Array.from(new Set([...(field.effects || []), ...coupled]));
 }

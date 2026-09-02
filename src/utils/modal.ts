@@ -55,14 +55,33 @@ export function hideModal(): void {
     spicetify?.PopupModal?.hide();
 }
 
+export function createModalHost(): HTMLElement {
+    try {
+        const template = document.createElement('template');
+        template.innerHTML = '<sl-generic-modal></sl-generic-modal>';
+        const parsed = template.content.firstElementChild as HTMLElement | null;
+        if (parsed) return parsed;
+    } catch {}
+
+    try {
+        return document.createElement('sl-generic-modal') as HTMLElement;
+    } catch {}
+
+    return document.createElement('div');
+}
+
+function displaySpicetifyModal(options: ModalOptions): void {
+    const spicetify = (globalThis as any).Spicetify;
+    spicetify?.PopupModal?.display({
+        title: options.title,
+        content: options.content,
+        isLarge: options.isLarge
+    });
+}
+
 export function displayModal(options: ModalOptions): void {
     if (!spicyLyricsAvailable()) {
-        const spicetify = (globalThis as any).Spicetify;
-        spicetify?.PopupModal?.display({
-            title: options.title,
-            content: options.content,
-            isLarge: options.isLarge
-        });
+        displaySpicetifyModal(options);
         return;
     }
 
@@ -72,8 +91,16 @@ export function displayModal(options: ModalOptions): void {
         activeOnClose = null;
     }
 
-    const host = document.createElement('sl-generic-modal');
-    host.classList.add('SpicyLyricsModal');
+    let host: HTMLElement;
+    try {
+        host = createModalHost();
+        host.classList.add('SpicyLyricsModal');
+        document.body.append(host);
+    } catch (hostError) {
+        displaySpicetifyModal(options);
+        return;
+    }
+
     const containerClass = options.isLarge ? 'sl-modal-container-large' : 'sl-modal-container';
 
     host.innerHTML = `
@@ -109,8 +136,6 @@ export function displayModal(options: ModalOptions): void {
     overlay?.addEventListener('click', (event) => {
         if (event.target === event.currentTarget) hideModal();
     });
-
-    document.body.append(host);
 
     setTimeout(() => {
         host.querySelector('.sl-modal-overlay-animated')?.classList.add('Active');

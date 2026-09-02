@@ -5,7 +5,7 @@ import { warn } from './debug';
 
 const QUICK_MENU_ID = 'slt-quick-menu';
 
-const QUICK_FIELD_IDS = ['overlay-mode', 'show-romanization'];
+const QUICK_FIELD_IDS = ['overlay-mode', 'learning-mode', 'show-romanization'];
 
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -117,6 +117,22 @@ function quickMenuStyles(): string {
     `;
 }
 
+function syncQuickMenuState(menu: HTMLElement): void {
+    menu.querySelectorAll('[data-slt-qm-field]').forEach(el => {
+        const item = el as HTMLElement;
+        const id = item.dataset.sltQmField || '';
+        const field = getSettingField(id);
+        if (!field) return;
+
+        const current = readSettingValue(field);
+        if (item.dataset.sltQmValue !== undefined) {
+            item.setAttribute('aria-checked', String(item.dataset.sltQmValue === String(current)));
+        } else {
+            item.setAttribute('aria-checked', String(Boolean(current)));
+        }
+    });
+}
+
 function buildToggleRow(field: SettingsField, onChange: () => void): HTMLElement {
     const checked = Boolean(readSettingValue(field));
 
@@ -125,6 +141,7 @@ function buildToggleRow(field: SettingsField, onChange: () => void): HTMLElement
     item.className = 'slt-qm-item';
     item.setAttribute('role', 'menuitemcheckbox');
     item.setAttribute('aria-checked', String(checked));
+    item.dataset.sltQmField = field.id;
     item.innerHTML = `
         <span class="slt-qm-check">✓</span>
         <span class="slt-qm-label">${escapeHtml(field.label)}</span>
@@ -155,6 +172,8 @@ function buildModeRows(field: SettingsField, onChange: () => void): HTMLElement 
         item.className = 'slt-qm-item';
         item.setAttribute('role', 'menuitemradio');
         item.setAttribute('aria-checked', String(option.value === current));
+        item.dataset.sltQmField = field.id;
+        item.dataset.sltQmValue = option.value;
         item.innerHTML = `
             <span class="slt-qm-check">✓</span>
             <span class="slt-qm-label">${escapeHtml(option.text)}</span>
@@ -237,6 +256,8 @@ export function openQuickMenu(x: number, y: number): void {
             menu.appendChild(sep);
         };
 
+        const refresh = () => syncQuickMenuState(menu);
+
         QUICK_FIELD_IDS.forEach((id, index) => {
             const field = getSettingField(id);
             if (!field) return;
@@ -244,11 +265,11 @@ export function openQuickMenu(x: number, y: number): void {
             if (index > 0) addSeparator();
 
             if (field.type === 'toggle') {
-                menu.appendChild(buildToggleRow(field, () => {}));
+                menu.appendChild(buildToggleRow(field, refresh));
             } else if (field.id === 'overlay-mode') {
-                menu.appendChild(buildModeRows(field, () => {}));
+                menu.appendChild(buildModeRows(field, refresh));
             } else {
-                menu.appendChild(buildSelectRow(field, () => {}));
+                menu.appendChild(buildSelectRow(field, refresh));
             }
         });
 

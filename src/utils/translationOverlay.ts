@@ -2,6 +2,7 @@ import { warn } from './debug';
 import type { LyricLineData, WordTimingData } from './lyricsFetcher';
 import type { TranslationQualityMeta } from './state';
 import { storage } from './storage';
+import { buildHeuristicBreakdown, BreakdownToken } from './wordBreakdown';
 
 export const CINEMA_CONTAINER_SELECTOR = '.Cinema--Container, .spicy-lyrics-cinema, .Root__cinema-view';
 export const CINEMA_LYRICS_CONTENT_SELECTOR = '.Cinema--Container .LyricsContent, .spicy-lyrics-cinema .LyricsContent, .Root__cinema-view .LyricsContent';
@@ -17,7 +18,7 @@ export function findSidebarLyricsPage(doc: Document = document): HTMLElement | n
            doc.querySelector('.Root__right-sidebar #SpicyLyricsPage');
 }
 
-export type OverlayMode = 'replace' | 'interleaved';
+export type OverlayMode = 'replace' | 'interleaved' | 'none';
 
 export interface OverlayConfig {
     mode: OverlayMode;
@@ -25,6 +26,7 @@ export interface OverlayConfig {
     fontSize: number;
     syncWordHighlight: boolean;
     showRomanization: boolean;
+    learningMode: boolean;
 }
 
 let currentConfig: OverlayConfig = {
@@ -32,7 +34,8 @@ let currentConfig: OverlayConfig = {
     opacity: 0.85,
     fontSize: 0.9,
     syncWordHighlight: true,
-    showRomanization: false
+    showRomanization: false,
+    learningMode: false
 };
 
 let isOverlayEnabled = false;
@@ -52,30 +55,41 @@ function normalizeCompare(text: string | undefined | null): string {
     return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
 }
 
-function lookupByContent<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
-    if (!text || map.size === 0) return undefined;
-    const norm = normalizeCompare(text);
+interface ContentLookupKeys {
+    norm: string;
+    nonLatinNorm: string;
+    latinNorm: string;
+}
+
+function buildContentLookupKeys(text: string): ContentLookupKeys {
+    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    return {
+        norm: normalizeCompare(text),
+        nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeCompare(nonLatinOnly) : '',
+        latinNorm: latinOnly && latinOnly !== text ? normalizeCompare(latinOnly) : ''
+    };
+}
+
+function lookupByKeys<V>(map: Map<string, V>, keys: ContentLookupKeys): V | undefined {
+    if (map.size === 0) return undefined;
+
+    const { norm, nonLatinNorm, latinNorm } = keys;
+
     if (norm) {
         const direct = map.get(norm);
         if (direct !== undefined) return direct;
     }
 
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (nonLatinOnly && nonLatinOnly !== text) {
-        const nNorm = normalizeCompare(nonLatinOnly);
-        if (nNorm) {
-            const match = map.get(nNorm);
-            if (match !== undefined) return match;
-        }
+    if (nonLatinNorm) {
+        const match = map.get(nonLatinNorm);
+        if (match !== undefined) return match;
     }
 
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (latinOnly && latinOnly !== text) {
-        const lNorm = normalizeCompare(latinOnly);
-        if (lNorm) {
-            const match = map.get(lNorm);
-            if (match !== undefined) return match;
-        }
+    if (latinNorm) {
+        const match = map.get(latinNorm);
+        if (match !== undefined) return match;
     }
 
     if (norm && norm.length >= 4) {
@@ -96,11 +110,16 @@ function lookupByContent<V>(map: Map<string, V>, text: string | undefined | null
     return undefined;
 }
 
+export function lookupByContent<V>(map: Map<string, V>, text: string | undefined | null): V | undefined {
+    if (!text || map.size === 0) return undefined;
+    return lookupByKeys(map, buildContentLookupKeys(text));
+}
+
 function hasContentData(): boolean {
     return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
 }
 
-function rebuildPerLineMaps(lines: ArrayLike<Element>): void {
+function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): void {
     if (!hasContentData()) return;
 
     const nextTranslation = new Map<number, string>();
@@ -113,26 +132,28 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>): void {
     let matchedLines = 0;
 
     for (let index = 0; index < lines.length; index++) {
-        const text = extractLineText(lines[index]);
+        const text = lineTexts[index];
         if (!text) continue;
         contentLines++;
 
-        const t = lookupByContent(translationByContent, text);
+        const keys = buildContentLookupKeys(text);
+
+        const t = lookupByKeys(translationByContent, keys);
         if (t) {
             nextTranslation.set(index, t);
             matchedLines++;
         }
 
-        const r = lookupByContent(romanizationByContent, text);
+        const r = lookupByKeys(romanizationByContent, keys);
         if (r) nextRomanization.set(index, r);
 
-        const o = lookupByContent(originalByContent, text);
+        const o = lookupByKeys(originalByContent, keys);
         if (o) nextOriginal.set(index, o);
 
-        const q = lookupByContent(qualityByContent, text);
+        const q = lookupByKeys(qualityByContent, keys);
         if (q) nextQuality.set(index, q);
 
-        const tim = lookupByContent(timingByContent, text);
+        const tim = lookupByKeys(timingByContent, keys);
         if (tim) nextTiming[index] = tim;
     }
 
@@ -169,15 +190,25 @@ export function setTimingContentData(data: Map<string, LyricLineData>): void {
 }
 
 const lastRenderSigMap = new WeakMap<Document, string>();
+const lastRenderedLinesMap = new WeakMap<Document, Element[]>();
+const lastRenderedOutputMap = new WeakMap<Document, number>();
 
-function computeRenderSignature(lines: ArrayLike<Element>): string {
+function extractLineTexts(lines: ArrayLike<Element>): string[] {
+    const texts: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        texts.push(extractLineText(lines[i]));
+    }
+    return texts;
+}
+
+function computeRenderSignature(lines: ArrayLike<Element>, lineTexts: string[]): string {
     const parts: string[] = [
         currentConfig.mode,
         currentConfig.syncWordHighlight ? '1' : '0',
         currentConfig.showRomanization ? '1' : '0'
     ];
     for (let i = 0; i < lines.length; i++) {
-        const text = extractLineText(lines[i]);
+        const text = lineTexts[i];
         const tr = translationMap.get(i) || '';
         const rom = romanizationMap.get(i) || '';
         const orig = originalTextMap.get(i) || '';
@@ -186,34 +217,40 @@ function computeRenderSignature(lines: ArrayLike<Element>): string {
     return parts.join('');
 }
 
-function renderSignatureUnchanged(doc: Document, lines: ArrayLike<Element>): boolean {
-    const sig = computeRenderSignature(lines);
-    if (lastRenderSigMap.get(doc) === sig) return true;
+const RENDERED_OUTPUT_SELECTOR = '.slt-interleaved-translation, .slt-replace-line, .slt-romanization-line, .slt-original-line';
+
+function countRenderedOutput(doc: Document): number {
+    return doc.querySelectorAll(RENDERED_OUTPUT_SELECTOR).length;
+}
+
+function renderedTargetsIntact(doc: Document, lines: ArrayLike<Element>): boolean {
+    const previous = lastRenderedLinesMap.get(doc);
+    if (!previous || previous.length !== lines.length) return false;
+
+    for (let i = 0; i < previous.length; i++) {
+        const line = previous[i];
+        if (line !== lines[i] || !line.isConnected) return false;
+    }
+
+    return lastRenderedOutputMap.get(doc) === countRenderedOutput(doc);
+}
+
+export function renderSignatureUnchanged(doc: Document, lines: ArrayLike<Element>, lineTexts: string[]): boolean {
+    const sig = computeRenderSignature(lines, lineTexts);
+    if (lastRenderSigMap.get(doc) === sig && renderedTargetsIntact(doc, lines)) return true;
     lastRenderSigMap.set(doc, sig);
+    lastRenderedLinesMap.set(doc, Array.from(lines));
     return false;
 }
 
-interface DocCache {
-    lines: NodeListOf<Element> | null;
-    translationMap: Map<number, HTMLElement> | null;
-    romanizationElMap: Map<number, HTMLElement> | null;
-    originalElMap: Map<number, HTMLElement> | null;
-    lastActiveIndex: number;
+export function markRenderComplete(doc: Document): void {
+    lastRenderedOutputMap.set(doc, countRenderedOutput(doc));
 }
 
-const docCacheMap = new WeakMap<Document, DocCache>();
-
-function getDocCache(doc: Document): DocCache {
-    let cache = docCacheMap.get(doc);
-    if (!cache) {
-        cache = { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 };
-        docCacheMap.set(doc, cache);
-    }
-    return cache;
-}
-
-function resetDocCache(doc: Document): void {
-    docCacheMap.set(doc, { lines: null, translationMap: null, romanizationElMap: null, originalElMap: null, lastActiveIndex: -1 });
+export function forgetRenderState(doc: Document): void {
+    lastRenderSigMap.delete(doc);
+    lastRenderedLinesMap.delete(doc);
+    lastRenderedOutputMap.delete(doc);
 }
 
 function buildRomanizationLine(
@@ -399,7 +436,21 @@ function extractLineText(line: Element): string {
     return line.textContent?.trim() || '';
 }
 
-function getWordUnits(line: Element): Element[] {
+let wordUnitsCache = new WeakMap<Element, Element[]>();
+
+export function invalidateWordUnitsCache(): void {
+    wordUnitsCache = new WeakMap<Element, Element[]>();
+}
+
+export function getWordUnits(line: Element): Element[] {
+    const cached = wordUnitsCache.get(line);
+    if (cached) return cached;
+    const units = computeWordUnits(line);
+    wordUnitsCache.set(line, units);
+    return units;
+}
+
+function computeWordUnits(line: Element): Element[] {
     const units: Element[] = [];
     const allElements = line.querySelectorAll('.word:not(.dot), .letterGroup, .syllable');
 
@@ -460,12 +511,12 @@ function adjacentOriginalLine(el: Element): HTMLElement | null {
 }
 
 function applyReplaceMode(doc: Document): void {
+    invalidateWordUnitsCache();
     const lines = getLyricLines(doc);
-    rebuildPerLineMaps(lines);
+    const lineTexts = extractLineTexts(lines);
+    rebuildPerLineMaps(lines, lineTexts);
 
-    if (renderSignatureUnchanged(doc, lines)) return;
-
-    resetDocCache(doc);
+    if (renderSignatureUnchanged(doc, lines, lineTexts)) return;
 
     const lyricsContainer = doc.querySelector('.SpicyLyricsScrollContainer');
     const lyricsType = lyricsContainer?.getAttribute('data-lyrics-type') || 'Line';
@@ -475,7 +526,7 @@ function applyReplaceMode(doc: Document): void {
     lines.forEach((line, index) => {
         const lineEl = line as HTMLElement;
         const translation = translationMap.get(index);
-        const originalText = extractLineText(line);
+        const originalText = lineTexts[index];
 
         let existing = siblingSkippingRomanization(line, 'next');
         if (existing && !existing.classList.contains('slt-replace-line')) existing = null;
@@ -611,6 +662,8 @@ function applyReplaceMode(doc: Document): void {
     doc.querySelectorAll('.slt-replace-line, .slt-original-line, .slt-romanization-line').forEach(el => {
         if (!claimed.has(el)) el.remove();
     });
+
+    markRenderComplete(doc);
 }
 
 function appendTranslationWordSpans(
@@ -753,7 +806,7 @@ function updateSyncWordLetterStates(
             yShift = -0.015;
         }
 
-        letterEl.style.setProperty('--slt-letter-shift', `${yShift.toFixed(3)}em`);
+        setStyleProp(letterEl, '--slt-letter-shift', `${yShift.toFixed(3)}em`);
     });
 }
 
@@ -817,41 +870,6 @@ export function restoreReplacedLine(line: Element): void {
     line.classList.remove('spicy-translated');
 }
 
-let interleavedScrollHandler: (() => void) | null = null;
-let interleavedResizeObserver: ResizeObserver | null = null;
-let interleavedAnimationFrame: number | null = null;
-
-function setupInterleavedTracking(doc: Document): void {
-    cleanupInterleavedTracking();
-}
-
-function cleanupInterleavedTracking(): void {
-    if (interleavedAnimationFrame) {
-        cancelAnimationFrame(interleavedAnimationFrame);
-        interleavedAnimationFrame = null;
-    }
-
-    if (interleavedScrollHandler) {
-        const docs = [document];
-        const pipWin = getPIPWindow();
-        if (pipWin) docs.push(pipWin.document);
-
-        docs.forEach(doc => {
-            const container = findLyricsContainer(doc);
-            if (container) {
-                container.removeEventListener('scroll', interleavedScrollHandler!);
-            }
-        });
-        window.removeEventListener('resize', interleavedScrollHandler);
-        interleavedScrollHandler = null;
-    }
-
-    if (interleavedResizeObserver) {
-        interleavedResizeObserver.disconnect();
-        interleavedResizeObserver = null;
-    }
-}
-
 function hasWrappedSyncWords(translationEl: HTMLElement): boolean {
     const words = Array.from(translationEl.querySelectorAll(':scope > .slt-sync-word')) as HTMLElement[];
     if (words.length < 2) return false;
@@ -875,15 +893,15 @@ function fallbackToContinuousMultilineGradient(
 
 function applyInterleavedMode(doc: Document): void {
     try {
+        invalidateWordUnitsCache();
         const lines = getLyricLines(doc);
         if (!lines || lines.length === 0) {
             return;
         }
-        rebuildPerLineMaps(lines);
+        const lineTexts = extractLineTexts(lines);
+        rebuildPerLineMaps(lines, lineTexts);
 
-        if (renderSignatureUnchanged(doc, lines)) return;
-
-        resetDocCache(doc);
+        if (renderSignatureUnchanged(doc, lines, lineTexts)) return;
 
         const claimed = new Set<Element>();
 
@@ -891,7 +909,7 @@ function applyInterleavedMode(doc: Document): void {
             try {
                 const lineEl = line as HTMLElement;
                 const translation = translationMap.get(index);
-                const originalText = extractLineText(line);
+                const originalText = lineTexts[index];
                 const isBreak = !originalText.trim() || /^[♪♫•\-–—\s]+$/.test(originalText.trim());
 
                 let existing = siblingSkippingRomanization(line, 'next');
@@ -1009,7 +1027,7 @@ function applyInterleavedMode(doc: Document): void {
             if (!claimed.has(el)) el.remove();
         });
 
-        setupInterleavedTracking(doc);
+        markRenderComplete(doc);
     } catch (err) {
         warn('Failed to apply interleaved mode:', err);
     }
@@ -1035,8 +1053,36 @@ export function setOverlayRomanization(show: boolean): void {
     currentConfig.showRomanization = show;
 }
 
+export function setOverlayLearningMode(enabled: boolean): void {
+    currentConfig.learningMode = enabled;
+    invalidateLearningRow();
+    if (!enabled) {
+        removeLearningRows(document);
+        const pip = getPIPWindow();
+        if (pip) removeLearningRows(pip.document);
+    }
+}
+
 export function updateOverlayConfig(config: Partial<OverlayConfig>): void {
     currentConfig = { ...currentConfig, ...config };
+}
+
+export function setStyleProp(el: HTMLElement, prop: string, value: string): void {
+    if (el.style.getPropertyValue(prop) !== value) {
+        el.style.setProperty(prop, value);
+    }
+}
+
+export function clearStyleProp(el: HTMLElement, prop: string): void {
+    if (el.style.getPropertyValue(prop) !== '') {
+        el.style.removeProperty(prop);
+    }
+}
+
+export function setDataProp(el: HTMLElement, key: string, value: string): void {
+    if (el.dataset[key] !== value) {
+        el.dataset[key] = value;
+    }
 }
 
 const MIRRORED_LINE_STYLE_PROPS = [
@@ -1067,23 +1113,23 @@ function syncTranslationLineFromOriginal(
     translatedLine.classList.toggle('OppositeAligned', originalLine.classList.contains('OppositeAligned'));
     translatedLine.classList.toggle('rtl', originalLine.classList.contains('rtl'));
 
-    translatedLine.style.setProperty('--gradient-degrees', '180deg');
+    setStyleProp(translatedLine, '--gradient-degrees', '180deg');
 
     for (const prop of MIRRORED_LINE_STYLE_PROPS) {
         if (prop === '--gradient-degrees') continue;
         const value = originalLine.style.getPropertyValue(prop);
         if (value && value.trim() !== '') {
-            translatedLine.style.setProperty(prop, value);
+            setStyleProp(translatedLine, prop, value);
         } else {
-            translatedLine.style.removeProperty(prop);
+            clearStyleProp(translatedLine, prop);
         }
     }
 
     if (!originalLine.style.getPropertyValue('--gradient-position')) {
         if (isSung) {
-            translatedLine.style.setProperty('--gradient-position', '100%');
+            setStyleProp(translatedLine, '--gradient-position', '100%');
         } else if (isNotSung) {
-            translatedLine.style.setProperty('--gradient-position', '-20%');
+            setStyleProp(translatedLine, '--gradient-position', '-20%');
         }
     }
 }
@@ -1216,9 +1262,9 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
             : (isSung ? 100 : (isNotSung ? -20 : (isActive ? 40 : -20)));
 
         translatedWords.forEach(wordEl => {
-            wordEl.style.setProperty('--gradient-degrees', perWordGradientDegrees);
-            wordEl.dataset.sltGradientPos = fallbackGradient.toString();
-            wordEl.style.setProperty('--gradient-position', `${fallbackGradient}%`);
+            setStyleProp(wordEl, '--gradient-degrees', perWordGradientDegrees);
+            setDataProp(wordEl, 'sltGradientPos', fallbackGradient.toString());
+            setStyleProp(wordEl, '--gradient-position', `${fallbackGradient}%`);
 
             const isWordSung = fallbackGradient >= 90;
             const isWordActive = fallbackGradient > -15 && fallbackGradient < 90;
@@ -1239,7 +1285,7 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
     }
 
     translatedWords.forEach((wordEl, i) => {
-        wordEl.style.setProperty('--gradient-degrees', perWordGradientDegrees);
+        setStyleProp(wordEl, '--gradient-degrees', perWordGradientDegrees);
         let gradientPosition = -20;
         const previousGradient = parseFloat(wordEl.dataset.sltGradientPos || 'NaN');
         const wasLatchedWhite = wordEl.dataset.sltLatchedWhite === '1';
@@ -1296,7 +1342,7 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
 
             if (wasLatchedWhite || gradientPosition >= LATCH_WHITE_THRESHOLD) {
                 gradientPosition = 100;
-                wordEl.dataset.sltLatchedWhite = '1';
+                setDataProp(wordEl, 'sltLatchedWhite', '1');
             } else if (!isNaN(previousGradient)) {
                 const delta = gradientPosition - previousGradient;
                 if (delta > PROGRESSION_SNAP_DELTA) {
@@ -1310,8 +1356,8 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
         }
 
         const clamped = Math.max(-20, Math.min(100, gradientPosition));
-        wordEl.dataset.sltGradientPos = clamped.toString();
-        wordEl.style.setProperty('--gradient-position', `${clamped}%`);
+        setDataProp(wordEl, 'sltGradientPos', clamped.toString());
+        setStyleProp(wordEl, '--gradient-position', `${clamped}%`);
 
         const isWordSung = clamped >= 90;
         const isWordActive = clamped > -15 && clamped < 90;
@@ -1367,7 +1413,7 @@ function updateWordSyncStates(doc: Document): void {
 
         const updatedByWords = updateTranslatedWordGradients(transLineEl, originalLine);
         if (updatedByWords) {
-            transLineEl.style.removeProperty('--gradient-position');
+            clearStyleProp(transLineEl, '--gradient-position');
             return;
         }
 
@@ -1376,13 +1422,13 @@ function updateWordSyncStates(doc: Document): void {
         }
 
         if (!isActive) {
-            transLineEl.style.setProperty('--gradient-position', isSung ? '100%' : (isNotSung ? '-20%' : '-20%'));
+            setStyleProp(transLineEl, '--gradient-position', isSung ? '100%' : (isNotSung ? '-20%' : '-20%'));
             return;
         }
 
         const wordProgress = getOverallWordGradientProgress(originalLine);
         if (wordProgress !== null) {
-            transLineEl.style.setProperty('--gradient-position', `${-20 + wordProgress * 120}%`);
+            setStyleProp(transLineEl, '--gradient-position', `${-20 + wordProgress * 120}%`);
             return;
         }
 
@@ -1390,13 +1436,13 @@ function updateWordSyncStates(doc: Document): void {
         const lineEndTime = parseFloat(transLineEl.dataset.endTime || '0');
         if (lineEndTime > 0 && lineStartTime >= 0) {
             if (currentTime >= lineEndTime) {
-                transLineEl.style.setProperty('--gradient-position', '100%');
+                setStyleProp(transLineEl, '--gradient-position', '100%');
             } else if (currentTime < lineStartTime) {
-                transLineEl.style.setProperty('--gradient-position', '-20%');
+                setStyleProp(transLineEl, '--gradient-position', '-20%');
             } else {
                 const total = lineEndTime - lineStartTime;
                 const pct = total <= 0 ? 1 : (currentTime - lineStartTime) / total;
-                transLineEl.style.setProperty('--gradient-position', `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
+                setStyleProp(transLineEl, '--gradient-position', `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
             }
         }
     });
@@ -1425,16 +1471,286 @@ function syncBlurToTranslations(doc: Document): void {
         if (lineEl) {
             const blurAmount = lineEl.style.getPropertyValue('--BlurAmount');
             if (blurAmount) {
-                transHtml.style.setProperty('--BlurAmount', blurAmount);
+                setStyleProp(transHtml, '--BlurAmount', blurAmount);
             } else {
-                transHtml.style.removeProperty('--BlurAmount');
+                clearStyleProp(transHtml, '--BlurAmount');
             }
         }
     });
 }
 
+type BreakdownLookup = (sourceText: string, translatedText: string) => BreakdownToken[] | null;
+
+let breakdownLookup: BreakdownLookup | null = null;
+let lastLearningKey = '';
+let lastLearningLine: HTMLElement | null = null;
+let currentTargetLanguage = '';
+let lastLearningCheck = 0;
+const LEARNING_THROTTLE_MS = 120;
+
+export function setBreakdownLookup(lookup: BreakdownLookup | null): void {
+    breakdownLookup = lookup;
+    lastLearningKey = '';
+}
+
+export function setLearningTargetLanguage(lang: string): void {
+    if (currentTargetLanguage === lang) return;
+    currentTargetLanguage = lang;
+    invalidateLearningRow();
+}
+
+export function invalidateLearningRow(): void {
+    lastLearningKey = '';
+    lastLearningLine = null;
+    lastLearningCheck = 0;
+}
+
+function findActiveLine(doc: Document): HTMLElement | null {
+    const lines = getLyricLines(doc);
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i] as HTMLElement;
+        if (line.classList.contains('Active') || line.classList.contains('active')) return line;
+    }
+    return null;
+}
+
+function removeLearningRows(doc: Document): void {
+    doc.querySelectorAll('.slt-learning-row').forEach(el => el.remove());
+}
+
+function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heuristic' | 'model'): HTMLElement {
+    const row = doc.createElement('div');
+    row.className = 'slt-learning-row';
+    row.dataset.origin = origin;
+
+    for (const token of tokens) {
+        if (!token.source && !token.target) continue;
+
+        const cell = doc.createElement('span');
+        cell.className = 'slt-learning-token';
+        cell.dataset.confidence = token.confidence;
+
+        const source = doc.createElement('span');
+        source.className = 'slt-learning-source';
+        source.textContent = token.source || '—';
+        cell.appendChild(source);
+
+        const target = doc.createElement('span');
+        target.className = 'slt-learning-target';
+        target.textContent = token.target || '—';
+        cell.appendChild(target);
+
+        const showLemma = token.lemma && token.lemma !== token.source;
+        if (showLemma || token.pos) {
+            const meta = doc.createElement('span');
+            meta.className = 'slt-learning-meta';
+
+            if (showLemma) {
+                const lemma = doc.createElement('span');
+                lemma.className = 'slt-learning-lemma';
+                lemma.textContent = token.lemma as string;
+                meta.appendChild(lemma);
+            }
+
+            if (token.pos) {
+                const pos = doc.createElement('span');
+                pos.className = 'slt-learning-pos';
+                pos.textContent = token.pos;
+                meta.appendChild(pos);
+            }
+
+            cell.appendChild(meta);
+        }
+
+        const tip = [token.lemma ? `lemma: ${token.lemma}` : '', token.pos || '', token.note || '']
+            .filter(Boolean)
+            .join(' · ');
+        if (tip) cell.title = tip;
+
+        row.appendChild(cell);
+    }
+
+    return row;
+}
+
+function updateLearningRow(doc: Document): void {
+    if (!currentConfig.learningMode) {
+        if (lastLearningKey) {
+            removeLearningRows(doc);
+            invalidateLearningRow();
+        }
+        return;
+    }
+
+    const now = Date.now();
+    if (now - lastLearningCheck < LEARNING_THROTTLE_MS) return;
+    lastLearningCheck = now;
+
+    if (lastLearningLine && lastLearningKey && lastLearningLine.isConnected
+        && (lastLearningLine.classList.contains('Active') || lastLearningLine.classList.contains('active'))) {
+        const existingRow = doc.querySelector('.slt-learning-row');
+        if (existingRow && existingRow.isConnected) return;
+    }
+
+    const activeLine = findActiveLine(doc);
+    if (!activeLine) return;
+
+    const sourceText = extractLineText(activeLine);
+    if (!sourceText) return;
+
+    const index = parseInt(activeLine.dataset.sltIndex || '-1', 10);
+    const translated = (index >= 0 ? translationMap.get(index) : undefined)
+        || lookupByContent(translationByContent, sourceText)
+        || '';
+    if (!translated) return;
+
+    const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
+    const origin: 'heuristic' | 'model' = modelTokens ? 'model' : 'heuristic';
+    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
+    if (tokens.length === 0) return;
+
+    const key = `${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const anchor = learningAnchorFor(activeLine);
+    if (!anchor || !anchor.parentNode) return;
+
+    const existing = doc.querySelector('.slt-learning-row') as HTMLElement | null;
+    if (existing && existing.isConnected && lastLearningKey === key && existing.previousElementSibling === anchor) {
+        lastLearningLine = activeLine;
+        return;
+    }
+
+    removeLearningRows(doc);
+
+    const row = buildLearningRow(doc, tokens, origin);
+    anchor.parentNode.insertBefore(row, anchor.nextSibling);
+    lastLearningKey = key;
+    lastLearningLine = activeLine;
+}
+
+function learningAnchorFor(line: HTMLElement): HTMLElement | null {
+    let node = line.nextElementSibling as HTMLElement | null;
+    let anchor: HTMLElement = line;
+
+    while (node) {
+        if (node.classList.contains('slt-interleaved-translation')
+            || node.classList.contains('slt-replace-line')
+            || node.classList.contains('slt-romanization-line')
+            || node.classList.contains('slt-original-line')) {
+            anchor = node;
+            node = node.nextElementSibling as HTMLElement | null;
+            continue;
+        }
+        break;
+    }
+
+    return anchor;
+}
+
+function restoreOriginalLines(doc: Document): void {
+    doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
+
+    doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
+
+    doc.querySelectorAll('[data-slt-original-html]').forEach(el => {
+        const original = (el as HTMLElement).dataset.sltOriginalHtml;
+        if (original !== undefined) {
+            el.innerHTML = original;
+            delete (el as HTMLElement).dataset.sltOriginalHtml;
+        }
+    });
+    doc.querySelectorAll('[data-slt-original-text]').forEach(el => {
+        const original = (el as HTMLElement).dataset.sltOriginalText;
+        if (original !== undefined) {
+            el.textContent = original;
+            delete (el as HTMLElement).dataset.sltOriginalText;
+        }
+    });
+    doc.querySelectorAll('[data-slt-replaced-with]').forEach(el => {
+        delete (el as HTMLElement).dataset.sltReplacedWith;
+    });
+
+    doc.querySelectorAll('.spicy-translation-container').forEach(el => el.remove());
+    doc.querySelectorAll('.spicy-hidden-original').forEach(el => {
+        el.classList.remove('spicy-hidden-original');
+    });
+    doc.querySelectorAll('.spicy-original-wrapper').forEach(wrapper => {
+        const parent = wrapper.parentElement;
+        if (parent) {
+            const originalContent = wrapper.innerHTML;
+            wrapper.remove();
+            if (parent.innerHTML.trim() === '' || !parent.querySelector('.word, .syllable, .letterGroup, .letter')) {
+                parent.innerHTML = originalContent;
+            }
+        }
+    });
+
+    doc.querySelectorAll('.slt-overlay-parent, .spicy-translated').forEach(el => {
+        el.classList.remove('slt-overlay-parent', 'spicy-translated');
+    });
+
+    doc.querySelectorAll('.slt-sync-word').forEach(el => {
+        el.classList.remove('slt-word-past', 'slt-word-active', 'slt-word-future');
+    });
+}
+
+function applyNoneMode(doc: Document): void {
+    invalidateWordUnitsCache();
+
+    const lines = getLyricLines(doc);
+    if (!lines || lines.length === 0) {
+        restoreOriginalLines(doc);
+        return;
+    }
+
+    const lineTexts = extractLineTexts(lines);
+    rebuildPerLineMaps(lines, lineTexts);
+
+    if (renderSignatureUnchanged(doc, lines, lineTexts)) return;
+
+    restoreOriginalLines(doc);
+
+    if (currentConfig.showRomanization) {
+        const claimed = new Set<Element>();
+
+        lines.forEach((line, index) => {
+            const lineEl = line as HTMLElement;
+            lineEl.dataset.sltIndex = index.toString();
+
+            const romanizationText = romanizationCompanionText(line, index, 'none');
+            if (!romanizationText) return;
+
+            const romanEl = buildRomanizationLine(doc, index, lineTimingData[index], line, romanizationText);
+            if (!romanEl || !line.parentNode) return;
+
+            line.parentNode.insertBefore(romanEl, line.nextSibling);
+            claimed.add(romanEl);
+        });
+
+        doc.querySelectorAll('.slt-romanization-line').forEach(el => {
+            if (!claimed.has(el)) el.remove();
+        });
+    } else {
+        lines.forEach((line, index) => {
+            (line as HTMLElement).dataset.sltIndex = index.toString();
+        });
+    }
+
+    markRenderComplete(doc);
+}
+
 function renderTranslations(doc: Document): void {
-    if (!isOverlayEnabled || (translationMap.size === 0 && !hasContentData())) return;
+    if (!isOverlayEnabled) return;
+
+    if (currentConfig.mode === 'none') {
+        applyNoneMode(doc);
+        return;
+    }
+
+    if (translationMap.size === 0 && !hasContentData()) return;
 
     switch (currentConfig.mode) {
         case 'replace':
@@ -1476,7 +1792,7 @@ function onActiveLineChanged(doc: Document): void {
     lastActiveLineUpdate = now;
 
     try {
-        if (currentConfig.mode === 'interleaved' || currentConfig.mode === 'replace') {
+        if (currentConfig.mode === 'interleaved' || currentConfig.mode === 'replace' || currentConfig.mode === 'none') {
             doc.querySelectorAll('.slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line').forEach(el => {
                 const orig = adjacentOriginalLine(el);
                 el.classList.toggle('active', !!orig && isLineActive(orig));
@@ -1501,7 +1817,9 @@ function syncLoop(): void {
     }
 
     try {
+        invalidateWordUnitsCache();
         onActiveLineChanged(document);
+        updateLearningRow(document);
         updateWordSyncStates(document);
         syncBlurToTranslations(document);
 
@@ -1512,7 +1830,7 @@ function syncLoop(): void {
                 if (pipDoc && pipDoc.body) {
                     ensurePIPStyles(pipDoc);
 
-                    if (translationMap.size > 0) {
+                    if (translationMap.size > 0 && currentConfig.mode !== 'none') {
                         const hasTranslations = pipDoc.querySelector('.slt-replace-line, .slt-interleaved-translation');
                         if (!hasTranslations) {
                             renderTranslations(pipDoc);
@@ -1529,6 +1847,12 @@ function syncLoop(): void {
                 }
             } catch (pipErr) {
             }
+        } else if (activeLineObservers.size > 1) {
+            for (const [observedDoc, observer] of activeLineObservers) {
+                if (observedDoc === document) continue;
+                try { observer.disconnect(); } catch {}
+                activeLineObservers.delete(observedDoc);
+            }
         }
     } catch (e) { }
 
@@ -1538,6 +1862,16 @@ function syncLoop(): void {
 function startActiveSyncInterval(): void {
     if (activeSyncRafId) return;
     activeSyncRafId = requestAnimationFrame(syncLoop);
+}
+
+export function pauseActiveSync(): void {
+    if (getPIPWindow()) return;
+    stopActiveSyncInterval();
+}
+
+export function resumeActiveSync(): void {
+    if (!isOverlayEnabled) return;
+    startActiveSyncInterval();
 }
 
 function stopActiveSyncInterval(): void {
@@ -1585,11 +1919,10 @@ function setupActiveLineObserver(doc: Document): void {
         const observer = new MutationObserver((mutations) => {
             try {
                 let activeChanged = false;
-                let structureChanged = false;
 
                 for (const mutation of mutations) {
+                    if (activeChanged) break;
                     if (mutation.type === 'childList') {
-                        structureChanged = true;
                         if (mutation.addedNodes.length > 0) activeChanged = true;
                     } else if (mutation.type === 'attributes') {
                         const target = mutation.target as HTMLElement;
@@ -1597,10 +1930,6 @@ function setupActiveLineObserver(doc: Document): void {
                             activeChanged = true;
                         }
                     }
-                }
-
-                if (structureChanged) {
-                    resetDocCache(doc);
                 }
 
                 if (activeChanged) {
@@ -1664,7 +1993,6 @@ export function enableOverlay(config?: Partial<OverlayConfig>): void {
 export function disableOverlay(): void {
     isOverlayEnabled = false;
 
-    cleanupInterleavedTracking();
     stopActiveSyncInterval();
 
     activeLineObservers.forEach((observer, doc) => {
@@ -1673,7 +2001,7 @@ export function disableOverlay(): void {
     activeLineObservers.clear();
 
     const cleanup = (doc: Document) => {
-        lastRenderSigMap.delete(doc);
+        forgetRenderState(doc);
 
         const overlay = doc.getElementById('spicy-translate-overlay');
         if (overlay) overlay.remove();
@@ -1681,54 +2009,8 @@ export function disableOverlay(): void {
         const interleavedOverlay = doc.getElementById('slt-interleaved-overlay');
         if (interleavedOverlay) interleavedOverlay.remove();
 
-        doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-sync-translation').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
-
-        doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
-        doc.querySelectorAll('.slt-replace-hidden').forEach(el => el.classList.remove('slt-replace-hidden'));
-
-        doc.querySelectorAll('[data-slt-original-html]').forEach(el => {
-            const original = (el as HTMLElement).dataset.sltOriginalHtml;
-            if (original !== undefined) {
-                el.innerHTML = original;
-                delete (el as HTMLElement).dataset.sltOriginalHtml;
-            }
-        });
-        doc.querySelectorAll('[data-slt-original-text]').forEach(el => {
-            const original = (el as HTMLElement).dataset.sltOriginalText;
-            if (original !== undefined) {
-                el.textContent = original;
-                delete (el as HTMLElement).dataset.sltOriginalText;
-            }
-        });
-        doc.querySelectorAll('[data-slt-replaced-with]').forEach(el => {
-            delete (el as HTMLElement).dataset.sltReplacedWith;
-        });
-
-        doc.querySelectorAll('.spicy-translation-container').forEach(el => el.remove());
-        doc.querySelectorAll('.spicy-hidden-original').forEach(el => {
-            el.classList.remove('spicy-hidden-original');
-        });
-        doc.querySelectorAll('.spicy-original-wrapper').forEach(wrapper => {
-            const parent = wrapper.parentElement;
-            if (parent) {
-                const originalContent = wrapper.innerHTML;
-                wrapper.remove();
-                if (parent.innerHTML.trim() === '' || !parent.querySelector('.word, .syllable, .letterGroup, .letter')) {
-                    parent.innerHTML = originalContent;
-                }
-            }
-        });
-
-        doc.querySelectorAll('.slt-overlay-parent, .spicy-translated').forEach(el => {
-            el.classList.remove('slt-overlay-parent', 'spicy-translated');
-        });
-
-        doc.querySelectorAll('.slt-sync-word').forEach(el => {
-            el.classList.remove('slt-word-past', 'slt-word-active', 'slt-word-future');
-        });
+        restoreOriginalLines(doc);
+        doc.querySelectorAll('.slt-learning-row').forEach(el => el.remove());
     };
 
     cleanup(document);
@@ -1775,13 +2057,14 @@ export function clearOverlayContent(): void {
     lineTimingData = [];
 
     const clearDoc = (doc: Document) => {
-        lastRenderSigMap.delete(doc);
+        forgetRenderState(doc);
 
         const container = doc.getElementById('spicy-translate-overlay');
         if (container) container.innerHTML = '';
 
         doc.querySelectorAll('.slt-interleaved-translation').forEach(el => el.remove());
         doc.querySelectorAll('.slt-romanization-line').forEach(el => el.remove());
+        doc.querySelectorAll('.slt-learning-row').forEach(el => el.remove());
         doc.querySelectorAll('.slt-original-line').forEach(el => el.remove());
 
         doc.querySelectorAll('.slt-replace-line').forEach(el => el.remove());
@@ -2037,6 +2320,89 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     padding: 1px 0;
     margin: 0;
+}
+.slt-learning-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 6px 10px;
+    padding: 6px 0 14px 0;
+    pointer-events: auto;
+    user-select: text;
+    text-align: left;
+    letter-spacing: 0;
+    scale: 1;
+    filter: none;
+    animation: slt-learning-in 180ms ease-out;
+}
+
+@keyframes slt-learning-in {
+    from { opacity: 0; transform: translateY(-2px); }
+    to { opacity: 1; transform: none; }
+}
+
+.slt-learning-token {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    border-left: 2px solid rgba(255, 255, 255, 0.28);
+    font-size: calc(0.3em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.25;
+    font-weight: 600;
+    white-space: normal;
+    max-width: 16em;
+}
+
+.slt-learning-token[data-confidence="high"] { border-left-color: rgba(126, 231, 135, 0.85); }
+.slt-learning-token[data-confidence="medium"] { border-left-color: rgba(255, 209, 102, 0.8); }
+.slt-learning-token[data-confidence="low"] { border-left-color: rgba(255, 255, 255, 0.22); }
+
+.slt-learning-row[data-origin="heuristic"] .slt-learning-token {
+    border-left-style: dashed;
+}
+
+.slt-learning-source {
+    color: rgba(255, 255, 255, 0.96);
+    font-weight: 800;
+}
+
+.slt-learning-target {
+    color: rgba(255, 255, 255, 0.74);
+    font-weight: 600;
+}
+
+.slt-learning-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.5em;
+    margin-top: auto;
+    padding-top: 1px;
+}
+
+.slt-learning-lemma {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+    font-style: italic;
+}
+
+.slt-learning-pos {
+    color: rgba(255, 255, 255, 0.42);
+    font-weight: 500;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-token,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
+#SpicyLyricsPage.CardMode .slt-learning-token {
+    font-size: calc(0.42em * var(--slt-overlay-font-scale, 1));
+    padding: 2px 5px;
+    max-width: 12em;
 }
 `;
 }

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { setPreferredApi as SetPreferredApi, translateText as TranslateText } from '../src/utils/translator';
+import type {
+    setPreferredApi as SetPreferredApi,
+    translateText as TranslateText,
+    translateLyrics as TranslateLyrics
+} from '../src/utils/translator';
 
 type FetchCall = {
     url: string;
@@ -28,9 +32,10 @@ Object.defineProperty(globalThis, 'navigator', {
     value: { onLine: true }
 });
 
-const { setPreferredApi, translateText } = require('../src/utils/translator') as {
+const { setPreferredApi, translateText, translateLyrics } = require('../src/utils/translator') as {
     setPreferredApi: typeof SetPreferredApi;
     translateText: typeof TranslateText;
+    translateLyrics: typeof TranslateLyrics;
 };
 
 function resetState(): void {
@@ -1144,4 +1149,65 @@ test('a resolved variant still sends the plain Catalan code to code-based provid
 
     await translateText('Good morning', 'ca-valencia', 'en');
     assert.equal(JSON.parse(String(deeplCalls[0].init?.body)).target_lang, 'CA');
+});
+
+function useLibreTranslateBatch(translatedLines: string[]): void {
+    resetState();
+    setPreferredApi('libretranslate', undefined, {
+        libreTranslateApiUrl: 'http://localhost:5000/translate'
+    } as any);
+    (globalThis as any).fetch = async () => jsonResponse({ translatedText: translatedLines.join(String.fromCharCode(10)) });
+}
+
+test('Swedish lyrics keep their translations instead of being wiped as unmeaningful', async () => {
+    const swedish = [
+        'Jag vet inte vad du gör med mig',
+        'Och sen är du bara borta igen',
+        'Du är mitt hjärta och jag är din'
+    ];
+    const english = [
+        'I do not know what you do to me',
+        'And then you are just gone again',
+        'You are my heart and I am yours'
+    ];
+
+    useLibreTranslateBatch(english);
+
+    const results = await translateLyrics(swedish, 'en');
+
+    assert.deepEqual(results.map(r => r.translatedText), english);
+    assert.deepEqual(results.map(r => r.wasTranslated), [true, true, true]);
+});
+
+test('a known non-target source language keeps translations the local heuristic cannot vouch for', async () => {
+    const turkish = [
+        'Bana ne yaptigini bilmiyorum',
+        'Sonra yine gidiyorsun',
+        'Sen benim kalbimsin'
+    ];
+    const english = [
+        'I do not know what you do to me',
+        'And then you leave again',
+        'You are my heart'
+    ];
+
+    useLibreTranslateBatch(english);
+
+    const results = await translateLyrics(turkish, 'en', undefined, 'tr');
+
+    assert.deepEqual(results.map(r => r.translatedText), english);
+    assert.deepEqual(results.map(r => r.wasTranslated), [true, true, true]);
+});
+
+test('same-language provider echo is still discarded', async () => {
+    const lines = [
+        'I know that you were the only one for me',
+        'We are not the same as we used to be here'
+    ];
+
+    useLibreTranslateBatch(lines);
+
+    const results = await translateLyrics(lines, 'en', undefined, 'en');
+
+    assert.deepEqual(results.map(r => r.wasTranslated), [false, false]);
 });
