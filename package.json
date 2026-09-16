@@ -13,7 +13,8 @@
   "homepage": "https://github.com/7xeh/SpicyLyricTranslate#readme",
   "scripts": {
     "build": "node build.js",
-    "build:watch": "node build.js --watch",
+    "rebuild": "node build.js --no-bump",
+    "build:watch":"node build.js --watch",
     "test": "node tests/run-tests.mjs",
     "deploy": "node deploy.js",
     "reset": "spicetify config extensions spicy-lyric-translater.js- && spicetify apply",
