@@ -4,11 +4,6 @@
     const STORAGE_PREFIX = 'spicy-lyric-translater:';
     const DEBUG_MODE = localStorage.getItem(STORAGE_PREFIX + 'debug-mode') === 'true';
 
-    const HOTFIX_CHECK_INTERVAL_MS = 30 * 60 * 1000;
-    const HOTFIX_FULL_CHECK_INTERVAL_MS = 2 * 60 * 1000;
-    const HOTFIX_INITIAL_DELAY_MS = 5 * 60 * 1000;
-    const HOTFIX_JITTER_MS = 60 * 1000;
-    
     const TAG = '%c[SLT-Loader]';
     const TAG_STYLE = 'color: #FF69B4; font-weight: bold;';
 
@@ -340,10 +335,6 @@
         if (contentHash) storageSet('content-hash', contentHash);
         storageSet('loaded-version', version);
 
-        if (isHotfix) {
-            storageSet('hotfix-detected', 'true');
-        }
-
         const metadata = {
             LoadedVersion: version,
             LoadedAt: Date.now(),
@@ -359,7 +350,6 @@
                 waitForSpicyLyrics,
                 resetSpicyLyricsCheck,
                 observer: SLT_Observer,
-                runHotfixCheck: () => runHotfixCheck(),
                 log
             }
         };
@@ -377,98 +367,6 @@
         } else {
             log.info(`Loaded v${version}${hashTag}`);
         }
-    };
-
-    let hotfixTimer = null;
-    let lastFullCheckTime = 0;
-
-    const scheduleHotfixCheck = (delayMs) => {
-        if (hotfixTimer) clearTimeout(hotfixTimer);
-        const jitter = Math.floor(Math.random() * HOTFIX_JITTER_MS);
-        hotfixTimer = setTimeout(runHotfixCheck, delayMs + jitter);
-    };
-
-    const runHotfixCheck = async () => {
-        if (document.hidden) {
-            scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-            return;
-        }
-
-        try {
-            const info = await getVersionInfo();
-            const currentVersion = storageGet('loaded-version');
-            const currentHash = storageGet('content-hash');
-
-            if (!currentVersion || !currentHash) {
-                scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-                return;
-            }
-
-            if (info.version !== currentVersion) {
-                log.debug(`Version change detected: ${currentVersion} → ${info.version}, deferring to updater`);
-                scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-                return;
-            }
-
-            if (info.hash) {
-                if (info.hash === currentHash) {
-                    log.debug('No hotfix (API hash match)');
-                    scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-                    return;
-                }
-
-                log.info(`Hotfix detected via API for v${info.version}! Reloading...`);
-                storageSet('hotfix-detected', 'true');
-                window.location.reload();
-                return;
-            }
-
-            const now = Date.now();
-            if (now - lastFullCheckTime < HOTFIX_FULL_CHECK_INTERVAL_MS) {
-                log.debug('Skipping full hotfix check (too recent)');
-                scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-                return;
-            }
-
-            lastFullCheckTime = now;
-            log.debug(`Running full hotfix check for v${info.version}...`);
-
-            const url = withCacheBust(info.downloadUrl || `${EXTENSION_BASE_URL}/versions/v${info.version}/spicy-lyric-translater.js`);
-            const response = await fetch(url);
-            if (!response.ok) {
-                scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-                return;
-            }
-
-            const code = await response.text();
-            const newHash = await computeSHA256(code);
-
-            if (newHash && newHash !== currentHash) {
-                log.info(`Hotfix detected for v${info.version}! [${currentHash.substring(0, 8)} → ${newHash.substring(0, 8)}] Reloading...`);
-                storageSet('content-hash', newHash);
-                storageSet('hotfix-detected', 'true');
-                window.location.reload();
-                return;
-            }
-
-            log.debug('No hotfix (content hash match)');
-        } catch (e) {
-            log.debug('Hotfix check failed:', e);
-        }
-
-        scheduleHotfixCheck(HOTFIX_CHECK_INTERVAL_MS);
-    };
-
-    const startHotfixChecker = () => {
-        scheduleHotfixCheck(HOTFIX_INITIAL_DELAY_MS);
-
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                scheduleHotfixCheck(5000);
-            }
-        });
-
-        log.debug('Hotfix checker initialized');
     };
 
     const showError = (message) => {
@@ -521,7 +419,6 @@
             try {
                 const info = await getVersionInfo();
                 await loadExtension(info.version, info.hash, info.downloadUrl);
-                startHotfixChecker();
                 return;
             } catch (err) {
                 lastError = err;

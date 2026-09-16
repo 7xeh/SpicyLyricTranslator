@@ -33,6 +33,7 @@ import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
+import { cleanLyricText, normalizeLyricMatchKey } from './text';
 
 let viewControlsObserver: MutationObserver | null = null;
 let lyricsObserver: MutationObserver | null = null;
@@ -63,7 +64,7 @@ interface SkippedTranslationState {
 let lastSkippedTranslation: SkippedTranslationState | null = null;
 
 function normalizeMatchKey(text: string | undefined | null): string {
-    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
+    return normalizeLyricMatchKey(text);
 }
 
 function buildLyricsKey(lines: string[]): string {
@@ -476,22 +477,19 @@ export function extractLineText(lineElement: Element): string {
 
     const words = lineElement.querySelectorAll('.word:not(.dot), .syllable, .letterGroup');
     if (words.length > 0) {
-        return Array.from(words)
-            .map(w => w.textContent?.trim() || '')
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+        return cleanLyricText(Array.from(words)
+            .map(w => w.textContent || '')
+            .join(' '));
     }
 
     const letters = lineElement.querySelectorAll('.letter');
     if (letters.length > 0) {
-        return Array.from(letters)
+        return cleanLyricText(Array.from(letters)
             .map(l => l.textContent || '')
-            .join('')
-            .trim();
+            .join(''));
     }
 
-    return lineElement.textContent?.trim() || '';
+    return cleanLyricText(lineElement.textContent);
 }
 
 function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: string): number[] {
@@ -1185,7 +1183,7 @@ export async function translateCurrentLyrics(): Promise<void> {
 }
 
 function normalizeForComparison(text: string): string {
-    return (text || '').toLowerCase().replace(/[\s\p{P}]+/gu, '').trim();
+    return (text || '').toLowerCase().replace(/[\s\p{P}\u200B-\u200D\u2060\uFEFF]+/gu, '').trim();
 }
 
 function formatNotificationDuration(ms: number | undefined): string {

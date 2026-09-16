@@ -1,5 +1,6 @@
 import { warn } from './debug';
 import { normalizeLanguageCode } from './languageDetection';
+import { cleanLyricText } from './text';
 
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
@@ -340,7 +341,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 romanizedText += romanSyl;
             }
             lineData.push({
-                text: lineText.trim(),
+                text: cleanLyricText(lineText),
                 startTime: group.Lead.StartTime,
                 endTime: group.Lead.EndTime,
                 isInstrumental: false,
@@ -355,7 +356,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 ? group.TransliteratedText
                 : undefined;
             lineData.push({
-                text: String(group.Text).trim(),
+                text: cleanLyricText(String(group.Text)),
                 startTime: group.StartTime,
                 endTime: group.EndTime,
                 isInstrumental: false,
@@ -368,7 +369,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             const leadText = (group.Lead as any).Text;
             if (leadText !== undefined) {
                 lineData.push({
-                    text: String(leadText).trim(),
+                    text: cleanLyricText(String(leadText)),
                     startTime: group.Lead.StartTime,
                     endTime: group.Lead.EndTime,
                     isInstrumental: false,
@@ -385,7 +386,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
 function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
     if (!lyrics.Lines) return [];
     return lyrics.Lines.map(line => ({
-        text: line.Text?.trim() || '',
+        text: cleanLyricText(line.Text),
         startTime: 0,
         endTime: 0,
         isInstrumental: false,

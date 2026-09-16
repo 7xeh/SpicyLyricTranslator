@@ -132,7 +132,7 @@ export async function initialize(): Promise<void> {
         getState: () => ({ ...state }),
         setDebugMode,
         isDebugEnabled,
-        checkForUpdates: () => checkForUpdates(true),
+        checkForUpdates: () => checkForUpdates({ trigger: 'manual' }),
         getUpdateInfo: getUpdateInfo,
         version: VERSION,
         connectivity: {

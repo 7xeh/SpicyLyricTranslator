@@ -195,6 +195,7 @@ function hasMixedLatinAndNonLatin(text: string): boolean {
 function normalizeComparisonText(value: string): string {
     return (value || '')
         .toLowerCase()
+        .replace(/[\u200B\u2060\uFEFF]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -1753,6 +1754,7 @@ function normalizeTranslatedLine(text: string): string {
         .replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, '')
         .replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, '')
         .replace(/\r?\n+/g, ' ')
+        .replace(/[\u200B\u2060\uFEFF]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }

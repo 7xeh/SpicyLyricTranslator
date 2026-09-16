@@ -2374,7 +2374,7 @@ var SpicyLyricTranslater = (() => {
     return hasLatin && hasNonLatin;
   }
   function normalizeComparisonText(value) {
-    return (value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    return (value || "").toLowerCase().replace(/[\u200B\u2060\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
   }
   function getLatinSkeleton(text) {
     return normalizeComparisonText(
@@ -3684,7 +3684,7 @@ ${text}`
     return byIndex;
   }
   function normalizeTranslatedLine(text) {
-    return text.replace(/```[a-z0-9_-]*/gi, "").replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim();
+    return text.replace(/```[a-z0-9_-]*/gi, "").replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/[\u200B\u2060\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
   }
   function foldWrapperLineForComparison(text) {
     return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -4706,6 +4706,15 @@ ${text}`
     _qualityByIndex: void 0
   };
 
+  // src/utils/text.ts
+  var INVISIBLE_SEPARATOR_REGEX = /[\u200B\u2060\uFEFF]/g;
+  function cleanLyricText(text) {
+    return (text || "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
+  }
+  function normalizeLyricMatchKey(text) {
+    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200D\u2060\uFEFF]+/gu, "").trim();
+  }
+
   // src/utils/lyricsFetcher.ts
   var SPICY_API_HOST = "api.spicylyrics.org";
   var SPICY_QUERY_PATH = "/query";
@@ -4950,7 +4959,7 @@ ${text}`
           romanizedText += romanSyl;
         }
         lineData.push({
-          text: lineText.trim(),
+          text: cleanLyricText(lineText),
           startTime: group.Lead.StartTime,
           endTime: group.Lead.EndTime,
           isInstrumental: false,
@@ -4962,7 +4971,7 @@ ${text}`
       if (group.Text !== void 0 && group.StartTime !== void 0 && group.EndTime !== void 0) {
         const groupRoman = group.TransliteratedText && group.TransliteratedText !== group.Text ? group.TransliteratedText : void 0;
         lineData.push({
-          text: String(group.Text).trim(),
+          text: cleanLyricText(String(group.Text)),
           startTime: group.StartTime,
           endTime: group.EndTime,
           isInstrumental: false,
@@ -4974,7 +4983,7 @@ ${text}`
         const leadText = group.Lead.Text;
         if (leadText !== void 0) {
           lineData.push({
-            text: String(leadText).trim(),
+            text: cleanLyricText(String(leadText)),
             startTime: group.Lead.StartTime,
             endTime: group.Lead.EndTime,
             isInstrumental: false
@@ -4989,7 +4998,7 @@ ${text}`
     if (!lyrics.Lines)
       return [];
     return lyrics.Lines.map((line) => ({
-      text: line.Text?.trim() || "",
+      text: cleanLyricText(line.Text),
       startTime: 0,
       endTime: 0,
       isInstrumental: false,
@@ -5121,7 +5130,7 @@ ${text}`
   var qualityByContent = /* @__PURE__ */ new Map();
   var timingByContent = /* @__PURE__ */ new Map();
   function normalizeCompare(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "").trim();
+    return normalizeLyricMatchKey(text);
   }
   function buildContentLookupKeys(text) {
     const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
@@ -5441,7 +5450,7 @@ ${text}`
         }
       }
       if (parts.length > 0) {
-        return parts.join(" ").replace(/\s+/g, " ").trim();
+        return cleanLyricText(parts.join(" "));
       }
     }
     const words = line.querySelectorAll(".word:not(.dot), .letterGroup");
@@ -5453,9 +5462,9 @@ ${text}`
           return false;
         return true;
       });
-      return wordUnits.map((w) => w.textContent?.trim() || "").join(" ").replace(/\s+/g, " ").trim();
+      return cleanLyricText(wordUnits.map((w) => w.textContent || "").join(" "));
     }
-    return line.textContent?.trim() || "";
+    return cleanLyricText(line.textContent);
   }
   var wordUnitsCache = /* @__PURE__ */ new WeakMap();
   function invalidateWordUnitsCache() {
@@ -8111,75 +8120,363 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     "_spicy_lyric_translator_metadata"
   ];
   function getLoaderMetadata() {
-    for (const key of METADATA_KEYS) {
-      const metadata = window[key];
-      if (metadata)
-        return metadata;
+    try {
+      for (const key of METADATA_KEYS) {
+        const metadata = window[key];
+        if (metadata && metadata.LoadedVersion)
+          return metadata;
+      }
+    } catch {
     }
     return null;
   }
   function clearLoaderMetadata() {
-    for (const key of METADATA_KEYS) {
-      if (window[key]) {
-        window[key] = {};
+    try {
+      for (const key of METADATA_KEYS) {
+        if (window[key]) {
+          window[key] = {};
+        }
       }
+    } catch {
     }
   }
-  var getLoadedVersion = () => {
-    const metadata = getLoaderMetadata();
-    if (metadata?.LoadedVersion) {
-      return metadata.LoadedVersion;
-    }
-    return true ? "2.1.5" : "0.0.0";
-  };
-  var CURRENT_VERSION = getLoadedVersion();
+  var LOADER_METADATA = getLoaderMetadata();
+  var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.6" : "0.0.0");
+  var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
-  var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+  var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
   var RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-  var EXTENSION_FILENAME = "spicy-lyric-translater.js";
   var UPDATE_API_URL = "https://7xeh.dev/apps/spicylyrictranslate/api/version.php";
-  var updateState = {
-    isUpdating: false,
-    progress: 0,
-    status: ""
-  };
-  var hasShownUpdateNotice = false;
-  var lastCheckTime = 0;
   var MIN_CHECK_INTERVAL_MS = 15 * 60 * 1e3;
   var DEFAULT_CHECK_INTERVAL_MS = 30 * 60 * 1e3;
+  var INITIAL_CHECK_DELAY_MS = 8e3;
   var MAX_BACKOFF_MS = 2 * 60 * 60 * 1e3;
   var REQUEST_TIMEOUT_MS = 6e3;
+  var BUNDLE_TIMEOUT_MS = 15e3;
+  var BUNDLE_HASH_INTERVAL_MS = 2 * 60 * 60 * 1e3;
   var SCHEDULE_JITTER_MS = 2 * 60 * 1e3;
+  var SNOOZE_MS = 12 * 60 * 60 * 1e3;
+  var PENDING_TTL_MS = 60 * 60 * 1e3;
+  var APPLIED_MODAL_DELAY_MS = 2e3;
+  var STORAGE_KEYS = {
+    pending: "pending-update",
+    snooze: "update-snooze",
+    lastVersion: "last-known-version",
+    lastHash: "last-known-hash"
+  };
+  var LEGACY_STORAGE_KEYS = [
+    "pending-update-version",
+    "pending-update-timestamp",
+    "pending-update-changelog",
+    "hotfix-detected"
+  ];
+  var isInstalling = false;
+  var inFlightCheck = null;
+  var lastCheckTime = 0;
+  var lastBundleHashTime = 0;
   var currentCheckIntervalMs = DEFAULT_CHECK_INTERVAL_MS;
   var currentBackoffMs = 0;
   var checkTimer = null;
-  var checkInProgress = false;
+  var schedulerStarted = false;
+  function parseVersion(version) {
+    if (typeof version !== "string")
+      return null;
+    const cleanVersion = version.trim().replace(/^v/i, "");
+    const match = cleanVersion.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match)
+      return null;
+    return {
+      major: parseInt(match[1], 10),
+      minor: parseInt(match[2], 10),
+      patch: parseInt(match[3], 10),
+      text: `${match[1]}.${match[2]}.${match[3]}`
+    };
+  }
+  function compareVersions(v1, v2) {
+    if (v1.major !== v2.major)
+      return v1.major > v2.major ? 1 : -1;
+    if (v1.minor !== v2.minor)
+      return v1.minor > v2.minor ? 1 : -1;
+    if (v1.patch !== v2.patch)
+      return v1.patch > v2.patch ? 1 : -1;
+    return 0;
+  }
+  function getCurrentVersion() {
+    return parseVersion(CURRENT_VERSION) || { major: 0, minor: 0, patch: 0, text: CURRENT_VERSION };
+  }
+  function getContentHashShort(length = 8) {
+    return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
+  }
   async function fetchWithTimeout2(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(input, {
-        ...init,
-        signal: controller.signal
-      });
-      return response;
+      return await fetch(input, { ...init, signal: controller.signal });
     } finally {
-      clearTimeout(timeoutId);
+      window.clearTimeout(timeoutId);
     }
   }
-  function getScheduledDelay(baseMs) {
-    const normalizedBase = Math.max(MIN_CHECK_INTERVAL_MS, baseMs);
+  function withCacheBust(url) {
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.set("_", Date.now().toString());
+      return parsed.href;
+    } catch {
+      return url;
+    }
+  }
+  async function computeSHA256(text) {
+    try {
+      const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      return null;
+    }
+  }
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+  function notify(message, isError = false) {
+    try {
+      Spicetify.showNotification?.(message, isError);
+    } catch {
+    }
+  }
+  async function fetchSelfHostedRelease() {
+    try {
+      const response = await fetchWithTimeout2(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
+      if (!response.ok)
+        return null;
+      const data = await response.json();
+      const version = parseVersion(data?.version);
+      if (!version)
+        return null;
+      const hash = data.hash || data.sha256 || data.checksum || null;
+      return {
+        version,
+        hash: typeof hash === "string" && hash.length > 0 ? hash.toLowerCase() : null,
+        downloadUrl: typeof data.download_url === "string" && data.download_url.length > 0 ? data.download_url : `${UPDATE_API_URL}?action=download&version=${encodeURIComponent(version.text)}`,
+        releaseUrl: data.release_notes_url || RELEASES_URL,
+        changelog: typeof data.changelog === "string" ? data.changelog : ""
+      };
+    } catch (e) {
+      warn("Self-hosted update API unavailable:", e);
+      return null;
+    }
+  }
+  async function fetchGitHubRelease(path) {
+    try {
+      const response = await fetchWithTimeout2(`${GITHUB_API_URL}/${path}`, {
+        headers: { "Accept": "application/vnd.github.v3+json" }
+      });
+      return response.ok ? await response.json() : null;
+    } catch {
+      return null;
+    }
+  }
+  async function fetchGitHubLatestRelease() {
+    const release = await fetchGitHubRelease("latest");
+    const version = release ? parseVersion(release.tag_name) : null;
+    if (!release || !version)
+      return null;
+    const jsAsset = Array.isArray(release.assets) ? release.assets.find((asset) => typeof asset?.name === "string" && asset.name.endsWith(".js")) : null;
+    return {
+      version,
+      hash: null,
+      downloadUrl: jsAsset?.browser_download_url || "",
+      releaseUrl: release.html_url || RELEASES_URL,
+      changelog: release.body || ""
+    };
+  }
+  async function fetchRemoteRelease() {
+    return await fetchSelfHostedRelease() || await fetchGitHubLatestRelease();
+  }
+  async function fetchChangelogForVersion(version, allowLatestFallback = true) {
+    const tagged = await fetchGitHubRelease(`tags/v${encodeURIComponent(version)}`);
+    if (tagged?.body)
+      return tagged.body;
+    if (!allowLatestFallback)
+      return "";
+    const latest = await fetchGitHubRelease("latest");
+    return latest?.body || "";
+  }
+  async function detectHotfixHash(remote, trigger) {
+    if (!IS_LOADER_MODE || !LOADED_HASH)
+      return null;
+    if (compareVersions(remote.version, getCurrentVersion()) !== 0)
+      return null;
+    if (remote.hash) {
+      return remote.hash !== LOADED_HASH.toLowerCase() ? remote.hash : null;
+    }
+    if (!remote.downloadUrl)
+      return null;
+    const now = Date.now();
+    if (trigger === "auto" && now - lastBundleHashTime < BUNDLE_HASH_INTERVAL_MS)
+      return null;
+    lastBundleHashTime = now;
+    try {
+      const response = await fetchWithTimeout2(withCacheBust(remote.downloadUrl), {}, BUNDLE_TIMEOUT_MS);
+      if (!response.ok)
+        return null;
+      const hash = await computeSHA256(await response.text());
+      return hash && hash !== LOADED_HASH.toLowerCase() ? hash : null;
+    } catch (e) {
+      debug("Bundle hash check failed:", e);
+      return null;
+    }
+  }
+  async function resolveUpdateStatus(trigger) {
+    const current = getCurrentVersion();
+    try {
+      const remote = await fetchRemoteRelease();
+      if (!remote) {
+        return { status: "error", current, message: "Update server could not be reached" };
+      }
+      if (compareVersions(remote.version, current) > 0) {
+        return { status: "update", current, remote, installable: IS_LOADER_MODE };
+      }
+      const hotfixHash = await detectHotfixHash(remote, trigger);
+      if (hotfixHash) {
+        return { status: "hotfix", current, remote, hash: hotfixHash };
+      }
+      return { status: "current", current, remote };
+    } catch (e) {
+      error("Update check failed:", e);
+      return { status: "error", current, message: e instanceof Error ? e.message : "Unknown error" };
+    }
+  }
+  function getPromptKey(result) {
+    if (result.status === "update")
+      return `update:${result.remote.version.text}`;
+    if (result.status === "hotfix")
+      return `hotfix:${result.remote.version.text}:${result.hash}`;
+    return null;
+  }
+  function isSnoozed(key) {
+    try {
+      const raw = storage.get(STORAGE_KEYS.snooze);
+      if (!raw)
+        return false;
+      const snooze2 = JSON.parse(raw);
+      return snooze2?.key === key && typeof snooze2.until === "number" && snooze2.until > Date.now();
+    } catch {
+      return false;
+    }
+  }
+  function snooze(key) {
+    storage.set(STORAGE_KEYS.snooze, JSON.stringify({ key, until: Date.now() + SNOOZE_MS }));
+  }
+  function isUpdaterModalOpen() {
+    try {
+      return !!document.querySelector(".slt-updater-modal");
+    } catch {
+      return false;
+    }
+  }
+  async function checkForUpdates(options = {}) {
+    const trigger = typeof options === "boolean" ? options ? "manual" : "auto" : options.trigger ?? "manual";
+    if (!inFlightCheck) {
+      lastCheckTime = Date.now();
+      inFlightCheck = resolveUpdateStatus(trigger).finally(() => {
+        inFlightCheck = null;
+      });
+    }
+    const result = await inFlightCheck;
+    if (result.status === "error") {
+      increaseBackoff();
+    } else {
+      resetBackoff();
+    }
+    const key = getPromptKey(result);
+    if (key && !isInstalling) {
+      if (trigger === "manual") {
+        storage.remove(STORAGE_KEYS.snooze);
+        presentPrompt(result);
+      } else if (!isSnoozed(key) && !isUpdaterModalOpen()) {
+        presentPrompt(result);
+      }
+    }
+    if (schedulerStarted && !isInstalling) {
+      scheduleNextCheck();
+    }
+    return result;
+  }
+  async function getUpdateInfo() {
+    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus("manual");
+    if (result.status === "error")
+      return null;
+    return {
+      hasUpdate: result.status === "update",
+      hasHotfix: result.status === "hotfix",
+      currentVersion: result.current.text,
+      latestVersion: result.remote.version.text,
+      releaseUrl: result.remote.releaseUrl
+    };
+  }
+  async function runManualUpdateCheck(button, options = {}) {
+    if (button?.disabled)
+      return null;
+    const idleText = button?.dataset.sltIdleText || button?.textContent || "Check for Updates";
+    const setButton = (text, disabled) => {
+      if (!button)
+        return;
+      button.dataset.sltIdleText = idleText;
+      button.textContent = text;
+      button.disabled = disabled;
+    };
+    const restoreLater = (text) => {
+      setButton(text, true);
+      window.setTimeout(() => setButton(idleText, false), 2500);
+    };
+    setButton("Checking...", true);
+    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus("manual");
+    if (result.status === "update" || result.status === "hotfix") {
+      setButton(idleText, false);
+      try {
+        await options.beforePrompt?.();
+      } catch {
+      }
+      storage.remove(STORAGE_KEYS.snooze);
+      resetBackoff();
+      presentPrompt(result);
+      return result;
+    }
+    if (result.status === "current") {
+      resetBackoff();
+      restoreLater("Up to date");
+      notify(`You're on the latest version (v${result.current.text})`);
+      return result;
+    }
+    restoreLater("Check failed");
+    notify(`Couldn't check for updates: ${result.message}`, true);
+    return result;
+  }
+  function getScheduledDelay() {
     const jitter = Math.floor(Math.random() * SCHEDULE_JITTER_MS);
-    return normalizedBase + jitter + currentBackoffMs;
+    return Math.max(MIN_CHECK_INTERVAL_MS, currentCheckIntervalMs) + jitter + currentBackoffMs;
   }
   function scheduleNextCheck(forceDelayMs) {
     if (checkTimer !== null) {
       window.clearTimeout(checkTimer);
     }
-    const delay = typeof forceDelayMs === "number" ? Math.max(1e3, forceDelayMs) : getScheduledDelay(currentCheckIntervalMs);
-    checkTimer = window.setTimeout(() => {
-      checkForUpdates();
-    }, delay);
+    const delay = typeof forceDelayMs === "number" ? Math.max(1e3, forceDelayMs) : getScheduledDelay();
+    checkTimer = window.setTimeout(runScheduledCheck, delay);
+  }
+  function runScheduledCheck() {
+    checkTimer = null;
+    if (isInstalling)
+      return;
+    if (document.hidden) {
+      scheduleNextCheck();
+      return;
+    }
+    if (navigator.onLine === false) {
+      increaseBackoff();
+      scheduleNextCheck();
+      return;
+    }
+    checkForUpdates({ trigger: "auto" }).catch(() => scheduleNextCheck());
   }
   function increaseBackoff() {
     currentBackoffMs = currentBackoffMs === 0 ? 5 * 60 * 1e3 : Math.min(MAX_BACKOFF_MS, currentBackoffMs * 2);
@@ -8187,561 +8484,506 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function resetBackoff() {
     currentBackoffMs = 0;
   }
-  function parseVersion(version) {
-    const cleanVersion = version.replace(/^v/, "");
-    const match = cleanVersion.match(/^(\d+)\.(\d+)\.(\d+)/);
-    if (!match) {
-      return null;
-    }
-    return {
-      major: parseInt(match[1], 10),
-      minor: parseInt(match[2], 10),
-      patch: parseInt(match[3], 10),
-      text: cleanVersion
-    };
-  }
-  function compareVersions(v1, v2) {
-    if (v1.major !== v2.major) {
-      return v1.major > v2.major ? 1 : -1;
-    }
-    if (v1.minor !== v2.minor) {
-      return v1.minor > v2.minor ? 1 : -1;
-    }
-    if (v1.patch !== v2.patch) {
-      return v1.patch > v2.patch ? 1 : -1;
-    }
-    return 0;
-  }
-  function getCurrentVersion() {
-    return parseVersion(CURRENT_VERSION) || {
-      major: 1,
-      minor: 0,
-      patch: 0,
-      text: CURRENT_VERSION
-    };
-  }
-  function getContentHash() {
-    try {
-      const metadata = getLoaderMetadata();
-      const hash = metadata?.ContentHash;
-      if (typeof hash === "string" && hash.length > 0)
-        return hash;
-    } catch {
-    }
-    return "";
-  }
-  function getContentHashShort(length = 8) {
-    const hash = getContentHash();
-    return hash ? hash.substring(0, length) : "";
-  }
-  async function getLatestVersion() {
-    let releaseNotes = "";
-    let githubRelease = null;
-    try {
-      const ghResponse = await fetch(GITHUB_API_URL, {
-        headers: { "Accept": "application/vnd.github.v3+json" }
-      });
-      if (ghResponse.ok) {
-        githubRelease = await ghResponse.json();
-        releaseNotes = githubRelease?.body || "";
-      }
-    } catch (e) {
-    }
-    try {
-      const response = await fetchWithTimeout2(`${UPDATE_API_URL}?action=version&_=${Date.now()}`);
-      if (response.ok) {
-        const data = await response.json();
-        const version = parseVersion(data.version);
-        if (version) {
-          const downloadUrl = typeof data.download_url === "string" && data.download_url.length > 0 ? data.download_url : `${UPDATE_API_URL}?action=download&version=${encodeURIComponent(version.text)}`;
-          return {
-            version,
-            release: {
-              tag_name: `v${data.version}`,
-              name: `v${data.version}`,
-              html_url: data.release_notes_url || RELEASES_URL,
-              body: data.changelog || releaseNotes || "",
-              published_at: data.published_at || (/* @__PURE__ */ new Date()).toISOString(),
-              assets: [{
-                name: EXTENSION_FILENAME,
-                browser_download_url: downloadUrl,
-                size: 0,
-                download_count: 0
-              }]
-            },
-            downloadUrl
-          };
-        }
-      }
-    } catch (error2) {
-      warn("Self-hosted API unavailable, trying GitHub:", error2);
-    }
-    if (githubRelease) {
-      const version = parseVersion(githubRelease.tag_name);
-      if (version) {
-        const jsAsset = githubRelease.assets?.find((a) => a.name.endsWith(".js"));
-        const downloadUrl = jsAsset?.browser_download_url || "";
-        return { version, release: githubRelease, downloadUrl };
-      }
-    }
-    try {
-      const response = await fetchWithTimeout2(GITHUB_API_URL, {
-        headers: {
-          "Accept": "application/vnd.github.v3+json"
-        }
-      });
-      if (!response.ok) {
-        warn("Failed to fetch latest version:", response.status);
-        return null;
-      }
-      const release = await response.json();
-      const version = parseVersion(release.tag_name);
-      if (!version) {
-        warn("Failed to parse version from tag:", release.tag_name);
-        return null;
-      }
-      const jsAsset = release.assets?.find((a) => a.name.endsWith(".js"));
-      const downloadUrl = jsAsset?.browser_download_url || "";
-      return { version, release, downloadUrl };
-    } catch (error2) {
-      error("Error fetching latest version:", error2);
-      return null;
-    }
-  }
-  async function performUpdate(release, version, modalContent) {
-    if (updateState.isUpdating)
+  function startUpdateChecker(intervalMs = DEFAULT_CHECK_INTERVAL_MS) {
+    currentCheckIntervalMs = Math.max(MIN_CHECK_INTERVAL_MS, intervalMs);
+    if (schedulerStarted)
       return;
-    updateState.isUpdating = true;
-    updateState.progress = 0;
-    updateState.status = "Preparing update...";
-    const progressContainer = modalContent.querySelector(".update-progress");
-    const progressBar = modalContent.querySelector(".progress-bar-fill");
-    const progressText = modalContent.querySelector(".progress-text");
-    const buttonsContainer = modalContent.querySelector(".update-buttons");
-    if (progressContainer) {
-      progressContainer.style.display = "block";
-    }
-    if (buttonsContainer) {
-      buttonsContainer.style.display = "none";
-    }
-    const updateProgress = () => {
-      if (progressBar) {
-        progressBar.style.width = `${updateState.progress}%`;
+    schedulerStarted = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden || isInstalling || inFlightCheck)
+        return;
+      if (Date.now() - lastCheckTime >= MIN_CHECK_INTERVAL_MS) {
+        scheduleNextCheck(3e3);
       }
-      if (progressText) {
-        progressText.textContent = updateState.status;
+    });
+    window.addEventListener("online", () => {
+      if (isInstalling || inFlightCheck)
+        return;
+      resetBackoff();
+      if (Date.now() - lastCheckTime >= MIN_CHECK_INTERVAL_MS) {
+        scheduleNextCheck(3e3);
       }
-    };
+    });
+    scheduleNextCheck(INITIAL_CHECK_DELAY_MS);
+  }
+  function readPending() {
     try {
-      storage.set("pending-update-version", version.text);
-      storage.set("pending-update-timestamp", Date.now().toString());
-      storage.set("pending-update-changelog", release.body || "");
-      updateState.progress = 30;
-      updateState.status = "Preparing to update...";
-      updateProgress();
-      await new Promise((r) => setTimeout(r, 500));
-      updateState.progress = 60;
-      updateState.status = "Ready to reload...";
-      updateProgress();
-      await new Promise((r) => setTimeout(r, 500));
-      updateState.progress = 100;
-      updateState.status = "Reloading Spotify...";
-      updateProgress();
-      await new Promise((r) => setTimeout(r, 300));
+      const raw = storage.get(STORAGE_KEYS.pending);
+      if (!raw)
+        return null;
+      const pending = JSON.parse(raw);
+      if (!pending || pending.kind !== "update" && pending.kind !== "hotfix" || typeof pending.version !== "string") {
+        return null;
+      }
+      return pending;
+    } catch {
+      return null;
+    }
+  }
+  async function installUpdate(result, content) {
+    if (isInstalling)
+      return;
+    isInstalling = true;
+    if (checkTimer !== null) {
+      window.clearTimeout(checkTimer);
+      checkTimer = null;
+    }
+    const progress = content.querySelector(".slt-upd-progress");
+    const progressFill = content.querySelector(".slt-upd-progress-fill");
+    const progressText = content.querySelector(".slt-upd-progress-text");
+    const buttons = content.querySelector(".slt-upd-buttons");
+    const step = async (percent, text, delayMs) => {
+      if (progressFill)
+        progressFill.style.width = `${percent}%`;
+      if (progressText)
+        progressText.textContent = text;
+      await wait(delayMs);
+    };
+    if (progress)
+      progress.style.display = "block";
+    if (buttons)
+      buttons.style.display = "none";
+    try {
+      await step(20, "Preparing update...", 250);
+      let changelog = result.remote.changelog;
+      if (!changelog) {
+        changelog = await fetchChangelogForVersion(result.remote.version.text);
+      }
+      const pending = {
+        kind: result.status,
+        version: result.remote.version.text,
+        fromVersion: result.current.text,
+        fromHash: LOADED_HASH,
+        changelog,
+        createdAt: Date.now()
+      };
+      if (!storage.set(STORAGE_KEYS.pending, JSON.stringify(pending))) {
+        throw new Error("Could not save update state");
+      }
+      storage.remove(STORAGE_KEYS.snooze);
+      await step(70, result.status === "hotfix" ? "Hotfix ready" : `v${pending.version} ready`, 300);
+      await step(100, "Reloading Spotify...", 350);
       clearLoaderMetadata();
       window.location.reload();
-    } catch (error2) {
-      error("Update failed:", error2);
-      updateState.status = "Update failed";
-      updateProgress();
-      if (progressContainer && buttonsContainer) {
-        progressContainer.innerHTML = `
-                <div class="update-error">
-                    <span class="error-icon">\u274C</span>
-                    <span class="error-text">Update failed. Please try restarting Spotify.</span>
-                </div>
-            `;
-        buttonsContainer.style.display = "flex";
-        buttonsContainer.innerHTML = `
-                <button class="update-btn secondary" id="slt-update-cancel">Cancel</button>
-                <button class="update-btn primary" id="slt-reload-now">Reload Now</button>
-            `;
-        setTimeout(() => {
-          const cancelBtn = document.getElementById("slt-update-cancel");
-          const reloadBtn = document.getElementById("slt-reload-now");
-          if (cancelBtn) {
-            cancelBtn.addEventListener("click", () => {
-              hideModal();
-              updateState.isUpdating = false;
-            });
-          }
-          if (reloadBtn) {
-            reloadBtn.addEventListener("click", () => {
-              window.location.reload();
-            });
-          }
-        }, 100);
+    } catch (e) {
+      error("Update install failed:", e);
+      storage.remove(STORAGE_KEYS.pending);
+      isInstalling = false;
+      if (progress) {
+        progress.innerHTML = `<div class="slt-upd-error">Update couldn't be installed. Restart Spotify to try again.</div>`;
       }
-      updateState.isUpdating = false;
+      if (buttons) {
+        buttons.style.display = "flex";
+        buttons.innerHTML = `
+                <button class="slt-upd-btn secondary" type="button" data-action="close">Close</button>
+                <button class="slt-upd-btn primary" type="button" data-action="reload">Reload Now</button>
+            `;
+        buttons.querySelector('[data-action="close"]')?.addEventListener("click", () => hideModal());
+        buttons.querySelector('[data-action="reload"]')?.addEventListener("click", () => window.location.reload());
+      }
+      if (schedulerStarted)
+        scheduleNextCheck();
     }
   }
-  function showUpdateModal(currentVersion, latestVersion, release) {
-    const content = document.createElement("div");
-    content.className = "slt-update-modal";
-    content.innerHTML = `
-        <style>
-            @keyframes slt-modal-fadeIn {
-                from { opacity: 0; transform: translateY(8px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            @keyframes slt-shimmer {
-                0% { background-position: -200% center; }
-                100% { background-position: 200% center; }
-            }
-            @keyframes slt-progress-glow {
-                0%, 100% { box-shadow: 0 0 8px rgba(29, 185, 84, 0.3); }
-                50% { box-shadow: 0 0 16px rgba(29, 185, 84, 0.6); }
-            }
-            @keyframes slt-pulse-ring {
-                0% { transform: scale(0.9); opacity: 0.6; }
-                50% { transform: scale(1.05); opacity: 1; }
-                100% { transform: scale(0.9); opacity: 0.6; }
-            }
-            @keyframes slt-arrow-bounce {
-                0%, 100% { transform: translateX(0); }
-                50% { transform: translateX(4px); }
-            }
-            .slt-update-modal {
-                padding: 2px;
-                color: var(--spice-text);
-                animation: slt-modal-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-            }
-            .slt-update-modal .update-hero {
-                display: flex;
-                align-items: center;
-                gap: 14px;
-                margin-bottom: 20px;
-                padding: 16px 18px;
-                border-radius: 12px;
-                background: linear-gradient(135deg, rgba(29, 185, 84, 0.12) 0%, rgba(29, 185, 84, 0.04) 100%);
-                border: 1px solid rgba(29, 185, 84, 0.18);
-            }
-            .slt-update-modal .update-hero-icon {
-                width: 44px;
-                height: 44px;
-                border-radius: 12px;
-                background: linear-gradient(135deg, #1db954, #1ed760);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 22px;
-                flex-shrink: 0;
-                box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
-            }
-            .slt-update-modal .update-hero-text {
-                flex: 1;
-            }
-            .slt-update-modal .update-hero-title {
-                font-size: 16px;
-                font-weight: 700;
-                color: var(--spice-text);
-                margin-bottom: 2px;
-            }
-            .slt-update-modal .update-hero-subtitle {
-                font-size: 12px;
-                color: var(--spice-subtext);
-            }
-            .slt-update-modal .version-info {
-                background: rgba(255, 255, 255, 0.04);
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
-                padding: 14px 18px;
-                border-radius: 10px;
-                margin-bottom: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.07);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 12px;
-            }
-            .slt-update-modal .version-badge {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 5px 12px;
-                border-radius: 8px;
-                font-size: 13px;
-                font-weight: 600;
-                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-            }
-            .slt-update-modal .version-badge.current {
-                background: rgba(255, 255, 255, 0.06);
-                color: var(--spice-subtext);
-            }
-            .slt-update-modal .version-arrow {
-                color: var(--spice-subtext);
-                font-size: 16px;
-                animation: slt-arrow-bounce 1.8s ease-in-out infinite;
-                opacity: 0.7;
-            }
-            .slt-update-modal .version-badge.latest {
-                background: linear-gradient(135deg, rgba(29, 185, 84, 0.2), rgba(30, 215, 96, 0.12));
-                color: #1ed760;
-                border: 1px solid rgba(29, 185, 84, 0.25);
-                box-shadow: 0 0 10px rgba(29, 185, 84, 0.1);
-            }
-            .slt-update-modal .release-notes {
-                background: rgba(255, 255, 255, 0.03);
-                backdrop-filter: blur(6px);
-                -webkit-backdrop-filter: blur(6px);
-                padding: 14px 18px;
-                border-radius: 10px;
-                margin-bottom: 18px;
-                max-height: 260px;
-                overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-            }
-            .slt-update-modal .release-notes::-webkit-scrollbar {
-                width: 5px;
-            }
-            .slt-update-modal .release-notes::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            .slt-update-modal .release-notes::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.15);
-                border-radius: 10px;
-            }
-            .slt-update-modal .release-notes::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.25);
-            }
-            .slt-update-modal .release-notes-title {
-                font-weight: 600;
-                font-size: 13px;
-                margin-bottom: 12px;
-                color: var(--spice-text);
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-            .slt-update-modal .release-notes-title svg {
-                width: 14px;
-                height: 14px;
-                opacity: 0.7;
-            }
-            .slt-update-modal .release-notes-content {
-                color: var(--spice-subtext);
-                font-size: 13px;
-                line-height: 1.65;
-            }
-            .slt-update-modal .update-progress {
-                display: none;
-                background: rgba(255, 255, 255, 0.03);
-                backdrop-filter: blur(6px);
-                -webkit-backdrop-filter: blur(6px);
-                padding: 18px;
-                border-radius: 10px;
-                margin-bottom: 18px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-            }
-            .slt-update-modal .progress-bar {
-                height: 6px;
-                background: rgba(255, 255, 255, 0.06);
-                border-radius: 6px;
-                overflow: hidden;
-                margin-bottom: 10px;
-            }
-            .slt-update-modal .progress-bar-fill {
-                height: 100%;
-                background: linear-gradient(90deg, #1db954, #1ed760, #1db954);
-                background-size: 200% 100%;
-                border-radius: 6px;
-                transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-                width: 0%;
-                animation: slt-shimmer 2s linear infinite, slt-progress-glow 2s ease-in-out infinite;
-            }
-            .slt-update-modal .progress-text {
-                font-size: 12px;
-                color: var(--spice-subtext);
-                text-align: center;
-                font-weight: 500;
-            }
-            .slt-update-modal .update-success {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                color: #1db954;
-                font-weight: 500;
-            }
-            .slt-update-modal .update-error {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                color: #e74c3c;
-                font-weight: 500;
-            }
-            .slt-update-modal .success-icon,
-            .slt-update-modal .error-icon {
-                font-size: 20px;
-            }
-            .slt-update-modal .update-buttons {
-                display: flex;
-                gap: 10px;
-                justify-content: flex-end;
-            }
-            .slt-update-modal .update-btn {
-                padding: 10px 24px;
-                border-radius: 24px;
-                border: none;
-                cursor: pointer;
-                font-size: 13px;
-                font-weight: 700;
-                letter-spacing: 0.2px;
-                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-                position: relative;
-                overflow: hidden;
-            }
-            .slt-update-modal .update-btn::after {
-                content: '';
-                position: absolute;
-                inset: 0;
-                opacity: 0;
-                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
-                transition: opacity 0.3s;
-            }
-            .slt-update-modal .update-btn:hover::after {
-                opacity: 1;
-            }
-            .slt-update-modal .update-btn.primary {
-                background: linear-gradient(135deg, #1db954, #1ed760);
-                color: #000;
-                box-shadow: 0 2px 12px rgba(29, 185, 84, 0.25);
-            }
-            .slt-update-modal .update-btn.primary:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 4px 20px rgba(29, 185, 84, 0.35);
-            }
-            .slt-update-modal .update-btn.primary:active {
-                transform: translateY(0);
-                box-shadow: 0 1px 6px rgba(29, 185, 84, 0.2);
-            }
-            .slt-update-modal .update-btn.secondary {
-                background: rgba(255, 255, 255, 0.06);
-                color: var(--spice-text);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            .slt-update-modal .update-btn.secondary:hover {
-                background: rgba(255, 255, 255, 0.1);
-                border-color: rgba(255, 255, 255, 0.14);
-            }
-            .slt-update-modal .update-instructions {
-                background: rgba(255, 255, 255, 0.03);
-                border-radius: 10px;
-                padding: 16px 18px;
-                margin-top: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-            }
-            .slt-update-modal .update-instructions p {
-                margin: 0 0 12px 0;
-                color: var(--spice-text);
-            }
-            .slt-update-modal .update-instructions code {
-                background: rgba(0, 0, 0, 0.4);
-                padding: 3px 8px;
-                border-radius: 5px;
-                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-                font-size: 12px;
-                color: #1ed760;
-                word-break: break-all;
-                border: 1px solid rgba(29, 185, 84, 0.15);
-            }
-            .slt-update-modal .update-instructions ol {
-                margin: 0;
-                padding-left: 20px;
-                color: var(--spice-subtext);
-            }
-            .slt-update-modal .update-instructions li {
-                margin-bottom: 8px;
-                line-height: 1.5;
-            }
-            .slt-update-modal .update-instructions li:last-child {
-                margin-bottom: 0;
-            }
-            .slt-update-modal .update-instructions li code {
-                display: inline-block;
-            }
-        </style>
-        <div class="update-hero">
-            <div class="update-hero-icon">\u{1F680}</div>
-            <div class="update-hero-text">
-                <div class="update-hero-title">A new version is available!</div>
-                <div class="update-hero-subtitle">Spicy Lyric Translator has a shiny new update ready for you.</div>
-            </div>
-        </div>
-        <div class="version-info">
-            <span class="version-badge current">${currentVersion.text}</span>
-            <span class="version-arrow">\u2192</span>
-            <span class="version-badge latest">${latestVersion.text}</span>
-        </div>
-        <div class="release-notes">
-            <div class="release-notes-title"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z"/></svg>Changelog</div>
-            <div class="release-notes-content">${formatReleaseNotes(release.body)}</div>
-        </div>
-        <div class="update-progress">
-            <div class="progress-bar">
-                <div class="progress-bar-fill"></div>
-            </div>
-            <div class="progress-text">Starting update...</div>
-        </div>
-        <div class="update-buttons">
-            <button class="update-btn secondary" id="slt-update-later">Later</button>
-            <button class="update-btn primary" id="slt-update-now">Install Update</button>
-        </div>
-    `;
-    if (Spicetify.PopupModal) {
-      displayModal({
-        title: "Spicy Lyric Translator",
-        content,
-        isLarge: true
+  function presentPrompt(result) {
+    if (result.status !== "update" && result.status !== "hotfix")
+      return;
+    const key = getPromptKey(result);
+    const existing = document.querySelector(".slt-updater-modal[data-prompt-key]");
+    if (existing?.dataset.promptKey === key)
+      return;
+    const isHotfix = result.status === "hotfix";
+    const installable = isHotfix || result.installable;
+    const remoteVersion = result.remote.version.text;
+    const fromLabel = isHotfix ? `v${result.current.text} \xB7 ${getContentHashShort() || "current"}` : `v${result.current.text}`;
+    const toLabel = isHotfix ? `v${remoteVersion} \xB7 ${result.hash.substring(0, 8)}` : `v${remoteVersion}`;
+    const title = isHotfix ? "Hotfix available" : "Update available";
+    const subtitle = isHotfix ? `A patched build of v${remoteVersion} is ready. It only takes a quick reload.` : installable ? `Spicy Lyric Translator v${remoteVersion} is ready to install.` : `v${remoteVersion} is out. This copy was installed manually, so grab the new build from GitHub.`;
+    const primaryButton = installable ? `<button class="slt-upd-btn primary" type="button" data-action="install">${isHotfix ? "Apply Hotfix" : "Install & Reload"}</button>` : `<a class="slt-upd-btn primary" href="${escapeHtml(result.remote.releaseUrl)}" target="_blank" rel="noopener noreferrer" data-action="open">View Release</a>`;
+    const content = buildUpdaterModal({
+      variant: isHotfix ? "hotfix" : "update",
+      icon: isHotfix ? "\u{1F527}" : "\u{1F680}",
+      title,
+      subtitle,
+      versionRow: { from: fromLabel, to: toLabel },
+      changelogHtml: result.remote.changelog ? formatReleaseNotes(result.remote.changelog) : '<span class="slt-upd-muted">Loading changelog...</span>',
+      buttonsHtml: `
+            <button class="slt-upd-btn secondary" type="button" data-action="later">Later</button>
+            ${primaryButton}
+        `,
+      withProgress: installable
+    });
+    content.dataset.promptKey = key;
+    if (!result.remote.changelog) {
+      fetchChangelogForVersion(remoteVersion).then((changelog) => {
+        result.remote.changelog = changelog;
+        const target = content.querySelector(".slt-upd-notes-content");
+        if (target)
+          target.innerHTML = formatReleaseNotes(changelog);
+      }).catch(() => {
       });
-      setTimeout(() => {
-        const laterBtn = document.getElementById("slt-update-later");
-        const updateBtn = document.getElementById("slt-update-now");
-        if (laterBtn) {
-          laterBtn.addEventListener("click", () => {
-            hideModal();
-          });
-        }
-        if (updateBtn) {
-          updateBtn.addEventListener("click", () => {
-            performUpdate(release, latestVersion, content);
-          });
-        }
-      }, 100);
     }
+    content.querySelector('[data-action="later"]')?.addEventListener("click", () => {
+      snooze(key);
+      hideModal();
+    });
+    content.querySelector('[data-action="install"]')?.addEventListener("click", () => {
+      installUpdate(result, content);
+    });
+    content.querySelector('[data-action="open"]')?.addEventListener("click", () => {
+      snooze(key);
+      hideModal();
+    });
+    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
   }
+  function showAppliedModal(kind, version, changelog) {
+    const isHotfix = kind === "hotfix";
+    const hashShort = getContentHashShort();
+    const content = buildUpdaterModal({
+      variant: isHotfix ? "hotfix" : "update",
+      icon: isHotfix ? "\u{1F527}" : "\u2728",
+      title: isHotfix ? "Hotfix applied" : "Updated successfully",
+      titleBadges: [`v${version}`, ...hashShort ? [hashShort] : []],
+      subtitle: isHotfix ? "Here's what changed in this hotfix" : "Here's what's new in this release",
+      changelogHtml: formatReleaseNotes(changelog),
+      buttonsHtml: `
+            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
+        `,
+      withProgress: false
+    });
+    content.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => hideModal());
+    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
+  }
+  async function showPostUpdateChangelog() {
+    const pending = readPending();
+    const lastKnownVersion = storage.get(STORAGE_KEYS.lastVersion);
+    const lastKnownHash = storage.get(STORAGE_KEYS.lastHash);
+    storage.remove(STORAGE_KEYS.pending);
+    for (const key of LEGACY_STORAGE_KEYS)
+      storage.remove(key);
+    storage.set(STORAGE_KEYS.lastVersion, CURRENT_VERSION);
+    if (LOADED_HASH)
+      storage.set(STORAGE_KEYS.lastHash, LOADED_HASH);
+    const current = getCurrentVersion();
+    let applied = null;
+    if (pending && Date.now() - pending.createdAt < PENDING_TTL_MS) {
+      const target = parseVersion(pending.version);
+      const versionDelta = target ? compareVersions(current, target) : -1;
+      const reached = pending.kind === "hotfix" ? versionDelta > 0 || versionDelta === 0 && !!LOADED_HASH && LOADED_HASH !== pending.fromHash : versionDelta >= 0;
+      if (!reached) {
+        await wait(APPLIED_MODAL_DELAY_MS);
+        notify("The update was downloaded but not applied yet. Restart Spotify to finish updating.", true);
+        return;
+      }
+      applied = {
+        kind: versionDelta > 0 ? "update" : pending.kind,
+        version: CURRENT_VERSION,
+        changelog: versionDelta > 0 ? "" : pending.changelog,
+        exactChangelogOnly: false
+      };
+    } else if (lastKnownVersion) {
+      const last = parseVersion(lastKnownVersion);
+      if (last && compareVersions(current, last) > 0) {
+        applied = { kind: "update", version: CURRENT_VERSION, changelog: "", exactChangelogOnly: !IS_LOADER_MODE };
+      } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && lastKnownHash && lastKnownHash !== LOADED_HASH) {
+        applied = { kind: "hotfix", version: CURRENT_VERSION, changelog: "", exactChangelogOnly: false };
+      }
+    }
+    if (!applied)
+      return;
+    let changelog = applied.changelog;
+    if (!changelog) {
+      changelog = await fetchChangelogForVersion(applied.version, !applied.exactChangelogOnly);
+      if (!changelog && applied.exactChangelogOnly)
+        return;
+    }
+    await wait(APPLIED_MODAL_DELAY_MS);
+    showAppliedModal(applied.kind, applied.version, changelog);
+  }
+  async function showCurrentChangelog() {
+    const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
+    const hashShort = getContentHashShort();
+    const content = buildUpdaterModal({
+      variant: "update",
+      icon: "\u{1F4DD}",
+      title: "What's new",
+      titleBadges: [`v${CURRENT_VERSION}`, ...hashShort ? [hashShort] : []],
+      subtitle: "Changelog for the version you are running",
+      changelogHtml: formatReleaseNotes(changelog),
+      buttonsHtml: `
+            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
+        `,
+      withProgress: false
+    });
+    content.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => hideModal());
+    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
+  }
+  function buildUpdaterModal(options) {
+    const content = document.createElement("div");
+    content.className = `slt-updater-modal slt-upd-${options.variant}`;
+    const badges = (options.titleBadges || []).map((badge, index) => `<span class="slt-upd-badge${index > 0 ? " subtle" : ""}">${escapeHtml(badge)}</span>`).join("");
+    const versionRow = options.versionRow ? `<div class="slt-upd-versions">
+                <span class="slt-upd-version from">${escapeHtml(options.versionRow.from)}</span>
+                <span class="slt-upd-arrow">\u2192</span>
+                <span class="slt-upd-version to">${escapeHtml(options.versionRow.to)}</span>
+            </div>` : "";
+    const progress = options.withProgress ? `<div class="slt-upd-progress">
+                <div class="slt-upd-progress-bar"><div class="slt-upd-progress-fill"></div></div>
+                <div class="slt-upd-progress-text">Starting...</div>
+            </div>` : "";
+    content.innerHTML = `
+        <style>${UPDATER_STYLES}</style>
+        <div class="slt-upd-hero">
+            <div class="slt-upd-hero-icon">${options.icon}</div>
+            <div class="slt-upd-hero-text">
+                <div class="slt-upd-hero-title">${escapeHtml(options.title)}${badges}</div>
+                <div class="slt-upd-hero-subtitle">${escapeHtml(options.subtitle)}</div>
+            </div>
+        </div>
+        ${versionRow}
+        <div class="slt-upd-notes">
+            <div class="slt-upd-notes-title">Changelog</div>
+            <div class="slt-upd-notes-content">${options.changelogHtml}</div>
+        </div>
+        ${progress}
+        <div class="slt-upd-buttons">${options.buttonsHtml}</div>
+    `;
+    return content;
+  }
+  var UPDATER_STYLES = `
+    @keyframes slt-upd-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slt-upd-shimmer {
+        0% { background-position: -200% center; }
+        100% { background-position: 200% center; }
+    }
+    @keyframes slt-upd-nudge {
+        0%, 100% { transform: translateX(0); }
+        50% { transform: translateX(4px); }
+    }
+    .slt-updater-modal {
+        --slt-cl-accent: #1ed760;
+        --slt-upd-accent-alt: #1db954;
+        --slt-upd-accent-rgb: 30, 215, 96;
+        padding: 2px;
+        color: var(--spice-text);
+        animation: slt-upd-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    .slt-updater-modal.slt-upd-hotfix {
+        --slt-cl-accent: #ffb74d;
+        --slt-upd-accent-alt: #ff9800;
+        --slt-upd-accent-rgb: 255, 183, 77;
+    }
+    .slt-upd-hero {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 16px;
+        padding: 16px 18px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(var(--slt-upd-accent-rgb), 0.12) 0%, rgba(var(--slt-upd-accent-rgb), 0.03) 100%);
+        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.2);
+    }
+    .slt-upd-hero-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        flex-shrink: 0;
+        box-shadow: 0 4px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
+    }
+    .slt-upd-hero-text {
+        flex: 1;
+        min-width: 0;
+    }
+    .slt-upd-hero-title {
+        font-size: 16px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .slt-upd-hero-subtitle {
+        font-size: 12px;
+        color: var(--spice-subtext);
+        margin-top: 3px;
+    }
+    .slt-upd-badge {
+        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
+        color: #000;
+        padding: 3px 10px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 800;
+        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+    .slt-upd-badge.subtle {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--spice-subtext);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 10px;
+        font-weight: 600;
+    }
+    .slt-upd-versions {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 12px 18px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .slt-upd-version {
+        padding: 5px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+    .slt-upd-version.from {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--spice-subtext);
+    }
+    .slt-upd-version.to {
+        background: rgba(var(--slt-upd-accent-rgb), 0.15);
+        color: var(--slt-cl-accent);
+        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.25);
+    }
+    .slt-upd-arrow {
+        color: var(--spice-subtext);
+        animation: slt-upd-nudge 1.8s ease-in-out infinite;
+    }
+    .slt-upd-notes {
+        padding: 14px 18px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+        max-height: 320px;
+        overflow-y: auto;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .slt-upd-notes::-webkit-scrollbar { width: 5px; }
+    .slt-upd-notes::-webkit-scrollbar-track { background: transparent; }
+    .slt-upd-notes::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+    .slt-upd-notes-title {
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .slt-upd-notes-content {
+        color: var(--spice-subtext);
+        font-size: 13px;
+        line-height: 1.65;
+    }
+    .slt-upd-notes-content strong { color: var(--spice-text); }
+    .slt-upd-notes-content del { opacity: 0.5; }
+    .slt-upd-muted {
+        font-style: italic;
+        color: var(--spice-subtext);
+    }
+    .slt-upd-progress {
+        display: none;
+        padding: 16px 18px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .slt-upd-progress-bar {
+        height: 6px;
+        border-radius: 6px;
+        overflow: hidden;
+        margin-bottom: 10px;
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .slt-upd-progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: 6px;
+        background: linear-gradient(90deg, var(--slt-upd-accent-alt), var(--slt-cl-accent), var(--slt-upd-accent-alt));
+        background-size: 200% 100%;
+        transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: slt-upd-shimmer 2s linear infinite;
+    }
+    .slt-upd-progress-text {
+        font-size: 12px;
+        font-weight: 500;
+        text-align: center;
+        color: var(--spice-subtext);
+    }
+    .slt-upd-error {
+        color: #e74c3c;
+        font-weight: 500;
+        text-align: center;
+    }
+    .slt-upd-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+    }
+    .slt-upd-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 24px;
+        border-radius: 24px;
+        border: none;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .slt-upd-btn.primary {
+        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
+        color: #000;
+        box-shadow: 0 2px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
+    }
+    .slt-upd-btn.primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 20px rgba(var(--slt-upd-accent-rgb), 0.35);
+    }
+    .slt-upd-btn.secondary {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--spice-text);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .slt-upd-btn.secondary:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+`;
   function escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function processInlineMarkdown(text) {
     const sanitizeUrl = (url) => {
       const trimmed = url.trim();
-      if (/^https?:\/\//i.test(trimmed))
-        return trimmed;
-      return "";
+      return /^https?:\/\//i.test(trimmed) ? trimmed : "";
     };
     return text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       const safe = sanitizeUrl(url);
       return safe ? `<img src="${safe}" alt="${alt}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">` : alt;
-    }).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text2, url) => {
+    }).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
       const safe = sanitizeUrl(url);
-      return safe ? `<a href="${safe}" style="color: #1db954; text-decoration: none;" target="_blank" rel="noopener noreferrer">${text2}</a>` : text2;
-    }).replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: #1db954;">$1</code>');
+      return safe ? `<a href="${safe}" style="color: var(--slt-cl-accent, #1db954); text-decoration: none;" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+    }).replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--slt-cl-accent, #1db954);">$1</code>');
   }
   function formatReleaseNotes(body) {
     if (!body || body.trim() === "") {
-      return '<span style="color: var(--spice-subtext); font-style: italic;">No changelog available for this release.</span>';
+      return '<span class="slt-upd-muted">No changelog available for this release.</span>';
     }
     const lines = body.split("\n");
     const output = [];
@@ -8759,8 +9001,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         inOl = false;
       }
     };
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, "");
       if (line.trim().startsWith("```")) {
         if (inCodeBlock) {
           output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--spice-subtext); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join("\n")}</code></pre>`);
@@ -8807,7 +9049,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const bq = line.match(/^>\s?(.*)/);
       if (bq) {
         closeLists();
-        output.push(`<div style="border-left: 3px solid #1db954; padding-left: 12px; margin: 6px 0; color: var(--spice-subtext); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`);
+        output.push(`<div style="border-left: 3px solid var(--slt-cl-accent, #1db954); padding-left: 12px; margin: 6px 0; color: var(--spice-subtext); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`);
         continue;
       }
       const ul = line.match(/^([ \t]*)[-*+]\s+(.*)/);
@@ -8820,8 +9062,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           output.push('<ul style="margin: 4px 0; padding-left: 0; list-style: none;">');
           inUl = true;
         }
-        const indent = ul[1].replace(/\t/g, "  ").length;
-        const depth = Math.min(Math.floor(indent / 2), 5);
+        const depth = Math.min(Math.floor(ul[1].replace(/\t/g, "  ").length / 2), 5);
         const markers = ["\u2022", "\u25E6", "\u25AA", "\u2023", "\xB7", "\u2022"];
         output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0;">${markers[depth] || "\u2022"}</span><span>${processInlineMarkdown(ul[2])}</span></li>`);
         continue;
@@ -8836,8 +9077,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           output.push('<ol style="margin: 4px 0; padding-left: 0; list-style: none;">');
           inOl = true;
         }
-        const indent = ol[1].replace(/\t/g, "  ").length;
-        const depth = Math.min(Math.floor(indent / 2), 5);
+        const depth = Math.min(Math.floor(ol[1].replace(/\t/g, "  ").length / 2), 5);
         output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0; min-width: 16px; font-weight: 600;">${ol[2]}.</span><span>${processInlineMarkdown(ol[3])}</span></li>`);
         continue;
       }
@@ -8849,419 +9089,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--spice-subtext); margin: 8px 0;"><code>${codeContent.join("\n")}</code></pre>`);
     }
     return output.join("");
-  }
-  async function checkForUpdates(force = false) {
-    const now = Date.now();
-    if (checkInProgress) {
-      return;
-    }
-    if (!force && now - lastCheckTime < MIN_CHECK_INTERVAL_MS) {
-      scheduleNextCheck(MIN_CHECK_INTERVAL_MS - (now - lastCheckTime));
-      return;
-    }
-    if (!force && document.hidden) {
-      scheduleNextCheck();
-      return;
-    }
-    if (!force && navigator.onLine === false) {
-      increaseBackoff();
-      scheduleNextCheck();
-      return;
-    }
-    lastCheckTime = now;
-    checkInProgress = true;
-    try {
-      const latest = await getLatestVersion();
-      if (!latest) {
-        increaseBackoff();
-        return;
-      }
-      const current = getCurrentVersion();
-      if (compareVersions(latest.version, current) > 0) {
-        if (!hasShownUpdateNotice) {
-          hasShownUpdateNotice = true;
-          showUpdateModal(current, latest.version, latest.release);
-        }
-      } else {
-        resetBackoff();
-        hasShownUpdateNotice = false;
-      }
-    } catch (error2) {
-      increaseBackoff();
-      error("Error checking for updates:", error2);
-    } finally {
-      checkInProgress = false;
-      if (!updateState.isUpdating) {
-        scheduleNextCheck();
-      }
-    }
-  }
-  function startUpdateChecker(intervalMs = DEFAULT_CHECK_INTERVAL_MS) {
-    currentCheckIntervalMs = Math.max(MIN_CHECK_INTERVAL_MS, intervalMs);
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        const elapsed = Date.now() - lastCheckTime;
-        if (elapsed >= MIN_CHECK_INTERVAL_MS && !checkInProgress && !updateState.isUpdating) {
-          checkForUpdates();
-        }
-      }
-    });
-    window.addEventListener("online", () => {
-      if (!checkInProgress && !updateState.isUpdating) {
-        resetBackoff();
-        checkForUpdates();
-      }
-    });
-    scheduleNextCheck(5e3);
-  }
-  async function getUpdateInfo() {
-    try {
-      const current = getCurrentVersion();
-      const latest = await getLatestVersion();
-      if (!latest) {
-        return {
-          hasUpdate: false,
-          currentVersion: current.text,
-          latestVersion: null,
-          releaseUrl: null
-        };
-      }
-      return {
-        hasUpdate: compareVersions(latest.version, current) > 0,
-        currentVersion: current.text,
-        latestVersion: latest.version.text,
-        releaseUrl: latest.release.html_url
-      };
-    } catch {
-      return null;
-    }
-  }
-  function showChangelogModal(version, changelog, options = {}) {
-    const { isHotfix = false, hashShort = "" } = options;
-    const heroIcon = isHotfix ? "\u{1F527}" : "\u2728";
-    const heroTitle = isHotfix ? "Hotfix Applied" : "Updated Successfully";
-    const heroSubtitle = isHotfix ? "Here's what's new in the hotfix" : "Here's what's new in this release";
-    const accentVar = isHotfix ? "--slt-cl-accent: #ffb74d; --slt-cl-accent-rgb: 255, 183, 77; --slt-cl-accent-alt: #ff9800;" : "--slt-cl-accent: #1ed760; --slt-cl-accent-rgb: 30, 215, 96; --slt-cl-accent-alt: #1db954;";
-    const content = document.createElement("div");
-    content.className = "slt-changelog-modal" + (isHotfix ? " slt-changelog-hotfix" : "");
-    content.setAttribute("style", accentVar);
-    content.innerHTML = `
-        <style>
-            @keyframes slt-cl-fadeIn {
-                from { opacity: 0; transform: translateY(8px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            @keyframes slt-confetti-float {
-                0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-                100% { transform: translateY(-20px) rotate(180deg); opacity: 0; }
-            }
-            .slt-changelog-modal {
-                padding: 2px;
-                color: var(--spice-text);
-                animation: slt-cl-fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-            }
-            .slt-changelog-modal .changelog-hero {
-                display: flex;
-                align-items: center;
-                gap: 14px;
-                margin-bottom: 20px;
-                padding: 16px 18px;
-                border-radius: 12px;
-                background: linear-gradient(135deg, rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.12) 0%, rgba(99, 102, 241, 0.08) 100%);
-                border: 1px solid rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.18);
-                position: relative;
-                overflow: hidden;
-            }
-            .slt-changelog-modal .changelog-hero::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                height: 1px;
-                background: linear-gradient(90deg, transparent, rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.4), transparent);
-            }
-            .slt-changelog-modal .changelog-hero-icon {
-                width: 44px;
-                height: 44px;
-                border-radius: 12px;
-                background: linear-gradient(135deg, var(--slt-cl-accent-alt, #1db954), var(--slt-cl-accent, #1ed760));
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 22px;
-                flex-shrink: 0;
-                box-shadow: 0 4px 12px rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.25);
-            }
-            .slt-changelog-modal .changelog-hero-text {
-                flex: 1;
-            }
-            .slt-changelog-modal .changelog-hero-title {
-                font-size: 16px;
-                font-weight: 700;
-                color: var(--spice-text);
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            .slt-changelog-modal .changelog-badge {
-                background: linear-gradient(135deg, var(--slt-cl-accent-alt, #1db954), var(--slt-cl-accent, #1ed760));
-                color: #000;
-                padding: 3px 10px;
-                border-radius: 8px;
-                font-size: 11px;
-                font-weight: 800;
-                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-                letter-spacing: 0.3px;
-                box-shadow: 0 2px 8px rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.2);
-            }
-            .slt-changelog-modal .changelog-hash {
-                background: rgba(255, 255, 255, 0.06);
-                color: var(--spice-subtext);
-                padding: 3px 8px;
-                border-radius: 6px;
-                font-size: 10px;
-                font-weight: 600;
-                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-                letter-spacing: 0.3px;
-                margin-left: 6px;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            .slt-changelog-modal .changelog-hero-subtitle {
-                font-size: 12px;
-                color: var(--spice-subtext);
-                margin-top: 3px;
-            }
-            .slt-changelog-modal .changelog-content {
-                background: rgba(255, 255, 255, 0.03);
-                backdrop-filter: blur(6px);
-                -webkit-backdrop-filter: blur(6px);
-                padding: 16px 18px;
-                border-radius: 10px;
-                margin-bottom: 18px;
-                max-height: 400px;
-                overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-                font-size: 13px;
-                line-height: 1.65;
-                color: var(--spice-subtext);
-            }
-            .slt-changelog-modal .changelog-content::-webkit-scrollbar {
-                width: 5px;
-            }
-            .slt-changelog-modal .changelog-content::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.15);
-                border-radius: 10px;
-            }
-            .slt-changelog-modal .changelog-content::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.25);
-            }
-            .slt-changelog-modal .changelog-content a {
-                color: #1ed760;
-                text-decoration: none;
-                border-bottom: 1px solid rgba(30, 215, 96, 0.3);
-                transition: border-color 0.2s;
-            }
-            .slt-changelog-modal .changelog-content a:hover {
-                border-color: #1ed760;
-            }
-            .slt-changelog-modal .changelog-content img {
-                max-width: 100%;
-                border-radius: 8px;
-                margin: 8px 0;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-            }
-            .slt-changelog-modal .changelog-content strong {
-                color: var(--spice-text);
-            }
-            .slt-changelog-modal .changelog-content del {
-                opacity: 0.5;
-            }
-            .slt-changelog-modal .changelog-buttons {
-                display: flex;
-                gap: 10px;
-                justify-content: flex-end;
-            }
-            .slt-changelog-modal .changelog-btn {
-                padding: 10px 24px;
-                border-radius: 24px;
-                border: none;
-                cursor: pointer;
-                font-size: 13px;
-                font-weight: 700;
-                letter-spacing: 0.2px;
-                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-                position: relative;
-                overflow: hidden;
-            }
-            .slt-changelog-modal .changelog-btn::after {
-                content: '';
-                position: absolute;
-                inset: 0;
-                opacity: 0;
-                background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, transparent 70%);
-                transition: opacity 0.3s;
-            }
-            .slt-changelog-modal .changelog-btn:hover::after {
-                opacity: 1;
-            }
-            .slt-changelog-modal .changelog-btn.primary {
-                background: linear-gradient(135deg, var(--slt-cl-accent-alt, #1db954), var(--slt-cl-accent, #1ed760));
-                color: #000;
-                box-shadow: 0 2px 12px rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.25);
-            }
-            .slt-changelog-modal .changelog-btn.primary:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 4px 20px rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.35);
-            }
-            .slt-changelog-modal .changelog-btn.primary:active {
-                transform: translateY(0);
-                box-shadow: 0 1px 6px rgba(var(--slt-cl-accent-rgb, 29, 185, 84), 0.2);
-            }
-            .slt-changelog-modal .changelog-btn.secondary {
-                background: rgba(255, 255, 255, 0.06);
-                color: var(--spice-text);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            .slt-changelog-modal .changelog-btn.secondary:hover {
-                background: rgba(255, 255, 255, 0.1);
-                border-color: rgba(255, 255, 255, 0.14);
-            }
-        </style>
-        <div class="changelog-hero">
-            <div class="changelog-hero-icon">${heroIcon}</div>
-            <div class="changelog-hero-text">
-                <div class="changelog-hero-title">
-                    ${heroTitle}
-                    <span class="changelog-badge">v${version}</span>
-                    ${hashShort ? `<span class="changelog-hash">${hashShort}</span>` : ""}
-                </div>
-                <div class="changelog-hero-subtitle">${heroSubtitle}</div>
-            </div>
-        </div>
-        <div class="changelog-content">${formatReleaseNotes(changelog)}</div>
-        <div class="changelog-buttons">
-            <a href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
-                <button class="changelog-btn secondary" type="button">View on GitHub</button>
-            </a>
-            <button class="changelog-btn primary" id="slt-changelog-dismiss">Got it</button>
-        </div>
-    `;
-    if (Spicetify.PopupModal) {
-      displayModal({
-        title: "Spicy Lyric Translator",
-        content,
-        isLarge: true
-      });
-      setTimeout(() => {
-        const dismissBtn = document.getElementById("slt-changelog-dismiss");
-        if (dismissBtn) {
-          dismissBtn.addEventListener("click", () => {
-            hideModal();
-          });
-        }
-      }, 100);
-    }
-  }
-  async function fetchChangelogForVersion(version) {
-    try {
-      const tagUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`;
-      const response = await fetchWithTimeout2(tagUrl, {
-        headers: { "Accept": "application/vnd.github.v3+json" }
-      });
-      if (response.ok) {
-        const release = await response.json();
-        if (release.body)
-          return release.body;
-      }
-    } catch (e) {
-    }
-    try {
-      const response = await fetchWithTimeout2(GITHUB_API_URL, {
-        headers: { "Accept": "application/vnd.github.v3+json" }
-      });
-      if (response.ok) {
-        const release = await response.json();
-        if (release.body)
-          return release.body;
-      }
-    } catch (e) {
-    }
-    return "";
-  }
-  async function showPostUpdateChangelog() {
-    const currentVersion = CURRENT_VERSION;
-    const currentHash = getContentHash();
-    let targetVersion = null;
-    let changelog = null;
-    const persistKnown = () => {
-      storage.set("last-known-version", currentVersion);
-      if (currentHash)
-        storage.set("last-known-hash", currentHash);
-    };
-    const showHotfix = async () => {
-      persistKnown();
-      await new Promise((r) => setTimeout(r, 2e3));
-      const hashShort = getContentHashShort();
-      const hotfixChangelog = await fetchChangelogForVersion(currentVersion);
-      showChangelogModal(currentVersion, hotfixChangelog || "", { isHotfix: true, hashShort });
-    };
-    const hotfixDetected = storage.get("hotfix-detected");
-    if (hotfixDetected) {
-      storage.remove("hotfix-detected");
-      await showHotfix();
-      return;
-    }
-    const pendingVersion = storage.get("pending-update-version");
-    if (pendingVersion) {
-      const pendingTimestamp = storage.get("pending-update-timestamp");
-      storage.remove("pending-update-version");
-      storage.remove("pending-update-timestamp");
-      if (pendingTimestamp) {
-        const elapsed = Date.now() - parseInt(pendingTimestamp, 10);
-        if (elapsed > 60 * 60 * 1e3) {
-          storage.remove("pending-update-changelog");
-          persistKnown();
-          return;
-        }
-      }
-      changelog = storage.get("pending-update-changelog");
-      storage.remove("pending-update-changelog");
-      targetVersion = pendingVersion;
-    } else {
-      const lastKnownVersion = storage.get("last-known-version");
-      const lastKnownHash = storage.get("last-known-hash");
-      if (!lastKnownVersion) {
-        persistKnown();
-        return;
-      }
-      if (lastKnownVersion !== currentVersion) {
-        const lastParsed = parseVersion(lastKnownVersion);
-        const currentParsed = parseVersion(currentVersion);
-        if (lastParsed && currentParsed && compareVersions(currentParsed, lastParsed) > 0) {
-          targetVersion = currentVersion;
-        }
-      } else if (currentHash && lastKnownHash && lastKnownHash !== currentHash) {
-        await showHotfix();
-        return;
-      }
-    }
-    persistKnown();
-    if (!targetVersion)
-      return;
-    if (!changelog) {
-      changelog = await fetchChangelogForVersion(targetVersion);
-    }
-    await new Promise((r) => setTimeout(r, 2e3));
-    showChangelogModal(targetVersion, changelog || "");
-  }
-  async function showCurrentChangelog() {
-    const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
-    const hashShort = getContentHashShort();
-    showChangelogModal(CURRENT_VERSION, changelog, { hashShort });
   }
   var VERSION = CURRENT_VERSION;
   var REPO_URL = RELEASES_URL;
@@ -10166,7 +9993,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var fillGapsInFlight = false;
   var lastSkippedTranslation = null;
   function normalizeMatchKey(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "").trim();
+    return normalizeLyricMatchKey(text);
   }
   function buildLyricsKey(lines) {
     let hash = 2166136261;
@@ -10522,13 +10349,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return "";
     const words = lineElement.querySelectorAll(".word:not(.dot), .syllable, .letterGroup");
     if (words.length > 0) {
-      return Array.from(words).map((w) => w.textContent?.trim() || "").join(" ").replace(/\s+/g, " ").trim();
+      return cleanLyricText(Array.from(words).map((w) => w.textContent || "").join(" "));
     }
     const letters = lineElement.querySelectorAll(".letter");
     if (letters.length > 0) {
-      return Array.from(letters).map((l) => l.textContent || "").join("").trim();
+      return cleanLyricText(Array.from(letters).map((l) => l.textContent || "").join(""));
     }
-    return lineElement.textContent?.trim() || "";
+    return cleanLyricText(lineElement.textContent);
   }
   function getConfidentNonTargetLineIndexes(lines, targetLanguage) {
     const indexes = [];
@@ -11131,7 +10958,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
   }
   function normalizeForComparison(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}]+/gu, "").trim();
+    return (text || "").toLowerCase().replace(/[\s\p{P}\u200B-\u200D\u2060\uFEFF]+/gu, "").trim();
   }
   function formatNotificationDuration(ms) {
     if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0)
@@ -12299,45 +12126,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       "slt-settings.check-updates",
       nativeVersionLabel,
       "Check for Updates",
-      async () => {
-        const btn = document.getElementById("slt-settings.check-updates");
-        if (btn) {
-          btn.textContent = "Checking...";
-          btn.disabled = true;
-        }
-        try {
-          const updateInfo = await getUpdateInfo();
-          if (updateInfo?.hasUpdate) {
-            checkForUpdates(true);
-          } else {
-            try {
-              const metadata = window._spicy_lyric_translater_metadata;
-              if (metadata?.utils?.runHotfixCheck) {
-                metadata.utils.runHotfixCheck();
-              }
-            } catch (_) {
-            }
-            if (btn)
-              btn.textContent = "Up to date!";
-            setTimeout(() => {
-              if (btn) {
-                btn.textContent = "Check for Updates";
-                btn.disabled = false;
-              }
-            }, 2e3);
-            if (Spicetify.showNotification) {
-              Spicetify.showNotification("You are running the latest version!");
-            }
-          }
-        } catch (e) {
-          if (btn) {
-            btn.textContent = "Check for Updates";
-            btn.disabled = false;
-          }
-          if (Spicetify.showNotification) {
-            Spicetify.showNotification("Failed to check for updates", true);
-          }
-        }
+      () => {
+        runManualUpdateCheck(document.getElementById("slt-settings.check-updates"));
       }
     ));
     const githubRow = document.createElement("div");
@@ -13125,38 +12915,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           viewChangelogPopupButton.disabled = false;
         }
       });
-      checkUpdatesButton?.addEventListener("click", async () => {
-        checkUpdatesButton.textContent = "Checking...";
-        checkUpdatesButton.disabled = true;
-        try {
-          const updateInfo = await getUpdateInfo();
-          if (updateInfo?.hasUpdate) {
+      checkUpdatesButton?.addEventListener("click", () => {
+        runManualUpdateCheck(checkUpdatesButton, {
+          beforePrompt: async () => {
             hideModal();
-            setTimeout(() => checkForUpdates(true), 150);
-          } else {
-            try {
-              const metadata = window._spicy_lyric_translater_metadata;
-              if (metadata?.utils?.runHotfixCheck) {
-                metadata.utils.runHotfixCheck();
-              }
-            } catch (_) {
-            }
-            checkUpdatesButton.textContent = "Up to date!";
-            setTimeout(() => {
-              checkUpdatesButton.textContent = "Check for Updates";
-              checkUpdatesButton.disabled = false;
-            }, 2e3);
-            if (Spicetify.showNotification) {
-              Spicetify.showNotification("You are running the latest version!");
-            }
+            await new Promise((resolve) => setTimeout(resolve, 300));
           }
-        } catch (e) {
-          checkUpdatesButton.textContent = "Check for Updates";
-          checkUpdatesButton.disabled = false;
-          if (Spicetify.showNotification) {
-            Spicetify.showNotification("Failed to check for updates", true);
-          }
-        }
+        });
       });
     }, 0);
     return container;
@@ -14887,7 +14652,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       getState: () => ({ ...state }),
       setDebugMode,
       isDebugEnabled,
-      checkForUpdates: () => checkForUpdates(true),
+      checkForUpdates: () => checkForUpdates({ trigger: "manual" }),
       getUpdateInfo,
       version: VERSION,
       connectivity: {

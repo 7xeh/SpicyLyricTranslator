@@ -3,6 +3,7 @@ import type { LyricLineData, WordTimingData } from './lyricsFetcher';
 import type { TranslationQualityMeta } from './state';
 import { storage } from './storage';
 import { buildHeuristicBreakdown, BreakdownToken } from './wordBreakdown';
+import { cleanLyricText, normalizeLyricMatchKey } from './text';
 
 export const CINEMA_CONTAINER_SELECTOR = '.Cinema--Container, .spicy-lyrics-cinema, .Root__cinema-view';
 export const CINEMA_LYRICS_CONTENT_SELECTOR = '.Cinema--Container .LyricsContent, .spicy-lyrics-cinema .LyricsContent, .Root__cinema-view .LyricsContent';
@@ -52,7 +53,7 @@ let qualityByContent: Map<string, TranslationQualityMeta> = new Map();
 let timingByContent: Map<string, LyricLineData> = new Map();
 
 function normalizeCompare(text: string | undefined | null): string {
-    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '').trim();
+    return normalizeLyricMatchKey(text);
 }
 
 interface ContentLookupKeys {
@@ -419,7 +420,7 @@ function extractLineText(line: Element): string {
         }
 
         if (parts.length > 0) {
-            return parts.join(' ').replace(/\s+/g, ' ').trim();
+            return cleanLyricText(parts.join(' '));
         }
     }
 
@@ -430,10 +431,10 @@ function extractLineText(line: Element): string {
             if (w.closest('.letterGroup')) return false;
             return true;
         });
-        return wordUnits.map(w => w.textContent?.trim() || '').join(' ').replace(/\s+/g, ' ').trim();
+        return cleanLyricText(wordUnits.map(w => w.textContent || '').join(' '));
     }
 
-    return line.textContent?.trim() || '';
+    return cleanLyricText(line.textContent);
 }
 
 let wordUnitsCache = new WeakMap<Element, Element[]>();

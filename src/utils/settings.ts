@@ -2,7 +2,7 @@ import { storage } from './storage';
 import { state } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
-import { VERSION, REPO_URL, checkForUpdates, getUpdateInfo, showCurrentChangelog, getContentHashShort } from './updater';
+import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getContentHashShort } from './updater';
 import { forceRetranslate } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
@@ -323,44 +323,8 @@ function createNativeSettingsSection(): HTMLElement {
         'slt-settings.check-updates',
         nativeVersionLabel,
         'Check for Updates',
-        async () => {
-            const btn = document.getElementById('slt-settings.check-updates') as HTMLButtonElement;
-            if (btn) {
-                btn.textContent = 'Checking...';
-                btn.disabled = true;
-            }
-
-            try {
-                const updateInfo = await getUpdateInfo();
-                if (updateInfo?.hasUpdate) {
-                    checkForUpdates(true);
-                } else {
-                    try {
-                        const metadata = (window as any)._spicy_lyric_translater_metadata;
-                        if (metadata?.utils?.runHotfixCheck) {
-                            metadata.utils.runHotfixCheck();
-                        }
-                    } catch (_) {}
-                    if (btn) btn.textContent = 'Up to date!';
-                    setTimeout(() => {
-                        if (btn) {
-                            btn.textContent = 'Check for Updates';
-                            btn.disabled = false;
-                        }
-                    }, 2000);
-                    if (Spicetify.showNotification) {
-                        Spicetify.showNotification('You are running the latest version!');
-                    }
-                }
-            } catch (e) {
-                if (btn) {
-                    btn.textContent = 'Check for Updates';
-                    btn.disabled = false;
-                }
-                if (Spicetify.showNotification) {
-                    Spicetify.showNotification('Failed to check for updates', true);
-                }
-            }
+        () => {
+            runManualUpdateCheck(document.getElementById('slt-settings.check-updates') as HTMLButtonElement | null);
         }
     ));
 
@@ -1208,38 +1172,13 @@ function createSettingsUI(): HTMLElement {
             }
         });
 
-        checkUpdatesButton?.addEventListener('click', async () => {
-            checkUpdatesButton.textContent = 'Checking...';
-            checkUpdatesButton.disabled = true;
-
-            try {
-                const updateInfo = await getUpdateInfo();
-                if (updateInfo?.hasUpdate) {
+        checkUpdatesButton?.addEventListener('click', () => {
+            runManualUpdateCheck(checkUpdatesButton, {
+                beforePrompt: async () => {
                     hideModal();
-                    setTimeout(() => checkForUpdates(true), 150);
-                } else {
-                    try {
-                        const metadata = (window as any)._spicy_lyric_translater_metadata;
-                        if (metadata?.utils?.runHotfixCheck) {
-                            metadata.utils.runHotfixCheck();
-                        }
-                    } catch (_) {}
-                    checkUpdatesButton.textContent = 'Up to date!';
-                    setTimeout(() => {
-                        checkUpdatesButton.textContent = 'Check for Updates';
-                        checkUpdatesButton.disabled = false;
-                    }, 2000);
-                    if (Spicetify.showNotification) {
-                        Spicetify.showNotification('You are running the latest version!');
-                    }
+                    await new Promise(resolve => setTimeout(resolve, 300));
                 }
-            } catch (e) {
-                checkUpdatesButton.textContent = 'Check for Updates';
-                checkUpdatesButton.disabled = false;
-                if (Spicetify.showNotification) {
-                    Spicetify.showNotification('Failed to check for updates', true);
-                }
-            }
+            });
         });
     }, 0);
 
