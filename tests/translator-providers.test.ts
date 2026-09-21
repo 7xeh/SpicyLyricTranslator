@@ -520,7 +520,7 @@ test('OpenAI maps retired dropdown values to GPT-4o mini', async () => {
     assert.equal(body.model, 'gpt-4o-mini');
 });
 
-test('Gemini uses the configured model in the generateContent endpoint and sends the key as a query param', async () => {
+test('Gemini uses the configured model in the generateContent endpoint and sends the key as a header', async () => {
     resetState();
     setPreferredApi('gemini', undefined, {
         geminiApiKey: 'gemini-key',
@@ -545,8 +545,8 @@ test('Gemini uses the configured model in the generateContent endpoint and sends
 
     assert.equal(result.translatedText, 'Xin chao');
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=gemini-key');
-    assert.deepEqual(calls[0].init?.headers, { 'Content-Type': 'application/json' });
+    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
+    assert.deepEqual(calls[0].init?.headers, { 'Content-Type': 'application/json', 'x-goog-api-key': 'gemini-key' });
 });
 
 test('Gemini maps old Flash model settings to the new 3.5 Flash endpoint', async () => {
@@ -572,7 +572,7 @@ test('Gemini maps old Flash model settings to the new 3.5 Flash endpoint', async
 
     await translateText('\u3053\u3093\u306b\u3061\u306f', 'vi', 'ja');
 
-    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=gemini-key');
+    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
 });
 
 test('Gemini omits thinkingConfig so generic models do not 400 on unknown options', async () => {
@@ -1066,11 +1066,124 @@ test('Gemini uses CosmosAsync when available instead of raw browser fetch', asyn
     assert.equal(result.translatedText, 'Xin chao');
     assert.equal(fetchCalls.length, 0);
     assert.equal(cosmosCalls.length, 1);
-    assert.equal(cosmosCalls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AIza-test');
+    assert.equal(cosmosCalls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent');
     assert.deepEqual(cosmosCalls[0].headers, {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-goog-api-key': 'AIza-test'
     });
     assert.equal(cosmosCalls[0].body.contents[0].parts[0].text.includes('\u3053\u3093\u306b\u3061\u306f'), true);
+});
+
+function useGeminiProvider(apiKey = 'AIza-test'): void {
+    resetState();
+    setPreferredApi('gemini', undefined, {
+        geminiApiKey: apiKey,
+        geminiModel: 'gemini-3.1-flash-lite'
+    } as any);
+}
+
+function geminiResponse(text: string): Response {
+    return jsonResponse({ candidates: [{ content: { parts: [{ text }] } }] });
+}
+
+function cosmosResolverFailure(calls: Array<{ url: string }>): void {
+    (globalThis as any).Spicetify = {
+        CosmosAsync: {
+            post: async (url: string) => {
+                calls.push({ url });
+                throw new Error(`POST request to ${url} request failed with error code -1 (Resolver not found!)`);
+            }
+        }
+    };
+}
+
+test('Gemini falls back to direct fetch when CosmosAsync cannot resolve the host', async () => {
+    useGeminiProvider();
+
+    const cosmosCalls: Array<{ url: string }> = [];
+    cosmosResolverFailure(cosmosCalls);
+
+    const fetchCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        fetchCalls.push({ url, init });
+        return geminiResponse('Xin chao');
+    };
+
+    const result = await translateText('こんにちは', 'vi', 'ja');
+
+    assert.equal(result.translatedText, 'Xin chao');
+    assert.equal(cosmosCalls.length, 1);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent');
+});
+
+test('Gemini falls back to the Spicetify CORS proxy when Cosmos and direct fetch both fail', async () => {
+    useGeminiProvider();
+
+    const cosmosCalls: Array<{ url: string }> = [];
+    cosmosResolverFailure(cosmosCalls);
+
+    const fetchCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        fetchCalls.push({ url, init });
+        if (!url.startsWith('https://cors-proxy.spicetify.app/')) {
+            throw new TypeError('Failed to fetch');
+        }
+        return geminiResponse('Xin chao');
+    };
+
+    const result = await translateText('こんにちは', 'vi', 'ja');
+
+    assert.equal(result.translatedText, 'Xin chao');
+    assert.equal(cosmosCalls.length, 1);
+    assert.equal(fetchCalls.length, 2);
+    assert.equal(
+        fetchCalls[1].url,
+        'https://cors-proxy.spicetify.app/https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent'
+    );
+});
+
+test('newer AQ. Google keys are sent as a header and never placed in the request URL', async () => {
+    useGeminiProvider('AQ.Ab8RN6Jsecretvalue');
+
+    const fetchCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        fetchCalls.push({ url, init });
+        return geminiResponse('Xin chao');
+    };
+
+    const result = await translateText('こんにちは', 'vi', 'ja');
+
+    assert.equal(result.translatedText, 'Xin chao');
+    assert.equal(fetchCalls[0].url.includes('AQ.'), false);
+    assert.equal((fetchCalls[0].init?.headers as Record<string, string>)['x-goog-api-key'], 'AQ.Ab8RN6Jsecretvalue');
+});
+
+test('a rejected AQ. key surfaces the provider status instead of retrying other transports', async () => {
+    useGeminiProvider('AQ.Ab8RN6Jsecretvalue');
+
+    const cosmosCalls: Array<{ url: string }> = [];
+    (globalThis as any).Spicetify = {
+        CosmosAsync: {
+            post: async (url: string) => {
+                cosmosCalls.push({ url });
+                throw new Error(`POST request to ${url} request failed with error code 400 (API key not valid: AQ.Ab8RN6Jsecretvalue)`);
+            }
+        }
+    };
+
+    const fetchCalls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        fetchCalls.push({ url, init });
+        return geminiResponse('unexpected');
+    };
+
+    await assert.rejects(
+        () => translateText('こんにちは', 'vi', 'ja'),
+        /Gemini API error: 400.*API key not valid: AQ\.\.\./
+    );
+    assert.equal(cosmosCalls.length, 1);
+    assert.equal(fetchCalls.length, 0);
 });
 
 test('Valencian is not a target-language option; it is a variant of Catalan', () => {

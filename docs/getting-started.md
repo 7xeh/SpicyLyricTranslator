@@ -2,8 +2,8 @@
 
 ## Requirements
 
-- Spicetify `>= 2.0.0`
-- The Spicy Lyrics extension, installed and working
+- Spicetify `>= 2.45.1`
+- The Spicy Lyrics extension (`>= 6.3.20`), installed and working
 - An internet connection for first-time translations and update checks
 
 ## Install

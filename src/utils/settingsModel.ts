@@ -248,8 +248,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'password',
         storageKey: 'gemini-api-key',
         defaultValue: '',
-        placeholder: 'AIza...',
-        description: 'Get a key at aistudio.google.com/apikey',
+        placeholder: 'AIza... or AQ...',
+        description: 'Get a key at aistudio.google.com/apikey (AIza... and AQ... keys both work)',
         secret: true,
         visibleForApis: ['gemini']
     },

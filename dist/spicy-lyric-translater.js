@@ -27,6 +27,7 @@ var SpicyLyricTranslater = (() => {
   // src/utils/storage.ts
   var STORAGE_PREFIX = "spicy-lyric-translator:";
   var SECRET_ENCODING_PREFIX = "b64:";
+  var LEGACY_PLAINTEXT_SECRET_PREFIXES = ["AIza", "AQ.", "sk-"];
   var MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
   function isLocalStorageAvailable() {
     try {
@@ -170,7 +171,7 @@ var SpicyLyricTranslater = (() => {
             return rest;
           }
         }
-        if (stored.startsWith("AIza") || stored.startsWith("sk-")) {
+        if (LEGACY_PLAINTEXT_SECRET_PREFIXES.some((prefix) => stored.startsWith(prefix))) {
           return stored;
         }
         try {
@@ -1867,6 +1868,50 @@ var SpicyLyricTranslater = (() => {
       detectedLanguage: detection.code
     };
   }
+  function getLanguageName(code) {
+    const languageNames = {
+      "en": "English",
+      "es": "Spanish",
+      "fr": "French",
+      "de": "German",
+      "it": "Italian",
+      "pt": "Portuguese",
+      "nl": "Dutch",
+      "pl": "Polish",
+      "lt": "Lithuanian",
+      "ru": "Russian",
+      "ja": "Japanese",
+      "zh": "Chinese",
+      "zh-hans": "Chinese (Simplified)",
+      "zh-hant": "Chinese (Traditional)",
+      "zh-hani": "Chinese",
+      "ko": "Korean",
+      "ar": "Arabic",
+      "he": "Hebrew",
+      "hi": "Hindi",
+      "th": "Thai",
+      "el": "Greek",
+      "tr": "Turkish",
+      "vi": "Vietnamese",
+      "id": "Indonesian",
+      "ms": "Malay",
+      "tl": "Tagalog",
+      "sv": "Swedish",
+      "no": "Norwegian",
+      "da": "Danish",
+      "fi": "Finnish",
+      "uk": "Ukrainian",
+      "cs": "Czech",
+      "ro": "Romanian",
+      "hu": "Hungarian",
+      "unknown": "Unknown"
+    };
+    const normalized = normalizeLanguageCode(code);
+    if (languageNames[normalized])
+      return languageNames[normalized];
+    const baseCode = code.toLowerCase().split("-")[0];
+    return languageNames[baseCode] || code.toUpperCase();
+  }
 
   // src/utils/wordBreakdown.ts
   var HAN_RANGE = /[一-鿿㐀-䶿]/;
@@ -2609,10 +2654,81 @@ var SpicyLyricTranslater = (() => {
     return new NonRetryableProviderError(message);
   }
   function sanitizeProviderErrorText(text) {
-    return (text || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-...").replace(/AIza[A-Za-z0-9_-]+/g, "AIza...");
+    return (text || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-...").replace(/AIza[A-Za-z0-9_-]+/g, "AIza...").replace(/AQ\.[A-Za-z0-9_.-]+/g, "AQ...");
   }
   function getSpicetifyCorsProxyUrl(url) {
     return `${SPICETIFY_CORS_PROXY_BASE}${url}`;
+  }
+  function canUseSpicetifyCorsProxy(url) {
+    if (url.startsWith(SPICETIFY_CORS_PROXY_BASE))
+      return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+        return false;
+      const host = parsed.hostname.toLowerCase();
+      return host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]" && !host.endsWith(".local");
+    } catch {
+      return false;
+    }
+  }
+  function getCosmosErrorStatus(err) {
+    const message = err instanceof Error ? err.message : String(err || "");
+    const match = message.match(/error code (-?\d+)/i);
+    if (!match)
+      return null;
+    const status = Number(match[1]);
+    return Number.isFinite(status) ? status : null;
+  }
+  function normalizeCosmosError(err, providerName) {
+    const status = getCosmosErrorStatus(err);
+    const message = err instanceof Error ? err.message : String(err || `${providerName} request failed`);
+    if (status !== null && status >= 400 && status < 600) {
+      return createProviderHttpError(providerName, status, message);
+    }
+    return err instanceof Error ? err : new Error(message);
+  }
+  function isTransportFailure(err) {
+    if (err instanceof NonRetryableProviderError)
+      return false;
+    const message = err instanceof Error ? err.message : String(err || "");
+    if (/API error: \d{3}/.test(message))
+      return false;
+    if (/resolver not found|no such resolver|failed to resolve/i.test(message))
+      return true;
+    const status = getCosmosErrorStatus(err);
+    if (status !== null && status < 100)
+      return true;
+    return isLikelyCorsOrNetworkError(err);
+  }
+  async function runProviderTransports(transports, providerName) {
+    let lastError = null;
+    for (const transport of transports) {
+      try {
+        return await transport();
+      } catch (err) {
+        if (!isTransportFailure(err)) {
+          throw err;
+        }
+        lastError = err instanceof Error ? err : new Error(String(err || `${providerName} request failed`));
+      }
+    }
+    throw lastError || new Error(`${providerName} request failed`);
+  }
+  function orderProviderTransports(viaCosmos, viaFetch, url, preferCosmos) {
+    const transports = [];
+    const direct = () => viaFetch(url);
+    if (preferCosmos && viaCosmos) {
+      transports.push(viaCosmos, direct);
+    } else {
+      transports.push(direct);
+      if (viaCosmos)
+        transports.push(viaCosmos);
+    }
+    if (canUseSpicetifyCorsProxy(url)) {
+      transports.push(() => viaFetch(getSpicetifyCorsProxyUrl(url)));
+    }
+    return transports;
   }
   function normalizeProviderJsonPayload(data, providerName) {
     if (typeof data !== "string") {
@@ -2640,22 +2756,29 @@ var SpicyLyricTranslater = (() => {
   }
   async function postJsonProvider(url, body, headers, providerName, options = {}) {
     const cosmos = getCosmosAsync();
-    if (options.preferCosmos && cosmos?.post) {
-      return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
-    }
-    try {
-      const response = await fetchWithTimeout(url, {
+    const cosmosPost = cosmos?.post;
+    const viaCosmos = cosmosPost ? async () => {
+      try {
+        return normalizeProviderJsonPayload(
+          await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+          providerName
+        );
+      } catch (err) {
+        throw normalizeCosmosError(err, providerName);
+      }
+    } : null;
+    const viaFetch = async (target) => {
+      const response = await fetchWithTimeout(target, {
         method: "POST",
         headers,
         body: JSON.stringify(body)
       }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
-      return await readProviderJsonResponse(response, providerName);
-    } catch (err) {
-      if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-        return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
-      }
-      throw err;
-    }
+      return readProviderJsonResponse(response, providerName);
+    };
+    return runProviderTransports(
+      orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
+      providerName
+    );
   }
   function buildLibreTranslateForm(text, targetLang) {
     const params = new URLSearchParams();
@@ -2685,27 +2808,32 @@ var SpicyLyricTranslater = (() => {
   }
   async function postFormProvider(url, params, providerName, options = {}) {
     const cosmos = getCosmosAsync();
-    if (options.preferCosmos && cosmos?.post) {
-      return normalizeProviderJsonPayload(
-        await withTimeout(cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
-        providerName
-      );
-    }
-    try {
-      const response = await fetchWithTimeout(url, {
+    const cosmosPost = cosmos?.post;
+    const viaCosmos = cosmosPost ? async () => {
+      try {
+        return normalizeProviderJsonPayload(
+          await withTimeout(
+            cosmosPost(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+            PROVIDER_REQUEST_TIMEOUT_MS,
+            providerName
+          ),
+          providerName
+        );
+      } catch (err) {
+        throw normalizeCosmosError(err, providerName);
+      }
+    } : null;
+    const viaFetch = async (target) => {
+      const response = await fetchWithTimeout(target, {
         method: "POST",
         body: params
       }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
-      return await readProviderJsonResponse(response, providerName);
-    } catch (err) {
-      if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-        return normalizeProviderJsonPayload(
-          await withTimeout(cosmos.post(url, formToJsonObject(params), { "Content-Type": "application/json" }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
-          providerName
-        );
-      }
-      throw err;
-    }
+      return readProviderJsonResponse(response, providerName);
+    };
+    return runProviderTransports(
+      orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
+      providerName
+    );
   }
   async function retryWithBackoff(fn, maxRetries = RATE_LIMIT.maxRetries, baseDelay = RATE_LIMIT.minDelayMs) {
     let lastError = null;
@@ -3203,11 +3331,11 @@ var SpicyLyricTranslater = (() => {
     const normalizedModel = normalizeGeminiModelName(model);
     return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(normalizedModel)}:generateContent`;
   }
-  function appendGeminiApiKeyQuery(url, apiKey) {
-    if (!apiKey)
-      return url;
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}key=${encodeURIComponent(apiKey)}`;
+  function getGeminiHeaders(apiKey) {
+    return {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey
+    };
   }
   async function translateWithGemini(text, targetLang) {
     if (!geminiApiKey) {
@@ -3215,7 +3343,7 @@ var SpicyLyricTranslater = (() => {
     }
     const langName = getTranslationLanguageName(targetLang);
     const data = await postJsonProvider(
-      appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+      getGeminiGenerateContentUrl(geminiModel),
       {
         contents: [
           {
@@ -3233,9 +3361,7 @@ ${text}`
           maxOutputTokens: Math.max(text.length * 3, 2048)
         }
       },
-      {
-        "Content-Type": "application/json"
-      },
+      getGeminiHeaders(geminiApiKey),
       "Gemini",
       { preferCosmos: true }
     );
@@ -4475,12 +4601,12 @@ ${text}`
       if (!geminiApiKey)
         throw createProviderConfigError("Gemini API key not configured. Set it in Settings.");
       const data = await postJsonProvider(
-        appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+        getGeminiGenerateContentUrl(geminiModel),
         {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
         },
-        { "Content-Type": "application/json" },
+        getGeminiHeaders(geminiApiKey),
         "Gemini breakdown",
         { preferCosmos: true }
       );
@@ -4708,11 +4834,21 @@ ${text}`
 
   // src/utils/text.ts
   var INVISIBLE_SEPARATOR_REGEX = /[\u200B\u2060\uFEFF]/g;
+  var DIRECTION_MARK_REGEX = /[\u200E\u200F]/g;
+  var ZERO_WIDTH_REGEX = /[\u200B\u200E\u200F\u2060\uFEFF]/g;
   function cleanLyricText(text) {
-    return (text || "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
+    return (text || "").replace(DIRECTION_MARK_REGEX, "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
   }
   function normalizeLyricMatchKey(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200D\u2060\uFEFF]+/gu, "").trim();
+    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200F\u2060\uFEFF]+/gu, "").trim();
+  }
+  function hasLyricText(text) {
+    return typeof text === "string" && text.replace(ZERO_WIDTH_REGEX, "").trim() !== "";
+  }
+  function pickLyricDisplayText(text, romanizedText) {
+    if (hasLyricText(text))
+      return text;
+    return hasLyricText(romanizedText) ? romanizedText : text ?? "";
   }
 
   // src/utils/lyricsFetcher.ts
@@ -4930,23 +5066,28 @@ ${text}`
         continue;
       }
       if (group.Lead?.Syllables && group.Lead.Syllables.length > 0) {
+        const syllables = group.Lead.Syllables.filter(
+          (syllable) => hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
+        );
+        if (syllables.length === 0)
+          continue;
         const wordTimings = [];
         let lineText = "";
         let romanizedText = "";
         let anyRomanized = false;
-        const syllables = group.Lead.Syllables;
         for (let i = 0; i < syllables.length; i++) {
           const syllable = syllables[i];
           const prev = i > 0 ? syllables[i - 1] : null;
+          const syllableRoman = syllable.TransliteratedText ?? syllable.RomanizedText;
+          const syllableText = pickLyricDisplayText(syllable.Text, syllableRoman);
           wordTimings.push({
-            text: syllable.Text,
+            text: syllableText,
             startTime: syllable.StartTime,
             endTime: syllable.EndTime,
             isPartOfWord: syllable.IsPartOfWord
           });
-          const syllableRoman = syllable.TransliteratedText ?? syllable.RomanizedText;
-          const romanSyl = syllableRoman ?? syllable.Text;
-          if (syllableRoman && syllableRoman !== syllable.Text) {
+          const romanSyl = syllableRoman ?? syllableText;
+          if (syllableRoman && syllableRoman !== syllableText) {
             anyRomanized = true;
           }
           const startsNewWord = prev !== null && !prev.IsPartOfWord;
@@ -4955,7 +5096,7 @@ ${text}`
             if (romanizedText.length > 0)
               romanizedText += " ";
           }
-          lineText += syllable.Text;
+          lineText += syllableText;
           romanizedText += romanSyl;
         }
         lineData.push({
@@ -4969,9 +5110,12 @@ ${text}`
         continue;
       }
       if (group.Text !== void 0 && group.StartTime !== void 0 && group.EndTime !== void 0) {
-        const groupRoman = group.TransliteratedText && group.TransliteratedText !== group.Text ? group.TransliteratedText : void 0;
+        if (!hasLyricText(group.Text) && !hasLyricText(group.TransliteratedText))
+          continue;
+        const groupText = pickLyricDisplayText(String(group.Text), group.TransliteratedText);
+        const groupRoman = group.TransliteratedText && group.TransliteratedText !== groupText ? group.TransliteratedText : void 0;
         lineData.push({
-          text: cleanLyricText(String(group.Text)),
+          text: cleanLyricText(groupText),
           startTime: group.StartTime,
           endTime: group.EndTime,
           isInstrumental: false,
@@ -4982,6 +5126,8 @@ ${text}`
       if (group.Lead) {
         const leadText = group.Lead.Text;
         if (leadText !== void 0) {
+          if (!hasLyricText(leadText))
+            continue;
           lineData.push({
             text: cleanLyricText(String(leadText)),
             startTime: group.Lead.StartTime,
@@ -4997,13 +5143,16 @@ ${text}`
   function extractStaticLinesData(lyrics) {
     if (!lyrics.Lines)
       return [];
-    return lyrics.Lines.map((line) => ({
-      text: cleanLyricText(line.Text),
-      startTime: 0,
-      endTime: 0,
-      isInstrumental: false,
-      romanizedText: line.TransliteratedText && line.TransliteratedText !== line.Text ? line.TransliteratedText : void 0
-    }));
+    return lyrics.Lines.filter((line) => hasLyricText(line.Text) || hasLyricText(line.TransliteratedText)).map((line) => {
+      const text = pickLyricDisplayText(line.Text, line.TransliteratedText);
+      return {
+        text: cleanLyricText(text),
+        startTime: 0,
+        endTime: 0,
+        isInstrumental: false,
+        romanizedText: line.TransliteratedText && line.TransliteratedText !== text ? line.TransliteratedText : void 0
+      };
+    });
   }
   function extractLinesData(lyrics) {
     switch (lyrics.Type) {
@@ -9326,8 +9475,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "password",
       storageKey: "gemini-api-key",
       defaultValue: "",
-      placeholder: "AIza...",
-      description: "Get a key at aistudio.google.com/apikey",
+      placeholder: "AIza... or AQ...",
+      description: "Get a key at aistudio.google.com/apikey (AIza... and AQ... keys both work)",
       secret: true,
       visibleForApis: ["gemini"]
     },
@@ -10967,7 +11116,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return `${Math.round(ms)}ms`;
     const s = ms / 1e3;
     if (s < 60)
-      return `${s.toFixed(s < 10 ? 2 : 1)}s`;
+      return `${s.toFixed(1)}s`;
     const m = Math.floor(s / 60);
     return `${m}m ${Math.round(s - m * 60)}s`;
   }
@@ -10994,33 +11143,71 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return "OpenAI";
       case "gemini":
         return "Gemini";
+      case "grok":
+        return "Grok";
+      case "anthropic":
+        return "Claude";
       case "custom":
         return "Custom";
       default:
         return api;
     }
   }
+  function formatLanguageLabel(code) {
+    const normalized = (code || "").trim();
+    if (!normalized)
+      return "";
+    const lower = normalized.toLowerCase();
+    if (lower === "unknown" || lower === "auto")
+      return "";
+    const supported = SUPPORTED_LANGUAGES.find((language) => language.code.toLowerCase() === lower);
+    if (supported)
+      return supported.name;
+    return getLanguageName(normalized);
+  }
+  function formatLanguagePair(sourceCode, targetCode) {
+    const target = formatLanguageLabel(targetCode);
+    if (!target)
+      return "Translated";
+    const source = formatLanguageLabel(sourceCode);
+    if (source && source !== target)
+      return `${source} \u2192 ${target}`;
+    return `Translated to ${target}`;
+  }
+  function formatProviderWithModel(providerLabel, model) {
+    if (!providerLabel)
+      return "";
+    const trimmed = (model || "").trim();
+    if (!trimmed)
+      return providerLabel;
+    const shortModel = trimmed.toLowerCase().startsWith(providerLabel.toLowerCase()) ? trimmed.slice(providerLabel.length).replace(/^[\s._/-]+/, "") : trimmed;
+    return shortModel ? `${providerLabel} (${shortModel})` : providerLabel;
+  }
   function buildTranslationNotification(translations, trackUri, targetLang) {
     const someTranslated = translations.some((t) => t.wasTranslated === true);
     if (!someTranslated)
       return null;
+    const cacheEntry = trackUri ? getTrackCache(trackUri, targetLang) : null;
     const fromApi = translations.some((t) => t.wasTranslated === true && t.source === "api");
-    const apiProvider = translations.find((t) => t.apiProvider)?.apiProvider;
-    const providerLabel = formatProviderName(apiProvider);
+    const providerLabel = formatProviderName(translations.find((t) => t.apiProvider)?.apiProvider || cacheEntry?.api);
+    const detectedLanguage = translations.find((t) => formatLanguageLabel(t.detectedLanguage))?.detectedLanguage;
+    const parts = [formatLanguagePair(detectedLanguage || cacheEntry?.lang, targetLang)];
     if (!fromApi) {
-      return providerLabel ? `Translated from cache \xB7 ${providerLabel}` : "Translated from cache";
+      parts.push("Cached");
+      if (providerLabel)
+        parts.push(providerLabel);
+      return parts.join(" \xB7 ");
     }
-    const metrics = trackUri ? getTrackCache(trackUri, targetLang)?.metrics : void 0;
-    const parts = ["Translated"];
-    if (providerLabel) {
-      parts.push(metrics?.model ? `${providerLabel} \xB7 ${metrics.model}` : providerLabel);
-    }
-    const dur = formatNotificationDuration(metrics?.durationMs);
-    if (dur)
-      parts.push(dur);
-    const tok = formatNotificationTokens(metrics?.totalTokens);
-    if (tok)
-      parts.push(tok);
+    const metrics = cacheEntry?.metrics;
+    const provider = formatProviderWithModel(providerLabel, metrics?.model);
+    if (provider)
+      parts.push(provider);
+    const duration = formatNotificationDuration(metrics?.durationMs);
+    if (duration)
+      parts.push(duration);
+    const tokens = formatNotificationTokens(metrics?.totalTokens);
+    if (tokens)
+      parts.push(tokens);
     return parts.join(" \xB7 ");
   }
   function looseLatinSkeleton(text) {
@@ -11772,7 +11959,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
     if (topBarContentRight)
       return topBarContentRight;
-    const userWidget = document.querySelector(".main-userWidget-box");
+    const userWidget = document.querySelector('.main-userWidget-box, [data-testid="user-widget-link"]');
     if (userWidget && userWidget.parentNode)
       return userWidget.parentNode;
     const historyButtons = document.querySelector(".main-topBar-historyButtons");
@@ -11813,10 +12000,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       applyIndicatorVisibility();
       return true;
     }
-    const topBarContentRight = await waitForElement2(".main-topBar-topbarContentRight");
-    if (topBarContentRight) {
+    await waitForElement2('.main-topBar-topbarContentRight, .main-userWidget-box, [data-testid="user-widget-link"], .main-topBar-historyButtons');
+    const lateContainer = getIndicatorContainer();
+    if (lateContainer) {
       containerElement = createIndicatorElement();
-      topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
+      lateContainer.insertBefore(containerElement, lateContainer.firstChild);
       applyIndicatorVisibility();
       return true;
     }
@@ -13019,6 +13207,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return "OpenAI";
       case "gemini":
         return "Gemini";
+      case "grok":
+        return "Grok";
+      case "anthropic":
+        return "Claude";
       case "custom":
         return "Custom API";
       default:

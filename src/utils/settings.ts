@@ -1273,6 +1273,8 @@ function formatApiProviderLabel(api: string | undefined): string {
         case 'deepl': return 'DeepL';
         case 'openai': return 'OpenAI';
         case 'gemini': return 'Gemini';
+        case 'grok': return 'Grok';
+        case 'anthropic': return 'Claude';
         case 'custom': return 'Custom API';
         default: return api;
     }

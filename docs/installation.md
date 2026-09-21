@@ -4,8 +4,8 @@ For most users, installing from the **Spicetify Marketplace** is the way to go â
 
 ## Requirements
 
-- Spicetify `>= 2.0.0` installed and working
-- Spicy Lyrics extension installed and enabled
+- Spicetify `>= 2.45.1` installed and working
+- Spicy Lyrics extension (`>= 6.3.20`) installed and enabled
 - Internet connection for translations and update checks
 
 ## Option 1: Loader script (recommended)

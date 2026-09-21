@@ -1,7 +1,7 @@
 import { state, TranslationQualityMeta } from './state';
 import { Icons } from './icons';
 import { storage } from './storage';
-import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown } from './translator';
+import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES } from './translator';
 import { getCurrentTrackUri, getTrackCache } from './trackCache';
 import {
     enableOverlay,
@@ -28,7 +28,7 @@ import {
     CINEMA_CONTAINER_SELECTOR,
     CINEMA_LYRICS_CONTENT_SELECTOR
 } from './translationOverlay';
-import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
+import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine, getLanguageName } from './languageDetection';
 import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
@@ -1190,7 +1190,7 @@ function formatNotificationDuration(ms: number | undefined): string {
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '';
     if (ms < 1000) return `${Math.round(ms)}ms`;
     const s = ms / 1000;
-    if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)}s`;
+    if (s < 60) return `${s.toFixed(1)}s`;
     const m = Math.floor(s / 60);
     return `${m}m ${Math.round(s - m * 60)}s`;
 }
@@ -1210,36 +1210,80 @@ function formatProviderName(api: string | undefined): string {
         case 'deepl': return 'DeepL';
         case 'openai': return 'OpenAI';
         case 'gemini': return 'Gemini';
+        case 'grok': return 'Grok';
+        case 'anthropic': return 'Claude';
         case 'custom': return 'Custom';
         default: return api;
     }
 }
 
-function buildTranslationNotification(
-    translations: Array<{ wasTranslated?: boolean; source?: 'cache' | 'api'; apiProvider?: string }>,
+function formatLanguageLabel(code: string | undefined): string {
+    const normalized = (code || '').trim();
+    if (!normalized) return '';
+
+    const lower = normalized.toLowerCase();
+    if (lower === 'unknown' || lower === 'auto') return '';
+
+    const supported = SUPPORTED_LANGUAGES.find(language => language.code.toLowerCase() === lower);
+    if (supported) return supported.name;
+
+    return getLanguageName(normalized);
+}
+
+function formatLanguagePair(sourceCode: string | undefined, targetCode: string): string {
+    const target = formatLanguageLabel(targetCode);
+    if (!target) return 'Translated';
+
+    const source = formatLanguageLabel(sourceCode);
+    if (source && source !== target) return `${source} → ${target}`;
+
+    return `Translated to ${target}`;
+}
+
+export function formatProviderWithModel(providerLabel: string, model: string | undefined): string {
+    if (!providerLabel) return '';
+
+    const trimmed = (model || '').trim();
+    if (!trimmed) return providerLabel;
+
+    const shortModel = trimmed.toLowerCase().startsWith(providerLabel.toLowerCase())
+        ? trimmed.slice(providerLabel.length).replace(/^[\s._/-]+/, '')
+        : trimmed;
+
+    return shortModel ? `${providerLabel} (${shortModel})` : providerLabel;
+}
+
+export function buildTranslationNotification(
+    translations: Array<{ wasTranslated?: boolean; source?: 'cache' | 'api'; apiProvider?: string; detectedLanguage?: string }>,
     trackUri: string | null,
     targetLang: string
 ): string | null {
     const someTranslated = translations.some(t => t.wasTranslated === true);
     if (!someTranslated) return null;
 
+    const cacheEntry = trackUri ? getTrackCache(trackUri, targetLang) : null;
     const fromApi = translations.some(t => t.wasTranslated === true && t.source === 'api');
-    const apiProvider = translations.find(t => t.apiProvider)?.apiProvider;
-    const providerLabel = formatProviderName(apiProvider);
+    const providerLabel = formatProviderName(translations.find(t => t.apiProvider)?.apiProvider || cacheEntry?.api);
+    const detectedLanguage = translations.find(t => formatLanguageLabel(t.detectedLanguage))?.detectedLanguage;
+
+    const parts: string[] = [formatLanguagePair(detectedLanguage || cacheEntry?.lang, targetLang)];
 
     if (!fromApi) {
-        return providerLabel ? `Translated from cache · ${providerLabel}` : 'Translated from cache';
+        parts.push('Cached');
+        if (providerLabel) parts.push(providerLabel);
+        return parts.join(' · ');
     }
 
-    const metrics = trackUri ? getTrackCache(trackUri, targetLang)?.metrics : undefined;
-    const parts: string[] = ['Translated'];
-    if (providerLabel) {
-        parts.push(metrics?.model ? `${providerLabel} · ${metrics.model}` : providerLabel);
-    }
-    const dur = formatNotificationDuration(metrics?.durationMs);
-    if (dur) parts.push(dur);
-    const tok = formatNotificationTokens(metrics?.totalTokens);
-    if (tok) parts.push(tok);
+    const metrics = cacheEntry?.metrics;
+    const provider = formatProviderWithModel(providerLabel, metrics?.model);
+    if (provider) parts.push(provider);
+
+    const duration = formatNotificationDuration(metrics?.durationMs);
+    if (duration) parts.push(duration);
+
+    const tokens = formatNotificationTokens(metrics?.totalTokens);
+    if (tokens) parts.push(tokens);
+
     return parts.join(' · ');
 }
 

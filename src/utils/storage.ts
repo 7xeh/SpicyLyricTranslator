@@ -2,6 +2,8 @@ const STORAGE_PREFIX = "spicy-lyric-translator:";
 
 const SECRET_ENCODING_PREFIX = 'b64:';
 
+const LEGACY_PLAINTEXT_SECRET_PREFIXES = ['AIza', 'AQ.', 'sk-'];
+
 const MAX_STORAGE_SIZE_BYTES = 4 * 1024 * 1024;
 
 function isLocalStorageAvailable(): boolean {
@@ -155,7 +157,7 @@ export const storage = {
                 }
             }
 
-            if (stored.startsWith('AIza') || stored.startsWith('sk-')) {
+            if (LEGACY_PLAINTEXT_SECRET_PREFIXES.some(prefix => stored.startsWith(prefix))) {
                 return stored;
             }
 

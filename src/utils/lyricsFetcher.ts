@@ -1,6 +1,6 @@
 import { warn } from './debug';
 import { normalizeLanguageCode } from './languageDetection';
-import { cleanLyricText } from './text';
+import { cleanLyricText, hasLyricText, pickLyricDisplayText } from './text';
 
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
@@ -313,23 +313,27 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
         }
 
         if (group.Lead?.Syllables && group.Lead.Syllables.length > 0) {
+            const syllables = group.Lead.Syllables.filter(syllable =>
+                hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
+            );
+            if (syllables.length === 0) continue;
             const wordTimings: WordTimingData[] = [];
             let lineText = '';
             let romanizedText = '';
             let anyRomanized = false;
-            const syllables = group.Lead.Syllables;
             for (let i = 0; i < syllables.length; i++) {
                 const syllable = syllables[i];
                 const prev = i > 0 ? syllables[i - 1] : null;
+                const syllableRoman = syllable.TransliteratedText ?? syllable.RomanizedText;
+                const syllableText = pickLyricDisplayText(syllable.Text, syllableRoman);
                 wordTimings.push({
-                    text: syllable.Text,
+                    text: syllableText,
                     startTime: syllable.StartTime,
                     endTime: syllable.EndTime,
                     isPartOfWord: syllable.IsPartOfWord,
                 });
-                const syllableRoman = syllable.TransliteratedText ?? syllable.RomanizedText;
-                const romanSyl = syllableRoman ?? syllable.Text;
-                if (syllableRoman && syllableRoman !== syllable.Text) {
+                const romanSyl = syllableRoman ?? syllableText;
+                if (syllableRoman && syllableRoman !== syllableText) {
                     anyRomanized = true;
                 }
                 const startsNewWord = prev !== null && !prev.IsPartOfWord;
@@ -337,7 +341,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                     lineText += ' ';
                     if (romanizedText.length > 0) romanizedText += ' ';
                 }
-                lineText += syllable.Text;
+                lineText += syllableText;
                 romanizedText += romanSyl;
             }
             lineData.push({
@@ -352,11 +356,13 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
         }
 
         if (group.Text !== undefined && group.StartTime !== undefined && group.EndTime !== undefined) {
-            const groupRoman = (group.TransliteratedText && group.TransliteratedText !== group.Text)
+            if (!hasLyricText(group.Text) && !hasLyricText(group.TransliteratedText)) continue;
+            const groupText = pickLyricDisplayText(String(group.Text), group.TransliteratedText);
+            const groupRoman = (group.TransliteratedText && group.TransliteratedText !== groupText)
                 ? group.TransliteratedText
                 : undefined;
             lineData.push({
-                text: cleanLyricText(String(group.Text)),
+                text: cleanLyricText(groupText),
                 startTime: group.StartTime,
                 endTime: group.EndTime,
                 isInstrumental: false,
@@ -368,6 +374,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
         if (group.Lead) {
             const leadText = (group.Lead as any).Text;
             if (leadText !== undefined) {
+                if (!hasLyricText(leadText)) continue;
                 lineData.push({
                     text: cleanLyricText(String(leadText)),
                     startTime: group.Lead.StartTime,
@@ -385,15 +392,20 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
 
 function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
     if (!lyrics.Lines) return [];
-    return lyrics.Lines.map(line => ({
-        text: cleanLyricText(line.Text),
-        startTime: 0,
-        endTime: 0,
-        isInstrumental: false,
-        romanizedText: (line.TransliteratedText && line.TransliteratedText !== line.Text)
-            ? line.TransliteratedText
-            : undefined
-    }));
+    return lyrics.Lines
+        .filter(line => hasLyricText(line.Text) || hasLyricText(line.TransliteratedText))
+        .map(line => {
+            const text = pickLyricDisplayText(line.Text, line.TransliteratedText);
+            return {
+                text: cleanLyricText(text),
+                startTime: 0,
+                endTime: 0,
+                isInstrumental: false,
+                romanizedText: (line.TransliteratedText && line.TransliteratedText !== text)
+                    ? line.TransliteratedText
+                    : undefined
+            };
+        });
 }
 
 function extractLinesData(lyrics: LyricsData): LyricLineData[] {

@@ -47,7 +47,7 @@ Full feature list: [docs/features.md](docs/features.md)
 
 No further setup needed — it works out of the box on Google Translate.
 
-Requires Spicetify `>= 2.0.0` and the Spicy Lyrics extension. For loader script or Windows installer instructions, see [docs/installation.md](docs/installation.md).
+Requires Spicetify `>= 2.45.1` and Spicy Lyrics `>= 6.3.20`. For loader script or Windows installer instructions, see [docs/installation.md](docs/installation.md).
 
 Then: play a track with lyrics, open the lyrics view, and click the **translate button**. Right-click it for quick settings. → [Getting Started](docs/getting-started.md)
 

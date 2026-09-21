@@ -4,7 +4,8 @@ import type { LyricLineData } from '../src/utils/lyricsFetcher';
 import type {
     isRomanizationActive as IsRomanizationActive,
     resolveTranslationSourceLines as ResolveTranslationSourceLines,
-    translateCurrentLyrics as TranslateCurrentLyrics
+    translateCurrentLyrics as TranslateCurrentLyrics,
+    buildTranslationNotification as BuildTranslationNotification
 } from '../src/utils/core';
 
 (globalThis as any).window = {
@@ -18,10 +19,11 @@ import type {
     querySelector: () => null
 };
 
-const { isRomanizationActive, resolveTranslationSourceLines, translateCurrentLyrics } = require('../src/utils/core') as {
+const { isRomanizationActive, resolveTranslationSourceLines, translateCurrentLyrics, buildTranslationNotification } = require('../src/utils/core') as {
     isRomanizationActive: typeof IsRomanizationActive;
     resolveTranslationSourceLines: typeof ResolveTranslationSourceLines;
     translateCurrentLyrics: typeof TranslateCurrentLyrics;
+    buildTranslationNotification: typeof BuildTranslationNotification;
 };
 const { state } = require('../src/utils/state') as { state: typeof import('../src/utils/state').state };
 
@@ -204,3 +206,51 @@ function fakeLine(text: string): Element {
         querySelectorAll: () => []
     } as unknown as Element;
 }
+
+function freshLine(detectedLanguage?: string): Parameters<typeof buildTranslationNotification>[0][number] {
+    return { wasTranslated: true, source: 'api', apiProvider: 'gemini', detectedLanguage };
+}
+
+function cachedLine(detectedLanguage?: string): Parameters<typeof buildTranslationNotification>[0][number] {
+    return { wasTranslated: true, source: 'cache', apiProvider: 'gemini', detectedLanguage };
+}
+
+test('a fresh translation names the language pair before the provider', () => {
+    const notification = buildTranslationNotification([freshLine('pl')], null, 'en');
+
+    assert.equal(notification, 'Polish \u2192 English \u00b7 Gemini');
+});
+
+test('a cached translation says so and still names the language pair', () => {
+    const notification = buildTranslationNotification([cachedLine('pl')], null, 'en');
+
+    assert.equal(notification, 'Polish \u2192 English \u00b7 Cached \u00b7 Gemini');
+});
+
+test('an undetected source language falls back to naming the target only', () => {
+    assert.equal(buildTranslationNotification([freshLine()], null, 'en'), 'Translated to English \u00b7 Gemini');
+    assert.equal(buildTranslationNotification([freshLine('unknown')], null, 'en'), 'Translated to English \u00b7 Gemini');
+});
+
+test('a source that already matches the target is not rendered as a pair', () => {
+    assert.equal(buildTranslationNotification([freshLine('en')], null, 'en'), 'Translated to English \u00b7 Gemini');
+});
+
+test('nothing translated produces no notification', () => {
+    assert.equal(buildTranslationNotification([{ wasTranslated: false, source: 'cache' }], null, 'en'), null);
+});
+
+test('regional target codes resolve to their full language name', () => {
+    assert.equal(buildTranslationNotification([freshLine('ja')], null, 'zh-TW'), 'Japanese \u2192 Chinese (Traditional) \u00b7 Gemini');
+});
+
+test('the model is folded into the provider without repeating the provider name', () => {
+    const { formatProviderWithModel } = require('../src/utils/core') as {
+        formatProviderWithModel: (provider: string, model: string | undefined) => string;
+    };
+
+    assert.equal(formatProviderWithModel('Gemini', 'gemini-3.1-flash-lite'), 'Gemini (3.1-flash-lite)');
+    assert.equal(formatProviderWithModel('Claude', 'claude-sonnet-5'), 'Claude (sonnet-5)');
+    assert.equal(formatProviderWithModel('OpenAI', 'gpt-4o-mini'), 'OpenAI (gpt-4o-mini)');
+    assert.equal(formatProviderWithModel('Gemini', undefined), 'Gemini');
+});

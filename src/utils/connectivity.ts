@@ -366,7 +366,7 @@ function getIndicatorContainer(): HTMLElement | null {
     const topBarContentRight = document.querySelector('.main-topBar-topbarContentRight');
     if (topBarContentRight) return topBarContentRight as HTMLElement;
 
-    const userWidget = document.querySelector('.main-userWidget-box');
+    const userWidget = document.querySelector('.main-userWidget-box, [data-testid="user-widget-link"]');
     if (userWidget && userWidget.parentNode) return userWidget.parentNode as HTMLElement;
 
     const historyButtons = document.querySelector('.main-topBar-historyButtons');
@@ -412,10 +412,11 @@ async function appendToDOM(): Promise<boolean> {
         return true;
     }
 
-    const topBarContentRight = await waitForElement('.main-topBar-topbarContentRight');
-    if (topBarContentRight) {
+    await waitForElement('.main-topBar-topbarContentRight, .main-userWidget-box, [data-testid="user-widget-link"], .main-topBar-historyButtons');
+    const lateContainer = getIndicatorContainer();
+    if (lateContainer) {
         containerElement = createIndicatorElement();
-        topBarContentRight.insertBefore(containerElement, topBarContentRight.firstChild);
+        lateContainer.insertBefore(containerElement, lateContainer.firstChild);
         applyIndicatorVisibility();
         return true;
     }

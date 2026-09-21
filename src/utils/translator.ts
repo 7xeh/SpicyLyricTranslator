@@ -507,11 +507,95 @@ function createProviderConfigError(message: string): Error {
 function sanitizeProviderErrorText(text: string): string {
     return (text || '')
         .replace(/sk-[A-Za-z0-9_-]+/g, 'sk-...')
-        .replace(/AIza[A-Za-z0-9_-]+/g, 'AIza...');
+        .replace(/AIza[A-Za-z0-9_-]+/g, 'AIza...')
+        .replace(/AQ\.[A-Za-z0-9_.-]+/g, 'AQ...');
 }
 
 function getSpicetifyCorsProxyUrl(url: string): string {
     return `${SPICETIFY_CORS_PROXY_BASE}${url}`;
+}
+
+function canUseSpicetifyCorsProxy(url: string): boolean {
+    if (url.startsWith(SPICETIFY_CORS_PROXY_BASE)) return false;
+
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+        const host = parsed.hostname.toLowerCase();
+        return host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]' && !host.endsWith('.local');
+    } catch {
+        return false;
+    }
+}
+
+function getCosmosErrorStatus(err: unknown): number | null {
+    const message = err instanceof Error ? err.message : String(err || '');
+    const match = message.match(/error code (-?\d+)/i);
+    if (!match) return null;
+    const status = Number(match[1]);
+    return Number.isFinite(status) ? status : null;
+}
+
+function normalizeCosmosError(err: unknown, providerName: string): Error {
+    const status = getCosmosErrorStatus(err);
+    const message = err instanceof Error ? err.message : String(err || `${providerName} request failed`);
+    if (status !== null && status >= 400 && status < 600) {
+        return createProviderHttpError(providerName, status, message);
+    }
+    return err instanceof Error ? err : new Error(message);
+}
+
+function isTransportFailure(err: unknown): boolean {
+    if (err instanceof NonRetryableProviderError) return false;
+
+    const message = err instanceof Error ? err.message : String(err || '');
+    if (/API error: \d{3}/.test(message)) return false;
+    if (/resolver not found|no such resolver|failed to resolve/i.test(message)) return true;
+
+    const status = getCosmosErrorStatus(err);
+    if (status !== null && status < 100) return true;
+
+    return isLikelyCorsOrNetworkError(err);
+}
+
+async function runProviderTransports(transports: Array<() => Promise<any>>, providerName: string): Promise<any> {
+    let lastError: Error | null = null;
+
+    for (const transport of transports) {
+        try {
+            return await transport();
+        } catch (err) {
+            if (!isTransportFailure(err)) {
+                throw err;
+            }
+            lastError = err instanceof Error ? err : new Error(String(err || `${providerName} request failed`));
+        }
+    }
+
+    throw lastError || new Error(`${providerName} request failed`);
+}
+
+function orderProviderTransports(
+    viaCosmos: (() => Promise<any>) | null,
+    viaFetch: (target: string) => Promise<any>,
+    url: string,
+    preferCosmos: boolean
+): Array<() => Promise<any>> {
+    const transports: Array<() => Promise<any>> = [];
+    const direct = () => viaFetch(url);
+
+    if (preferCosmos && viaCosmos) {
+        transports.push(viaCosmos, direct);
+    } else {
+        transports.push(direct);
+        if (viaCosmos) transports.push(viaCosmos);
+    }
+
+    if (canUseSpicetifyCorsProxy(url)) {
+        transports.push(() => viaFetch(getSpicetifyCorsProxyUrl(url)));
+    }
+
+    return transports;
 }
 
 function normalizeProviderJsonPayload(data: unknown, providerName: string): any {
@@ -550,25 +634,35 @@ async function postJsonProvider(
     options: { preferCosmos?: boolean } = {}
 ): Promise<any> {
     const cosmos = getCosmosAsync();
+    const cosmosPost = cosmos?.post;
 
-    if (options.preferCosmos && cosmos?.post) {
-        return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
-    }
+    const viaCosmos = cosmosPost
+        ? async () => {
+            try {
+                return normalizeProviderJsonPayload(
+                    await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+                    providerName
+                );
+            } catch (err) {
+                throw normalizeCosmosError(err, providerName);
+            }
+        }
+        : null;
 
-    try {
-        const response = await fetchWithTimeout(url, {
+    const viaFetch = async (target: string) => {
+        const response = await fetchWithTimeout(target, {
             method: 'POST',
             headers,
             body: JSON.stringify(body)
         }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
 
-        return await readProviderJsonResponse(response, providerName);
-    } catch (err) {
-        if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-            return normalizeProviderJsonPayload(await withTimeout(cosmos.post(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName), providerName);
-        }
-        throw err;
-    }
+        return readProviderJsonResponse(response, providerName);
+    };
+
+    return runProviderTransports(
+        orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
+        providerName
+    );
 }
 
 function buildLibreTranslateForm(text: string | string[], targetLang: string): URLSearchParams {
@@ -608,30 +702,38 @@ async function postFormProvider(
     options: { preferCosmos?: boolean } = {}
 ): Promise<any> {
     const cosmos = getCosmosAsync();
+    const cosmosPost = cosmos?.post;
 
-    if (options.preferCosmos && cosmos?.post) {
-        return normalizeProviderJsonPayload(
-            await withTimeout(cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
-            providerName
-        );
-    }
+    const viaCosmos = cosmosPost
+        ? async () => {
+            try {
+                return normalizeProviderJsonPayload(
+                    await withTimeout(
+                        cosmosPost(url, formToJsonObject(params), { 'Content-Type': 'application/json' }),
+                        PROVIDER_REQUEST_TIMEOUT_MS,
+                        providerName
+                    ),
+                    providerName
+                );
+            } catch (err) {
+                throw normalizeCosmosError(err, providerName);
+            }
+        }
+        : null;
 
-    try {
-        const response = await fetchWithTimeout(url, {
+    const viaFetch = async (target: string) => {
+        const response = await fetchWithTimeout(target, {
             method: 'POST',
             body: params
         }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
 
-        return await readProviderJsonResponse(response, providerName);
-    } catch (err) {
-        if (cosmos?.post && isLikelyCorsOrNetworkError(err)) {
-            return normalizeProviderJsonPayload(
-                await withTimeout(cosmos.post(url, formToJsonObject(params), { 'Content-Type': 'application/json' }), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
-                providerName
-            );
-        }
-        throw err;
-    }
+        return readProviderJsonResponse(response, providerName);
+    };
+
+    return runProviderTransports(
+        orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
+        providerName
+    );
 }
 
 async function retryWithBackoff<T>(
@@ -1188,10 +1290,11 @@ function getGeminiGenerateContentUrl(model: string | undefined): string {
     return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(normalizedModel)}:generateContent`;
 }
 
-function appendGeminiApiKeyQuery(url: string, apiKey: string): string {
-    if (!apiKey) return url;
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}key=${encodeURIComponent(apiKey)}`;
+function getGeminiHeaders(apiKey: string): Record<string, string> {
+    return {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+    };
 }
 
 async function translateWithGemini(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
@@ -1202,7 +1305,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
     const langName = getTranslationLanguageName(targetLang);
 
     const data = await postJsonProvider(
-        appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+        getGeminiGenerateContentUrl(geminiModel),
         {
             contents: [
                 {
@@ -1218,9 +1321,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
                 maxOutputTokens: Math.max(text.length * 3, 2048)
             }
         },
-        {
-            'Content-Type': 'application/json'
-        },
+        getGeminiHeaders(geminiApiKey),
         'Gemini',
         { preferCosmos: true }
     );
@@ -2708,12 +2809,12 @@ async function requestModelCompletion(prompt: string, maxTokens: number): Promis
     if (preferredApi === 'gemini') {
         if (!geminiApiKey) throw createProviderConfigError('Gemini API key not configured. Set it in Settings.');
         const data = await postJsonProvider(
-            appendGeminiApiKeyQuery(getGeminiGenerateContentUrl(geminiModel), geminiApiKey),
+            getGeminiGenerateContentUrl(geminiModel),
             {
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: { temperature: 0, maxOutputTokens: maxTokens }
             },
-            { 'Content-Type': 'application/json' },
+            getGeminiHeaders(geminiApiKey),
             'Gemini breakdown',
             { preferCosmos: true }
         );

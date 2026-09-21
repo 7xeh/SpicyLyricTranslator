@@ -21,3 +21,16 @@ test('a translation keyed by API text is found for the rendered line', () => {
     const map = new Map([[normalizeLyricMatchKey(API_LINE), "I've been around my life"]]);
     assert.equal(lookupByContent(map, DOM_LINE), "I've been around my life");
 });
+
+test('direction marks stripped by Spicy Lyrics do not break matching', () => {
+    const apiLine = 'Tu me‏ manques‎';
+    const domLine = 'Tu me manques';
+    assert.equal(cleanLyricText(apiLine), domLine);
+    assert.equal(normalizeLyricMatchKey(apiLine), normalizeLyricMatchKey(domLine));
+});
+
+test('zero-width spaces removed by Spicy Lyrics still match the API copy', () => {
+    const apiLine = `Tout${ZWSP}le${ZWSP}monde`;
+    const domLine = 'Toutlemonde';
+    assert.equal(normalizeLyricMatchKey(apiLine), normalizeLyricMatchKey(domLine));
+});
