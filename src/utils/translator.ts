@@ -7,11 +7,13 @@ import {
     getTrackCacheStats,
     getAllCachedTracks,
     deleteTrackCache,
-    getCurrentTrackUri
+    getCurrentTrackUri,
+    getCurrentTrackMeta
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
 import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
 import { buildBreakdownPrompt, parseModelBreakdown, breakdownCacheKey, BreakdownToken } from './wordBreakdown';
+import { DEFAULT_MODELS, resolveModelId } from './modelCatalog';
 
 export interface TranslationResult {
     originalText: string;
@@ -34,15 +36,12 @@ export interface TranslationCache {
 export type ApiPreference = 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom';
 export type CustomApiFormat = 'generic' | 'libretranslate' | 'openai' | 'gemini' | 'deepl';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const DEFAULT_GROK_MODEL = 'grok-4.5';
-const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
+const DEFAULT_OPENAI_MODEL = DEFAULT_MODELS.openai;
+const DEFAULT_GEMINI_MODEL = DEFAULT_MODELS.gemini;
+const DEFAULT_GROK_MODEL = DEFAULT_MODELS.grok;
+const DEFAULT_ANTHROPIC_MODEL = DEFAULT_MODELS.anthropic;
 const DEFAULT_LIBRETRANSLATE_URL = 'https://libretranslate.com/translate';
 const DEFAULT_PARALLEL_CHUNKS = 4;
-
-const GROK_MODELS = ['grok-4.5', 'grok-4.3'] as const;
-const ANTHROPIC_MODELS = ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-4-8'] as const;
 
 let preferredApi: ApiPreference = 'google';
 let customApiUrl: string = '';
@@ -66,6 +65,7 @@ let maxParallelChunks: number = DEFAULT_PARALLEL_CHUNKS;
 const RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2000,
+    overloadDelayMs: 1000,
     maxRetries: 3,
     backoffMultiplier: 2
 };
@@ -90,6 +90,46 @@ function endMetricsSession(session: MetricsSession): void {
     if (activeMetricsSession === session) {
         activeMetricsSession = null;
     }
+}
+
+interface SongContext {
+    title: string;
+    artist?: string;
+}
+
+const SONG_CONTEXT_MAX_LENGTH = 120;
+
+let activeSongContext: SongContext | null = null;
+
+function cleanSongMetadata(value: string | undefined): string {
+    return (value || '')
+        .replace(/[\u0000-\u001F\u007F"]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, SONG_CONTEXT_MAX_LENGTH);
+}
+
+function resolveSongContext(trackUri: string | undefined, targetLang: string): SongContext | null {
+    const currentUri = getCurrentTrackUri();
+    const meta = !trackUri || trackUri === currentUri
+        ? getCurrentTrackMeta()
+        : getTrackCache(trackUri, targetLang) || {};
+    const title = cleanSongMetadata(meta.trackName);
+    if (!title) return null;
+    const artist = cleanSongMetadata(meta.artistName);
+    return artist ? { title, artist } : { title };
+}
+
+function buildSongContextNote(): string {
+    if (!activeSongContext) return '';
+    const song = activeSongContext.artist
+        ? `"${activeSongContext.title}" by ${activeSongContext.artist}`
+        : `"${activeSongContext.title}"`;
+    return ` The lyrics are from the song ${song}. Use this only as context, for example to recognize names, characters and references, and keep names as names. Do not translate or output the title or artist.`;
+}
+
+function buildLyricsTranslationInstruction(langName: string): string {
+    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.${buildSongContextNote()}`;
 }
 
 function recordApiUsage(usage: { input?: number; output?: number; total?: number } | null | undefined): void {
@@ -492,6 +532,12 @@ function isNonRetryableProviderError(err: unknown): boolean {
     return status !== 408 && status !== 429;
 }
 
+function isProviderOverloadError(err: unknown): boolean {
+    if (err instanceof NonRetryableProviderError) return false;
+    const message = err instanceof Error ? err.message : String(err || '');
+    return /API error: (5\d\d|429)\b/.test(message);
+}
+
 function createProviderHttpError(providerName: string, status: number, errorText: string): Error {
     const message = `${providerName} API error: ${status}${errorText ? ` ${sanitizeProviderErrorText(errorText).slice(0, 240)}` : ''}`;
     if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
@@ -598,6 +644,19 @@ function orderProviderTransports(
     return transports;
 }
 
+function cosmosCanCarryHeaders(headers: Record<string, string>): boolean {
+    return Object.keys(headers).every(key => key.toLowerCase() === 'content-type');
+}
+
+function rejectCosmosErrorPayload(data: unknown, providerName: string): unknown {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+    const payload = data as Record<string, unknown>;
+    if (typeof payload.code === 'number' && 'error' in payload && payload.message === 'Failed to fetch') {
+        throw createProviderHttpError(providerName, payload.code, String(payload.error || ''));
+    }
+    return data;
+}
+
 function normalizeProviderJsonPayload(data: unknown, providerName: string): any {
     if (typeof data !== 'string') {
         return data;
@@ -634,13 +693,16 @@ async function postJsonProvider(
     options: { preferCosmos?: boolean } = {}
 ): Promise<any> {
     const cosmos = getCosmosAsync();
-    const cosmosPost = cosmos?.post;
+    const cosmosPost = cosmosCanCarryHeaders(headers) ? cosmos?.post : undefined;
 
     const viaCosmos = cosmosPost
         ? async () => {
             try {
                 return normalizeProviderJsonPayload(
-                    await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+                    rejectCosmosErrorPayload(
+                        await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+                        providerName
+                    ),
                     providerName
                 );
             } catch (err) {
@@ -708,9 +770,12 @@ async function postFormProvider(
         ? async () => {
             try {
                 return normalizeProviderJsonPayload(
-                    await withTimeout(
-                        cosmosPost(url, formToJsonObject(params), { 'Content-Type': 'application/json' }),
-                        PROVIDER_REQUEST_TIMEOUT_MS,
+                    rejectCosmosErrorPayload(
+                        await withTimeout(
+                            cosmosPost(url, formToJsonObject(params), { 'Content-Type': 'application/json' }),
+                            PROVIDER_REQUEST_TIMEOUT_MS,
+                            providerName
+                        ),
                         providerName
                     ),
                     providerName
@@ -755,8 +820,9 @@ async function retryWithBackoff<T>(
             }
 
             if (attempt < maxRetries) {
+                const attemptBaseDelay = isProviderOverloadError(error) ? Math.max(baseDelay, RATE_LIMIT.overloadDelayMs) : baseDelay;
                 const delay = Math.min(
-                    baseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
+                    attemptBaseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
                     RATE_LIMIT.maxDelayMs
                 );
                 await new Promise(resolve => setTimeout(resolve, delay));
@@ -1205,32 +1271,29 @@ async function translateWithOpenAI(text: string, targetLang: string): Promise<{ 
 }
 
 function normalizeOpenAIModelName(model: string | undefined): string {
-    const trimmed = (model || '').trim();
-    if (!trimmed) return DEFAULT_OPENAI_MODEL;
-    if (trimmed === 'gpt-5.5' || trimmed === 'gpt-4o-mini') return trimmed;
-    return DEFAULT_OPENAI_MODEL;
+    return resolveModelId('openai', model);
 }
 
 function normalizeGrokModelName(model: string | undefined): string {
-    const trimmed = (model || '').trim();
-    if (!trimmed) return DEFAULT_GROK_MODEL;
-    return (GROK_MODELS as readonly string[]).includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL;
+    return resolveModelId('grok', model);
 }
 
 function normalizeAnthropicModelName(model: string | undefined): string {
-    const trimmed = (model || '').trim();
-    if (!trimmed) return DEFAULT_ANTHROPIC_MODEL;
-    return (ANTHROPIC_MODELS as readonly string[]).includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL;
+    return resolveModelId('anthropic', model);
 }
 
-function isOpenAISpeedModeModel(model: string): boolean {
-    return model === 'gpt-5.5';
+function isOpenAIReasoningModel(model: string): boolean {
+    return /^(o\d|gpt-5|gpt-6)/.test(model) && !model.includes('-chat');
+}
+
+function getOpenAIReasoningEffort(model: string): string {
+    return model === 'gpt-5.5' ? 'none' : 'low';
 }
 
 function buildOpenAIChatBody(text: string, langName: string): Record<string, unknown> {
     const model = normalizeOpenAIModelName(openaiModel);
-    const useSpeedMode = isOpenAISpeedModeModel(model);
-    const instruction = `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+    const useSpeedMode = isOpenAIReasoningModel(model);
+    const instruction = buildLyricsTranslationInstruction(langName);
     const outputTokenBudget = Math.max(text.length * 4, useSpeedMode ? 8000 : 2048);
 
     const body: Record<string, unknown> = {
@@ -1249,7 +1312,7 @@ function buildOpenAIChatBody(text: string, langName: string): Record<string, unk
     };
 
     if (useSpeedMode) {
-        body.reasoning_effort = 'none';
+        body.reasoning_effort = getOpenAIReasoningEffort(model);
     } else {
         body.temperature = 0.3;
     }
@@ -1258,15 +1321,7 @@ function buildOpenAIChatBody(text: string, langName: string): Record<string, unk
 }
 
 function normalizeGeminiModelName(model: string | undefined): string {
-    const trimmed = (model || '').trim().replace(/^models\//, '');
-    if (!trimmed) return DEFAULT_GEMINI_MODEL;
-    if (trimmed === 'gemini-3.1-flash-lite' || trimmed === 'gemini-3.5-flash' || trimmed === 'gemini-3.1-pro-preview') {
-        return trimmed;
-    }
-    if (trimmed.includes('flash-lite')) return 'gemini-3.1-flash-lite';
-    if (trimmed.includes('pro')) return 'gemini-3.1-pro-preview';
-    if (trimmed.includes('flash')) return 'gemini-3.5-flash';
-    return DEFAULT_GEMINI_MODEL;
+    return resolveModelId('gemini', model);
 }
 
 function normalizeGeminiTemperature(value: string | number | undefined): number {
@@ -1311,7 +1366,7 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
                 {
                     parts: [
                         {
-                            text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.\n\n${text}`
+                            text: `${buildLyricsTranslationInstruction(langName)}\n\n${text}`
                         }
                     ]
                 }
@@ -1336,10 +1391,6 @@ async function translateWithGemini(text: string, targetLang: string): Promise<{ 
     }
 
     throw new Error('Invalid response from Gemini API');
-}
-
-function buildLyricsTranslationInstruction(langName: string): string {
-    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
 }
 
 async function translateWithGrok(text: string, targetLang: string): Promise<{ translation: string; detectedLang?: string }> {
@@ -1520,7 +1571,7 @@ function buildCustomSingleBody(text: string, targetLang: string, format: CustomA
             messages: [
                 {
                     role: 'system',
-                    content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
+                    content: buildLyricsTranslationInstruction(langName)
                 },
                 {
                     role: 'user',
@@ -1538,7 +1589,7 @@ function buildCustomSingleBody(text: string, targetLang: string, format: CustomA
                 {
                     parts: [
                         {
-                            text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.\n\n${text}`
+                            text: `${buildLyricsTranslationInstruction(langName)}\n\n${text}`
                         }
                     ]
                 }
@@ -2246,6 +2297,9 @@ export async function translateText(text: string, targetLang: string, sourceLang
             throw primaryError;
         }
         if (hasInternalBatchMarkers(text)) {
+            if (isProviderOverloadError(primaryError)) {
+                throw primaryError;
+            }
             const message = primaryError instanceof Error ? primaryError.message : String(primaryError || 'Provider failed');
             throw new NonRetryableProviderError(message);
         }
@@ -2311,9 +2365,12 @@ export async function translateLyrics(
 ): Promise<TranslationResult[]> {
     const metricsSession = beginMetricsSession();
     const metricsStartedAt = Date.now();
+    const previousSongContext = activeSongContext;
+    activeSongContext = resolveSongContext(trackUri, targetLang);
     try {
         return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt, skipTrackCache);
     } finally {
+        activeSongContext = previousSongContext;
         endMetricsSession(metricsSession);
     }
 }

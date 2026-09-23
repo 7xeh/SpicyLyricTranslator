@@ -2,36 +2,9 @@ import { storage } from './storage';
 import { OverlayMode } from './translationOverlay';
 import { resolveTargetLanguage } from './translator';
 import type { ApiPreference, CustomApiFormat } from './translator';
+import { resolveModelId } from './modelCatalog';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const DEFAULT_GROK_MODEL = 'grok-4.5';
-const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
 const DEFAULT_LIBRETRANSLATE_URL = 'https://libretranslate.com/translate';
-
-function normalizeStoredOpenAIModel(model: string | null): string {
-    const value = (model || '').trim();
-    return value === 'gpt-5.5' || value === 'gpt-4o-mini' ? value : DEFAULT_OPENAI_MODEL;
-}
-
-function normalizeStoredGeminiModel(model: string | null): string {
-    const value = (model || '').trim().replace(/^models\//, '');
-    if (value === 'gemini-3.1-flash-lite' || value === 'gemini-3.5-flash' || value === 'gemini-3.1-pro-preview') return value;
-    if (value.includes('flash-lite')) return 'gemini-3.1-flash-lite';
-    if (value.includes('pro')) return 'gemini-3.1-pro-preview';
-    if (value.includes('flash')) return 'gemini-3.5-flash';
-    return DEFAULT_GEMINI_MODEL;
-}
-
-function normalizeStoredGrokModel(model: string | null): string {
-    const value = (model || '').trim();
-    return value === 'grok-4.5' || value === 'grok-4.3' ? value : DEFAULT_GROK_MODEL;
-}
-
-function normalizeStoredAnthropicModel(model: string | null): string {
-    const value = (model || '').trim();
-    return value === 'claude-haiku-4-5' || value === 'claude-sonnet-5' || value === 'claude-opus-4-8' ? value : DEFAULT_ANTHROPIC_MODEL;
-}
 
 function resolveStoredTargetLanguage(): string {
     return resolveTargetLanguage(
@@ -103,14 +76,14 @@ export const state: ExtensionState = {
     libreTranslateApiKey: storage.getSecret('libretranslate-api-key') || '',
     deeplApiKey: storage.getSecret('deepl-api-key') || '',
     openaiApiKey: storage.getSecret('openai-api-key') || '',
-    openaiModel: normalizeStoredOpenAIModel(storage.get('openai-model')),
+    openaiModel: resolveModelId('openai', storage.get('openai-model')),
     geminiApiKey: storage.getSecret('gemini-api-key') || '',
-    geminiModel: normalizeStoredGeminiModel(storage.get('gemini-model')),
+    geminiModel: resolveModelId('gemini', storage.get('gemini-model')),
     geminiTemperature: storage.get('gemini-temperature') || '0.3',
     grokApiKey: storage.getSecret('grok-api-key') || '',
-    grokModel: normalizeStoredGrokModel(storage.get('grok-model')),
+    grokModel: resolveModelId('grok', storage.get('grok-model')),
     anthropicApiKey: storage.getSecret('anthropic-api-key') || '',
-    anthropicModel: normalizeStoredAnthropicModel(storage.get('anthropic-model')),
+    anthropicModel: resolveModelId('anthropic', storage.get('anthropic-model')),
     maxParallelChunks: storage.get('max-parallel-chunks') || '4',
     lastTranslatedSongUri: null,
     translatedLyrics: new Map(),

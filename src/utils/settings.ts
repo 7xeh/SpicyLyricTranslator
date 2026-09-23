@@ -21,6 +21,7 @@ import {
     isSettingFieldVisible,
     matchesSettingQuery,
     readSettingValue,
+    refreshProviderModelLists,
     writeSettingValue
 } from './settingsModel';
 
@@ -130,7 +131,7 @@ function createNativeDropdown(id: string, label: string, options: { value: strin
         <div class="x-settings-secondColumn">
             <span>
                 <select class="main-dropDown-dropDown" id="${id}">
-                    ${options.map(opt => `<option value="${opt.value}" ${opt.value === currentValue ? 'selected' : ''}>${opt.text}</option>`).join('')}
+                    ${options.map(opt => `<option value="${escapeHtml(opt.value)}" ${opt.value === currentValue ? 'selected' : ''}>${escapeHtml(opt.text)}</option>`).join('')}
                 </select>
             </span>
         </div>
@@ -215,11 +216,37 @@ function updateSettingFieldVisibility(root: ParentNode, visibleDisplay: string):
     });
 }
 
+function rebuildModelSelects(fieldIds: string[]): void {
+    for (const fieldId of fieldIds) {
+        const field = getSettingField(fieldId);
+        if (!field) continue;
+        const value = String(readSettingValue(field));
+        for (const elementId of [getNativeSettingInputId(field), getModalSettingInputId(field)]) {
+            const select = document.getElementById(elementId);
+            if (!(select instanceof HTMLSelectElement)) continue;
+            select.replaceChildren(...(field.options || []).map(option => {
+                const element = document.createElement('option');
+                element.value = option.value;
+                element.textContent = option.text;
+                return element;
+            }));
+            select.value = value;
+        }
+    }
+}
+
+function syncModelLists(options: { fieldId?: string; force?: boolean } = {}): void {
+    refreshProviderModelLists(options).then(rebuildModelSelects).catch(() => undefined);
+}
+
 function handleSettingChange(field: SettingsField, value: string | boolean, root?: ParentNode, visibleDisplay: string = ''): void {
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
     if ((effects.includes('providerVisibility') || effects.includes('fieldVisibility')) && root) {
         updateSettingFieldVisibility(root, visibleDisplay);
+    }
+    if (field.id.endsWith('-api-key')) {
+        syncModelLists({ fieldId: field.id, force: true });
     }
 }
 
@@ -277,6 +304,7 @@ function createNativeSettingsSection(): HTMLElement {
     const sectionContent = section.querySelector('.x-settings-section.fNaaQ0Cp8Yzy19j8') as HTMLElement;
 
     renderNativeSettingsFields(sectionContent);
+    syncModelLists();
 
     sectionContent.appendChild(createNativeButton(
         'slt-settings.view-cache',
@@ -603,6 +631,7 @@ function buildModalSettingsPanel(): HTMLElement {
     searchInput.addEventListener('input', () => applyModalSettingsFilter(panel, searchInput.value));
 
     applyModalSettingsFilter(panel, '');
+    syncModelLists();
     return panel;
 }
 

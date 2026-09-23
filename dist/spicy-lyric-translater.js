@@ -300,10 +300,10 @@ var SpicyLyricTranslater = (() => {
       targetLang: fullKey.substring(lastColonIdx + 1)
     };
   }
-  function parseCacheKey(cacheKey) {
-    if (!cacheKey.startsWith(CACHE_KEY_PREFIX))
+  function parseCacheKey(cacheKey2) {
+    if (!cacheKey2.startsWith(CACHE_KEY_PREFIX))
       return null;
-    return parseFullKey(cacheKey.substring(CACHE_KEY_PREFIX.length));
+    return parseFullKey(cacheKey2.substring(CACHE_KEY_PREFIX.length));
   }
   function removeFullKey(storage2, fullKey) {
     const parsed = parseFullKey(fullKey);
@@ -355,27 +355,27 @@ var SpicyLyricTranslater = (() => {
     const seen = /* @__PURE__ */ new Set();
     const entries = [];
     const index = getCacheIndex();
-    const addEntry = (fullKey, cacheKey) => {
+    const addEntry = (fullKey, cacheKey2) => {
       if (seen.has(fullKey))
         return;
       try {
-        const entryStr = storage2.getItem(cacheKey);
+        const entryStr = storage2.getItem(cacheKey2);
         if (!entryStr)
           return;
         const entry = parseTrackCacheEntry(entryStr);
         if (!entry || now - entry.timestamp > CACHE_EXPIRY_MS) {
-          storage2.removeItem(cacheKey);
+          storage2.removeItem(cacheKey2);
           return;
         }
         const parsed = parseFullKey(fullKey);
         if (!parsed || isSameLanguageNoopCache(entry, parsed.targetLang)) {
-          storage2.removeItem(cacheKey);
+          storage2.removeItem(cacheKey2);
           return;
         }
         seen.add(fullKey);
-        entries.push({ fullKey, cacheKey, timestamp: entry.timestamp });
+        entries.push({ fullKey, cacheKey: cacheKey2, timestamp: entry.timestamp });
       } catch (e) {
-        storage2.removeItem(cacheKey);
+        storage2.removeItem(cacheKey2);
       }
     };
     index.trackUris.forEach((fullKey) => {
@@ -384,13 +384,13 @@ var SpicyLyricTranslater = (() => {
         return;
       addEntry(fullKey, getCacheKey(parsed.trackUri, parsed.targetLang));
     });
-    collectNativeCacheKeys(storage2).forEach((cacheKey) => {
-      const parsed = parseCacheKey(cacheKey);
+    collectNativeCacheKeys(storage2).forEach((cacheKey2) => {
+      const parsed = parseCacheKey(cacheKey2);
       if (!parsed) {
-        storage2.removeItem(cacheKey);
+        storage2.removeItem(cacheKey2);
         return;
       }
-      addEntry(`${parsed.trackUri}:${parsed.targetLang}`, cacheKey);
+      addEntry(`${parsed.trackUri}:${parsed.targetLang}`, cacheKey2);
     });
     entries.sort((a, b) => a.timestamp - b.timestamp);
     const removeCount = Math.max(0, entries.length - maxTracks);
@@ -408,24 +408,24 @@ var SpicyLyricTranslater = (() => {
     const storage2 = getStorage();
     if (!storage2 || !trackUri)
       return null;
-    const cacheKey = getCacheKey(trackUri, targetLang);
+    const cacheKey2 = getCacheKey(trackUri, targetLang);
     try {
-      const entryStr = storage2.getItem(cacheKey);
+      const entryStr = storage2.getItem(cacheKey2);
       if (!entryStr)
         return null;
       const entry = parseTrackCacheEntry(entryStr);
       if (!entry) {
-        storage2.removeItem(cacheKey);
+        storage2.removeItem(cacheKey2);
         pruneTrackCache();
         return null;
       }
       if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
-        storage2.removeItem(cacheKey);
+        storage2.removeItem(cacheKey2);
         pruneTrackCache();
         return null;
       }
       if (isSameLanguageNoopCache(entry, targetLang)) {
-        storage2.removeItem(cacheKey);
+        storage2.removeItem(cacheKey2);
         pruneTrackCache();
         return null;
       }
@@ -440,7 +440,7 @@ var SpicyLyricTranslater = (() => {
     const storage2 = getStorage();
     if (!storage2 || !trackUri || !lines.length)
       return;
-    const cacheKey = getCacheKey(trackUri, targetLang);
+    const cacheKey2 = getCacheKey(trackUri, targetLang);
     const meta = trackName ? { trackName, artistName } : getCurrentTrackMeta();
     const entry = {
       lang: sourceLang,
@@ -455,7 +455,7 @@ var SpicyLyricTranslater = (() => {
       metrics: metrics && (metrics.model || metrics.durationMs || metrics.totalTokens || metrics.apiCalls) ? metrics : void 0
     };
     try {
-      storage2.setItem(cacheKey, JSON.stringify(entry));
+      storage2.setItem(cacheKey2, JSON.stringify(entry));
       const index = getCacheIndex();
       const fullKey = `${trackUri}:${targetLang}`;
       index.trackUris = index.trackUris.filter((k) => k !== fullKey);
@@ -467,7 +467,7 @@ var SpicyLyricTranslater = (() => {
       if (e instanceof Error && e.name === "QuotaExceededError") {
         pruneOldestEntries(10);
         try {
-          storage2.setItem(cacheKey, JSON.stringify(entry));
+          storage2.setItem(cacheKey2, JSON.stringify(entry));
           const index = getCacheIndex();
           const fullKey = `${trackUri}:${targetLang}`;
           index.trackUris = index.trackUris.filter((k) => k !== fullKey);
@@ -600,9 +600,9 @@ var SpicyLyricTranslater = (() => {
       const lastColonIdx = fullKey.lastIndexOf(":");
       const uri = fullKey.substring(0, lastColonIdx);
       const lang = fullKey.substring(lastColonIdx + 1);
-      const cacheKey = getCacheKey(uri, lang);
+      const cacheKey2 = getCacheKey(uri, lang);
       try {
-        const entryStr = storage2.getItem(cacheKey);
+        const entryStr = storage2.getItem(cacheKey2);
         if (entryStr) {
           trackCount++;
           sizeBytes += entryStr.length * 2;
@@ -683,9 +683,9 @@ var SpicyLyricTranslater = (() => {
       const lastColonIdx = fullKey.lastIndexOf(":");
       const uri = fullKey.substring(0, lastColonIdx);
       const lang = fullKey.substring(lastColonIdx + 1);
-      const cacheKey = getCacheKey(uri, lang);
+      const cacheKey2 = getCacheKey(uri, lang);
       try {
-        const entryStr = storage2.getItem(cacheKey);
+        const entryStr = storage2.getItem(cacheKey2);
         if (entryStr) {
           const entry = parseTrackCacheEntry(entryStr);
           if (!entry)
@@ -2281,15 +2281,222 @@ var SpicyLyricTranslater = (() => {
     return `${targetLang}:${(sourceText || "").replace(/\s+/g, " ").trim().toLowerCase()}`;
   }
 
+  // src/utils/modelCatalog.ts
+  var MODEL_PROVIDERS = ["openai", "gemini", "grok", "anthropic"];
+  var DEFAULT_MODELS = {
+    openai: "gpt-4o-mini",
+    gemini: "gemini-3.1-flash-lite",
+    grok: "grok-4.5",
+    anthropic: "claude-haiku-4-5"
+  };
+  var FALLBACK_MODEL_OPTIONS = {
+    openai: [
+      { value: "gpt-5.5", text: "GPT-5.5 Speed" },
+      { value: "gpt-4o-mini", text: "GPT-4o mini" }
+    ],
+    gemini: [
+      { value: "gemini-3.1-flash-lite", text: "3.1 Flash-Lite" },
+      { value: "gemini-3.5-flash", text: "3.5 Flash" },
+      { value: "gemini-3.1-pro-preview", text: "3.1 Pro" }
+    ],
+    grok: [
+      { value: "grok-4.5", text: "Grok 4.5" },
+      { value: "grok-4.3", text: "Grok 4.3" }
+    ],
+    anthropic: [
+      { value: "claude-haiku-4-5", text: "Haiku 4.5" },
+      { value: "claude-sonnet-5", text: "Sonnet 5" },
+      { value: "claude-opus-4-8", text: "Opus 4.8" }
+    ]
+  };
+  var CATALOG_TTL_MS = 24 * 60 * 60 * 1e3;
+  var CATALOG_REQUEST_TIMEOUT_MS = 1e4;
+  var CORS_PROXY_BASE = "https://cors-proxy.spicetify.app/";
+  var MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
+  var RETIRED_OPENAI_MODELS = /* @__PURE__ */ new Set(["gpt-4o", "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]);
+  var RETIRED_GEMINI_MODELS = /* @__PURE__ */ new Set(["gemini-3.1-flash-lite-preview", "gemini-3-pro-preview"]);
+  var GEMINI_EXCLUDED = /(image|tts|live|transcribe|embedding|audio|robotics|computer-use|aqa)/;
+  var OPENAI_INCLUDED = /^(gpt-|o\d|chatgpt-)/;
+  var OPENAI_EXCLUDED = /(audio|realtime|tts|transcribe|image|search|embedding|instruct|codex|cyber|computer-use|moderation|daybreak|rosalind|-\d{4}-\d{2}-\d{2}$)/;
+  var GROK_EXCLUDED = /(image|imagine|video|build|multi-agent)/;
+  var ModelCatalogHttpError = class extends Error {
+    constructor(status) {
+      super(`Model list request failed: ${status}`);
+      this.status = status;
+      this.name = "ModelCatalogHttpError";
+    }
+  };
+  function mapRetiredGeminiModel(id) {
+    if (!RETIRED_GEMINI_MODELS.has(id) && !/^gemini-[12][.-]/.test(id))
+      return null;
+    if (id.includes("flash-lite"))
+      return "gemini-3.1-flash-lite";
+    if (id.includes("pro"))
+      return "gemini-3.1-pro-preview";
+    if (id.includes("flash"))
+      return "gemini-3.5-flash";
+    return DEFAULT_MODELS.gemini;
+  }
+  function resolveModelId(provider, model) {
+    const trimmed = (model || "").trim().replace(/^models\//, "");
+    if (!MODEL_ID_PATTERN.test(trimmed))
+      return DEFAULT_MODELS[provider];
+    if (provider === "openai" && RETIRED_OPENAI_MODELS.has(trimmed))
+      return DEFAULT_MODELS.openai;
+    if (provider === "gemini")
+      return mapRetiredGeminiModel(trimmed) ?? trimmed;
+    return trimmed;
+  }
+  function hashApiKey(apiKey) {
+    let hash = 2166136261;
+    for (let i = 0; i < apiKey.length; i++) {
+      hash ^= apiKey.charCodeAt(i);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  }
+  function cacheKey(provider) {
+    return `model-catalog-${provider}`;
+  }
+  function readCache(provider) {
+    try {
+      const parsed = JSON.parse(storage.get(cacheKey(provider)) || "null");
+      if (!parsed || !Array.isArray(parsed.models) || parsed.models.length === 0)
+        return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+  function fallbackLabel(provider, id) {
+    return FALLBACK_MODEL_OPTIONS[provider].find((option) => option.value === id)?.text || id;
+  }
+  function getModelOptions(provider, selected) {
+    const options = [...readCache(provider)?.models ?? FALLBACK_MODEL_OPTIONS[provider]];
+    const required = [selected ? resolveModelId(provider, selected) : "", DEFAULT_MODELS[provider]];
+    for (const id of required) {
+      if (id && !options.some((option) => option.value === id)) {
+        options.push({ value: id, text: fallbackLabel(provider, id) });
+      }
+    }
+    return options;
+  }
+  function isModelCatalogFresh(provider, apiKey, now = Date.now()) {
+    const cached = readCache(provider);
+    return Boolean(cached && cached.keyHash === hashApiKey(apiKey.trim()) && now - cached.fetchedAt < CATALOG_TTL_MS);
+  }
+  async function getJson(url, headers) {
+    const attempt = async (target) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CATALOG_REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(target, { method: "GET", headers, signal: controller.signal });
+        if (!response.ok)
+          throw new ModelCatalogHttpError(response.status);
+        return await response.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    try {
+      return await attempt(url);
+    } catch (err) {
+      if (err instanceof ModelCatalogHttpError)
+        throw err;
+      return attempt(`${CORS_PROXY_BASE}${url}`);
+    }
+  }
+  function newestFirst(options) {
+    return options.sort((a, b) => b.value.localeCompare(a.value, void 0, { numeric: true }));
+  }
+  function dedupe(options) {
+    const seen = /* @__PURE__ */ new Set();
+    return options.filter((option) => {
+      if (seen.has(option.value))
+        return false;
+      seen.add(option.value);
+      return true;
+    });
+  }
+  function parseGeminiModels(data) {
+    const models = Array.isArray(data?.models) ? data.models : [];
+    return newestFirst(dedupe(models.filter((model) => Array.isArray(model?.supportedGenerationMethods) && model.supportedGenerationMethods.includes("generateContent")).map((model) => {
+      const value = String(model.name || "").replace(/^models\//, "");
+      return { value, text: String(model.displayName || value) };
+    }).filter((option) => option.value.startsWith("gemini-") && !GEMINI_EXCLUDED.test(option.value))));
+  }
+  function parseOpenAIModels(data) {
+    const models = Array.isArray(data?.data) ? data.data : [];
+    return newestFirst(dedupe(models.map((model) => String(model?.id || "")).filter((id) => OPENAI_INCLUDED.test(id) && !OPENAI_EXCLUDED.test(id)).map((id) => ({ value: id, text: id }))));
+  }
+  function parseAnthropicModels(data) {
+    const models = Array.isArray(data?.data) ? data.data : [];
+    return dedupe(models.map((model) => ({ value: String(model?.id || ""), text: String(model?.display_name || model?.id || "") })).filter((option) => option.value.startsWith("claude-")));
+  }
+  function parseGrokModels(data) {
+    const models = Array.isArray(data?.data) ? data.data : [];
+    return newestFirst(dedupe(models.map((model) => String(model?.id || "")).filter((id) => id.startsWith("grok-") && !GROK_EXCLUDED.test(id)).map((id) => ({ value: id, text: id }))));
+  }
+  async function fetchModelList(provider, apiKey) {
+    switch (provider) {
+      case "gemini":
+        return parseGeminiModels(await getJson(
+          "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+          { "x-goog-api-key": apiKey }
+        ));
+      case "openai":
+        return parseOpenAIModels(await getJson(
+          "https://api.openai.com/v1/models",
+          { "Authorization": `Bearer ${apiKey}` }
+        ));
+      case "anthropic":
+        return parseAnthropicModels(await getJson(
+          "https://api.anthropic.com/v1/models?limit=100",
+          {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true"
+          }
+        ));
+      case "grok":
+        return parseGrokModels(await getJson(
+          "https://api.x.ai/v1/models",
+          { "Authorization": `Bearer ${apiKey}` }
+        ));
+    }
+  }
+  var inflight = /* @__PURE__ */ new Map();
+  function refreshModelCatalog(provider, apiKey, options = {}) {
+    const key = (apiKey || "").trim();
+    if (!key)
+      return Promise.resolve(null);
+    if (!options.force && isModelCatalogFresh(provider, key))
+      return Promise.resolve(null);
+    const pending = inflight.get(provider);
+    if (pending)
+      return pending;
+    const request = fetchModelList(provider, key).then((models) => {
+      if (models.length === 0)
+        return null;
+      storage.set(cacheKey(provider), JSON.stringify({ keyHash: hashApiKey(key), fetchedAt: Date.now(), models }));
+      return models;
+    }).catch((err) => {
+      warn(`Could not refresh ${provider} model list:`, err);
+      return null;
+    }).finally(() => {
+      inflight.delete(provider);
+    });
+    inflight.set(provider, request);
+    return request;
+  }
+
   // src/utils/translator.ts
-  var DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
-  var DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
-  var DEFAULT_GROK_MODEL = "grok-4.5";
-  var DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+  var DEFAULT_OPENAI_MODEL = DEFAULT_MODELS.openai;
+  var DEFAULT_GEMINI_MODEL = DEFAULT_MODELS.gemini;
+  var DEFAULT_GROK_MODEL = DEFAULT_MODELS.grok;
+  var DEFAULT_ANTHROPIC_MODEL = DEFAULT_MODELS.anthropic;
   var DEFAULT_LIBRETRANSLATE_URL = "https://libretranslate.com/translate";
   var DEFAULT_PARALLEL_CHUNKS = 4;
-  var GROK_MODELS = ["grok-4.5", "grok-4.3"];
-  var ANTHROPIC_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"];
   var preferredApi = "google";
   var customApiUrl = "";
   var customApiKey = "";
@@ -2311,6 +2518,7 @@ var SpicyLyricTranslater = (() => {
   var RATE_LIMIT = {
     minDelayMs: 100,
     maxDelayMs: 2e3,
+    overloadDelayMs: 1e3,
     maxRetries: 3,
     backoffMultiplier: 2
   };
@@ -2324,6 +2532,29 @@ var SpicyLyricTranslater = (() => {
     if (activeMetricsSession === session) {
       activeMetricsSession = null;
     }
+  }
+  var SONG_CONTEXT_MAX_LENGTH = 120;
+  var activeSongContext = null;
+  function cleanSongMetadata(value) {
+    return (value || "").replace(/[\u0000-\u001F\u007F"]+/g, " ").replace(/\s+/g, " ").trim().slice(0, SONG_CONTEXT_MAX_LENGTH);
+  }
+  function resolveSongContext(trackUri, targetLang) {
+    const currentUri = getCurrentTrackUri();
+    const meta = !trackUri || trackUri === currentUri ? getCurrentTrackMeta() : getTrackCache(trackUri, targetLang) || {};
+    const title = cleanSongMetadata(meta.trackName);
+    if (!title)
+      return null;
+    const artist = cleanSongMetadata(meta.artistName);
+    return artist ? { title, artist } : { title };
+  }
+  function buildSongContextNote() {
+    if (!activeSongContext)
+      return "";
+    const song = activeSongContext.artist ? `"${activeSongContext.title}" by ${activeSongContext.artist}` : `"${activeSongContext.title}"`;
+    return ` The lyrics are from the song ${song}. Use this only as context, for example to recognize names, characters and references, and keep names as names. Do not translate or output the title or artist.`;
+  }
+  function buildLyricsTranslationInstruction(langName) {
+    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.${buildSongContextNote()}`;
   }
   function recordApiUsage(usage) {
     if (!activeMetricsSession)
@@ -2643,6 +2874,12 @@ var SpicyLyricTranslater = (() => {
     const status = Number(statusMatch[1]);
     return status !== 408 && status !== 429;
   }
+  function isProviderOverloadError(err) {
+    if (err instanceof NonRetryableProviderError)
+      return false;
+    const message = err instanceof Error ? err.message : String(err || "");
+    return /API error: (5\d\d|429)\b/.test(message);
+  }
   function createProviderHttpError(providerName, status, errorText) {
     const message = `${providerName} API error: ${status}${errorText ? ` ${sanitizeProviderErrorText(errorText).slice(0, 240)}` : ""}`;
     if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
@@ -2730,6 +2967,18 @@ var SpicyLyricTranslater = (() => {
     }
     return transports;
   }
+  function cosmosCanCarryHeaders(headers) {
+    return Object.keys(headers).every((key) => key.toLowerCase() === "content-type");
+  }
+  function rejectCosmosErrorPayload(data, providerName) {
+    if (!data || typeof data !== "object" || Array.isArray(data))
+      return data;
+    const payload = data;
+    if (typeof payload.code === "number" && "error" in payload && payload.message === "Failed to fetch") {
+      throw createProviderHttpError(providerName, payload.code, String(payload.error || ""));
+    }
+    return data;
+  }
   function normalizeProviderJsonPayload(data, providerName) {
     if (typeof data !== "string") {
       return data;
@@ -2756,11 +3005,14 @@ var SpicyLyricTranslater = (() => {
   }
   async function postJsonProvider(url, body, headers, providerName, options = {}) {
     const cosmos = getCosmosAsync();
-    const cosmosPost = cosmos?.post;
+    const cosmosPost = cosmosCanCarryHeaders(headers) ? cosmos?.post : void 0;
     const viaCosmos = cosmosPost ? async () => {
       try {
         return normalizeProviderJsonPayload(
-          await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+          rejectCosmosErrorPayload(
+            await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
+            providerName
+          ),
           providerName
         );
       } catch (err) {
@@ -2812,9 +3064,12 @@ var SpicyLyricTranslater = (() => {
     const viaCosmos = cosmosPost ? async () => {
       try {
         return normalizeProviderJsonPayload(
-          await withTimeout(
-            cosmosPost(url, formToJsonObject(params), { "Content-Type": "application/json" }),
-            PROVIDER_REQUEST_TIMEOUT_MS,
+          rejectCosmosErrorPayload(
+            await withTimeout(
+              cosmosPost(url, formToJsonObject(params), { "Content-Type": "application/json" }),
+              PROVIDER_REQUEST_TIMEOUT_MS,
+              providerName
+            ),
             providerName
           ),
           providerName
@@ -2847,8 +3102,9 @@ var SpicyLyricTranslater = (() => {
           throw error2;
         }
         if (attempt < maxRetries) {
+          const attemptBaseDelay = isProviderOverloadError(error2) ? Math.max(baseDelay, RATE_LIMIT.overloadDelayMs) : baseDelay;
           const delay = Math.min(
-            baseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
+            attemptBaseDelay * Math.pow(RATE_LIMIT.backoffMultiplier, attempt),
             RATE_LIMIT.maxDelayMs
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
@@ -3250,32 +3506,24 @@ var SpicyLyricTranslater = (() => {
     throw new Error("Invalid response from OpenAI API");
   }
   function normalizeOpenAIModelName(model) {
-    const trimmed = (model || "").trim();
-    if (!trimmed)
-      return DEFAULT_OPENAI_MODEL;
-    if (trimmed === "gpt-5.5" || trimmed === "gpt-4o-mini")
-      return trimmed;
-    return DEFAULT_OPENAI_MODEL;
+    return resolveModelId("openai", model);
   }
   function normalizeGrokModelName(model) {
-    const trimmed = (model || "").trim();
-    if (!trimmed)
-      return DEFAULT_GROK_MODEL;
-    return GROK_MODELS.includes(trimmed) ? trimmed : DEFAULT_GROK_MODEL;
+    return resolveModelId("grok", model);
   }
   function normalizeAnthropicModelName(model) {
-    const trimmed = (model || "").trim();
-    if (!trimmed)
-      return DEFAULT_ANTHROPIC_MODEL;
-    return ANTHROPIC_MODELS.includes(trimmed) ? trimmed : DEFAULT_ANTHROPIC_MODEL;
+    return resolveModelId("anthropic", model);
   }
-  function isOpenAISpeedModeModel(model) {
-    return model === "gpt-5.5";
+  function isOpenAIReasoningModel(model) {
+    return /^(o\d|gpt-5|gpt-6)/.test(model) && !model.includes("-chat");
+  }
+  function getOpenAIReasoningEffort(model) {
+    return model === "gpt-5.5" ? "none" : "low";
   }
   function buildOpenAIChatBody(text, langName) {
     const model = normalizeOpenAIModelName(openaiModel);
-    const useSpeedMode = isOpenAISpeedModeModel(model);
-    const instruction = `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
+    const useSpeedMode = isOpenAIReasoningModel(model);
+    const instruction = buildLyricsTranslationInstruction(langName);
     const outputTokenBudget = Math.max(text.length * 4, useSpeedMode ? 8e3 : 2048);
     const body = {
       model,
@@ -3292,26 +3540,14 @@ var SpicyLyricTranslater = (() => {
       max_completion_tokens: outputTokenBudget
     };
     if (useSpeedMode) {
-      body.reasoning_effort = "none";
+      body.reasoning_effort = getOpenAIReasoningEffort(model);
     } else {
       body.temperature = 0.3;
     }
     return body;
   }
   function normalizeGeminiModelName(model) {
-    const trimmed = (model || "").trim().replace(/^models\//, "");
-    if (!trimmed)
-      return DEFAULT_GEMINI_MODEL;
-    if (trimmed === "gemini-3.1-flash-lite" || trimmed === "gemini-3.5-flash" || trimmed === "gemini-3.1-pro-preview") {
-      return trimmed;
-    }
-    if (trimmed.includes("flash-lite"))
-      return "gemini-3.1-flash-lite";
-    if (trimmed.includes("pro"))
-      return "gemini-3.1-pro-preview";
-    if (trimmed.includes("flash"))
-      return "gemini-3.5-flash";
-    return DEFAULT_GEMINI_MODEL;
+    return resolveModelId("gemini", model);
   }
   function normalizeGeminiTemperature(value) {
     const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
@@ -3349,7 +3585,7 @@ var SpicyLyricTranslater = (() => {
           {
             parts: [
               {
-                text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.
+                text: `${buildLyricsTranslationInstruction(langName)}
 
 ${text}`
               }
@@ -3373,9 +3609,6 @@ ${text}`
       }
     }
     throw new Error("Invalid response from Gemini API");
-  }
-  function buildLyricsTranslationInstruction(langName) {
-    return `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`;
   }
   async function translateWithGrok(text, targetLang) {
     if (!grokApiKey) {
@@ -3531,7 +3764,7 @@ ${text}`
         messages: [
           {
             role: "system",
-            content: `You are a song lyrics translator. Translate the given lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.`
+            content: buildLyricsTranslationInstruction(langName)
           },
           {
             role: "user",
@@ -3548,7 +3781,7 @@ ${text}`
           {
             parts: [
               {
-                text: `You are a song lyrics translator. Translate the following lyrics to ${langName}. Output ONLY the translated text, nothing else. Preserve line breaks. Keep the poetic feel and rhythm where possible.
+                text: `${buildLyricsTranslationInstruction(langName)}
 
 ${text}`
               }
@@ -4111,6 +4344,9 @@ ${text}`
         throw primaryError;
       }
       if (hasInternalBatchMarkers(text)) {
+        if (isProviderOverloadError(primaryError)) {
+          throw primaryError;
+        }
         const message = primaryError instanceof Error ? primaryError.message : String(primaryError || "Provider failed");
         throw new NonRetryableProviderError(message);
       }
@@ -4179,9 +4415,12 @@ ${text}`
   async function translateLyrics(lines, targetLang, trackUri, detectedSourceLang, skipTrackCache = false) {
     const metricsSession = beginMetricsSession();
     const metricsStartedAt = Date.now();
+    const previousSongContext = activeSongContext;
+    activeSongContext = resolveSongContext(trackUri, targetLang);
     try {
       return await translateLyricsInner(lines, targetLang, trackUri, detectedSourceLang, metricsSession, metricsStartedAt, skipTrackCache);
     } finally {
+      activeSongContext = previousSongContext;
       endMetricsSession(metricsSession);
     }
   }
@@ -4758,35 +4997,7 @@ ${text}`
   }
 
   // src/utils/state.ts
-  var DEFAULT_OPENAI_MODEL2 = "gpt-4o-mini";
-  var DEFAULT_GEMINI_MODEL2 = "gemini-3.1-flash-lite";
-  var DEFAULT_GROK_MODEL2 = "grok-4.5";
-  var DEFAULT_ANTHROPIC_MODEL2 = "claude-haiku-4-5";
   var DEFAULT_LIBRETRANSLATE_URL2 = "https://libretranslate.com/translate";
-  function normalizeStoredOpenAIModel(model) {
-    const value = (model || "").trim();
-    return value === "gpt-5.5" || value === "gpt-4o-mini" ? value : DEFAULT_OPENAI_MODEL2;
-  }
-  function normalizeStoredGeminiModel(model) {
-    const value = (model || "").trim().replace(/^models\//, "");
-    if (value === "gemini-3.1-flash-lite" || value === "gemini-3.5-flash" || value === "gemini-3.1-pro-preview")
-      return value;
-    if (value.includes("flash-lite"))
-      return "gemini-3.1-flash-lite";
-    if (value.includes("pro"))
-      return "gemini-3.1-pro-preview";
-    if (value.includes("flash"))
-      return "gemini-3.5-flash";
-    return DEFAULT_GEMINI_MODEL2;
-  }
-  function normalizeStoredGrokModel(model) {
-    const value = (model || "").trim();
-    return value === "grok-4.5" || value === "grok-4.3" ? value : DEFAULT_GROK_MODEL2;
-  }
-  function normalizeStoredAnthropicModel(model) {
-    const value = (model || "").trim();
-    return value === "claude-haiku-4-5" || value === "claude-sonnet-5" || value === "claude-opus-4-8" ? value : DEFAULT_ANTHROPIC_MODEL2;
-  }
   function resolveStoredTargetLanguage() {
     return resolveTargetLanguage(
       storage.get("target-language") || "en",
@@ -4809,14 +5020,14 @@ ${text}`
     libreTranslateApiKey: storage.getSecret("libretranslate-api-key") || "",
     deeplApiKey: storage.getSecret("deepl-api-key") || "",
     openaiApiKey: storage.getSecret("openai-api-key") || "",
-    openaiModel: normalizeStoredOpenAIModel(storage.get("openai-model")),
+    openaiModel: resolveModelId("openai", storage.get("openai-model")),
     geminiApiKey: storage.getSecret("gemini-api-key") || "",
-    geminiModel: normalizeStoredGeminiModel(storage.get("gemini-model")),
+    geminiModel: resolveModelId("gemini", storage.get("gemini-model")),
     geminiTemperature: storage.get("gemini-temperature") || "0.3",
     grokApiKey: storage.getSecret("grok-api-key") || "",
-    grokModel: normalizeStoredGrokModel(storage.get("grok-model")),
+    grokModel: resolveModelId("grok", storage.get("grok-model")),
     anthropicApiKey: storage.getSecret("anthropic-api-key") || "",
-    anthropicModel: normalizeStoredAnthropicModel(storage.get("anthropic-model")),
+    anthropicModel: resolveModelId("anthropic", storage.get("anthropic-model")),
     maxParallelChunks: storage.get("max-parallel-chunks") || "4",
     lastTranslatedSongUri: null,
     translatedLyrics: /* @__PURE__ */ new Map(),
@@ -8291,7 +8502,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.7" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.8" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -9460,11 +9671,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "select",
       storageKey: "openai-model",
       defaultValue: "gpt-4o-mini",
-      options: [
-        { value: "gpt-5.5", text: "GPT-5.5 Speed" },
-        { value: "gpt-4o-mini", text: "GPT-4o mini" }
-      ],
-      description: "GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option",
+      get options() {
+        return getModelOptions("openai", storage.get("openai-model"));
+      },
+      description: "Models available to your API key, refreshed automatically. Mini/nano models are fastest and cheapest",
       visibleForApis: ["openai"]
     },
     {
@@ -9488,12 +9698,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "select",
       storageKey: "gemini-model",
       defaultValue: "gemini-3.1-flash-lite",
-      options: [
-        { value: "gemini-3.1-flash-lite", text: "3.1 Flash-Lite" },
-        { value: "gemini-3.5-flash", text: "3.5 Flash" },
-        { value: "gemini-3.1-pro-preview", text: "3.1 Pro" }
-      ],
-      description: "Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics",
+      get options() {
+        return getModelOptions("gemini", storage.get("gemini-model"));
+      },
+      description: "Models available to your API key, refreshed automatically. Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics",
       visibleForApis: ["gemini"]
     },
     {
@@ -9529,11 +9737,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "select",
       storageKey: "grok-model",
       defaultValue: "grok-4.5",
-      options: [
-        { value: "grok-4.5", text: "Grok 4.5 (recommended)" },
-        { value: "grok-4.3", text: "Grok 4.3" }
-      ],
-      description: "Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship",
+      get options() {
+        return getModelOptions("grok", storage.get("grok-model"));
+      },
+      description: "Models available to your API key, refreshed automatically",
       visibleForApis: ["grok"]
     },
     {
@@ -9557,12 +9764,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "select",
       storageKey: "anthropic-model",
       defaultValue: "claude-haiku-4-5",
-      options: [
-        { value: "claude-haiku-4-5", text: "Haiku 4.5 (fast & cheap)" },
-        { value: "claude-sonnet-5", text: "Sonnet 5 (balanced)" },
-        { value: "claude-opus-4-8", text: "Opus 4.8 (best quality)" }
-      ],
-      description: "Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics",
+      get options() {
+        return getModelOptions("anthropic", storage.get("anthropic-model"));
+      },
+      description: "Models available to your API key, refreshed automatically. Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics",
       visibleForApis: ["anthropic"]
     },
     {
@@ -9660,25 +9865,41 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return false;
     return !field.visibleWhen || field.visibleWhen();
   }
+  function getModelFieldId(provider) {
+    return `${provider}-model`;
+  }
+  function getModelProviderForField(fieldId) {
+    return MODEL_PROVIDERS.find((provider) => fieldId === getModelFieldId(provider) || fieldId === `${provider}-api-key`) || null;
+  }
+  function getProviderApiKey(provider) {
+    switch (provider) {
+      case "openai":
+        return state.openaiApiKey;
+      case "gemini":
+        return state.geminiApiKey;
+      case "grok":
+        return state.grokApiKey;
+      case "anthropic":
+        return state.anthropicApiKey;
+    }
+  }
+  async function refreshProviderModelLists(options = {}) {
+    const onlyProvider = options.fieldId ? getModelProviderForField(options.fieldId) : null;
+    if (options.fieldId && !onlyProvider)
+      return [];
+    const providers = onlyProvider ? [onlyProvider] : MODEL_PROVIDERS;
+    const results = await Promise.all(providers.map(async (provider) => {
+      const refreshed = await refreshModelCatalog(provider, getProviderApiKey(provider), { force: options.force });
+      return refreshed ? getModelFieldId(provider) : null;
+    }));
+    return results.filter((id) => Boolean(id));
+  }
   function normalizeLegacySelectValue(fieldId, value) {
-    const stored = (value || "").trim().replace(/^models\//, "");
+    const stored = (value || "").trim();
     if (!stored)
       return value;
-    if (fieldId === "openai-model") {
-      return stored === "gpt-5.5" || stored === "gpt-4o-mini" ? stored : "gpt-4o-mini";
-    }
-    if (fieldId === "gemini-model") {
-      if (stored === "gemini-3.1-flash-lite" || stored === "gemini-3.5-flash" || stored === "gemini-3.1-pro-preview")
-        return stored;
-      if (stored.includes("flash-lite"))
-        return "gemini-3.1-flash-lite";
-      if (stored.includes("pro"))
-        return "gemini-3.1-pro-preview";
-      if (stored.includes("flash"))
-        return "gemini-3.5-flash";
-      return "gemini-3.1-flash-lite";
-    }
-    return value;
+    const provider = MODEL_PROVIDERS.find((candidate) => fieldId === getModelFieldId(candidate));
+    return provider ? resolveModelId(provider, stored) : value;
   }
   function readSettingValue(field) {
     if (field.type === "toggle") {
@@ -12146,7 +12367,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         <div class="x-settings-secondColumn">
             <span>
                 <select class="main-dropDown-dropDown" id="${id}">
-                    ${options.map((opt) => `<option value="${opt.value}" ${opt.value === currentValue ? "selected" : ""}>${opt.text}</option>`).join("")}
+                    ${options.map((opt) => `<option value="${escapeHtml3(opt.value)}" ${opt.value === currentValue ? "selected" : ""}>${escapeHtml3(opt.text)}</option>`).join("")}
                 </select>
             </span>
         </div>
@@ -12220,11 +12441,37 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }
     });
   }
+  function rebuildModelSelects(fieldIds) {
+    for (const fieldId of fieldIds) {
+      const field = getSettingField(fieldId);
+      if (!field)
+        continue;
+      const value = String(readSettingValue(field));
+      for (const elementId of [getNativeSettingInputId(field), getModalSettingInputId(field)]) {
+        const select = document.getElementById(elementId);
+        if (!(select instanceof HTMLSelectElement))
+          continue;
+        select.replaceChildren(...(field.options || []).map((option) => {
+          const element = document.createElement("option");
+          element.value = option.value;
+          element.textContent = option.text;
+          return element;
+        }));
+        select.value = value;
+      }
+    }
+  }
+  function syncModelLists(options = {}) {
+    refreshProviderModelLists(options).then(rebuildModelSelects).catch(() => void 0);
+  }
   function handleSettingChange(field, value, root, visibleDisplay = "") {
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
     if ((effects.includes("providerVisibility") || effects.includes("fieldVisibility")) && root) {
       updateSettingFieldVisibility(root, visibleDisplay);
+    }
+    if (field.id.endsWith("-api-key")) {
+      syncModelLists({ fieldId: field.id, force: true });
     }
   }
   function getNativeSettingInputId(field) {
@@ -12272,6 +12519,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     `;
     const sectionContent = section.querySelector(".x-settings-section.fNaaQ0Cp8Yzy19j8");
     renderNativeSettingsFields(sectionContent);
+    syncModelLists();
     sectionContent.appendChild(createNativeButton(
       "slt-settings.view-cache",
       "View Translation Cache",
@@ -12531,6 +12779,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const searchInput = panel.querySelector("#slt-settings-search-input");
     searchInput.addEventListener("input", () => applyModalSettingsFilter(panel, searchInput.value));
     applyModalSettingsFilter(panel, "");
+    syncModelLists();
     return panel;
   }
   function connectionStateLabel(connectionState) {

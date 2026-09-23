@@ -3,6 +3,8 @@ import { storage } from './storage';
 import { OverlayMode } from './translationOverlay';
 import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolveTargetLanguage } from './translator';
 import type { ApiPreference, CustomApiFormat } from './translator';
+import { getModelOptions, refreshModelCatalog, resolveModelId, MODEL_PROVIDERS } from './modelCatalog';
+import type { ModelProvider } from './modelCatalog';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
 export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'learningModeClass';
@@ -233,11 +235,10 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'openai-model',
         defaultValue: 'gpt-4o-mini',
-        options: [
-            { value: 'gpt-5.5', text: 'GPT-5.5 Speed' },
-            { value: 'gpt-4o-mini', text: 'GPT-4o mini' }
-        ],
-        description: 'GPT-5.5 uses speed mode; GPT-4o mini is the low-cost option',
+        get options() {
+            return getModelOptions('openai', storage.get('openai-model'));
+        },
+        description: 'Models available to your API key, refreshed automatically. Mini/nano models are fastest and cheapest',
         visibleForApis: ['openai']
     },
     {
@@ -261,12 +262,10 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'gemini-model',
         defaultValue: 'gemini-3.1-flash-lite',
-        options: [
-            { value: 'gemini-3.1-flash-lite', text: '3.1 Flash-Lite' },
-            { value: 'gemini-3.5-flash', text: '3.5 Flash' },
-            { value: 'gemini-3.1-pro-preview', text: '3.1 Pro' }
-        ],
-        description: 'Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics',
+        get options() {
+            return getModelOptions('gemini', storage.get('gemini-model'));
+        },
+        description: 'Models available to your API key, refreshed automatically. Flash-Lite is fastest; Flash is balanced; Pro is best for harder lyrics',
         visibleForApis: ['gemini']
     },
     {
@@ -302,11 +301,10 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'grok-model',
         defaultValue: 'grok-4.5',
-        options: [
-            { value: 'grok-4.5', text: 'Grok 4.5 (recommended)' },
-            { value: 'grok-4.3', text: 'Grok 4.3' }
-        ],
-        description: 'Grok 4.5 is the fastest and most capable; 4.3 is the previous flagship',
+        get options() {
+            return getModelOptions('grok', storage.get('grok-model'));
+        },
+        description: 'Models available to your API key, refreshed automatically',
         visibleForApis: ['grok']
     },
     {
@@ -330,12 +328,10 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'anthropic-model',
         defaultValue: 'claude-haiku-4-5',
-        options: [
-            { value: 'claude-haiku-4-5', text: 'Haiku 4.5 (fast & cheap)' },
-            { value: 'claude-sonnet-5', text: 'Sonnet 5 (balanced)' },
-            { value: 'claude-opus-4-8', text: 'Opus 4.8 (best quality)' }
-        ],
-        description: 'Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics',
+        get options() {
+            return getModelOptions('anthropic', storage.get('anthropic-model'));
+        },
+        description: 'Models available to your API key, refreshed automatically. Haiku is fastest and cheapest; Sonnet balances cost and quality; Opus is best for nuanced lyrics',
         visibleForApis: ['anthropic']
     },
     {
@@ -444,20 +440,40 @@ export function isSettingFieldVisible(field: SettingsField, api: ApiPreference =
     return !field.visibleWhen || field.visibleWhen();
 }
 
+export function getModelFieldId(provider: ModelProvider): string {
+    return `${provider}-model`;
+}
+
+function getModelProviderForField(fieldId: string): ModelProvider | null {
+    return MODEL_PROVIDERS.find(provider => fieldId === getModelFieldId(provider) || fieldId === `${provider}-api-key`) || null;
+}
+
+function getProviderApiKey(provider: ModelProvider): string {
+    switch (provider) {
+        case 'openai': return state.openaiApiKey;
+        case 'gemini': return state.geminiApiKey;
+        case 'grok': return state.grokApiKey;
+        case 'anthropic': return state.anthropicApiKey;
+    }
+}
+
+export async function refreshProviderModelLists(options: { fieldId?: string; force?: boolean } = {}): Promise<string[]> {
+    const onlyProvider = options.fieldId ? getModelProviderForField(options.fieldId) : null;
+    if (options.fieldId && !onlyProvider) return [];
+
+    const providers = onlyProvider ? [onlyProvider] : MODEL_PROVIDERS;
+    const results = await Promise.all(providers.map(async provider => {
+        const refreshed = await refreshModelCatalog(provider, getProviderApiKey(provider), { force: options.force });
+        return refreshed ? getModelFieldId(provider) : null;
+    }));
+    return results.filter((id): id is string => Boolean(id));
+}
+
 function normalizeLegacySelectValue(fieldId: string, value: string | null): string | null {
-    const stored = (value || '').trim().replace(/^models\//, '');
+    const stored = (value || '').trim();
     if (!stored) return value;
-    if (fieldId === 'openai-model') {
-        return stored === 'gpt-5.5' || stored === 'gpt-4o-mini' ? stored : 'gpt-4o-mini';
-    }
-    if (fieldId === 'gemini-model') {
-        if (stored === 'gemini-3.1-flash-lite' || stored === 'gemini-3.5-flash' || stored === 'gemini-3.1-pro-preview') return stored;
-        if (stored.includes('flash-lite')) return 'gemini-3.1-flash-lite';
-        if (stored.includes('pro')) return 'gemini-3.1-pro-preview';
-        if (stored.includes('flash')) return 'gemini-3.5-flash';
-        return 'gemini-3.1-flash-lite';
-    }
-    return value;
+    const provider = MODEL_PROVIDERS.find(candidate => fieldId === getModelFieldId(candidate));
+    return provider ? resolveModelId(provider, stored) : value;
 }
 
 export function readSettingValue(field: SettingsField): string | boolean {
