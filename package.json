@@ -1,6 +1,6 @@
 {
   "name": "spicy-lyric-translater",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "A Spicetify extension that adds translation functionality to Spicy Lyrics with non-destructive overlay, smart caching, and language detection",
   "main": "dist/spicy-lyric-translater.js",
   "repository": {
@@ -17,6 +17,7 @@
     "build:watch": "node build.js --watch",
     "test": "node tests/run-tests.mjs",
     "deploy": "node deploy.js",
+    "redeploy": "node deploy.js --no-bump",
     "reset": "spicetify config extensions spicy-lyric-translater.js- && spicetify apply",
     "apply": "spicetify apply",
     "release": "npm run build && copy dist\\spicy-lyric-translater.js builds\\spicy-lyric-translater.js"

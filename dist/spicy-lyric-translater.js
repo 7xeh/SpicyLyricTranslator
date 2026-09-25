@@ -4938,13 +4938,18 @@ ${text}`
   var BREAKDOWN_CACHE_KEY = "breakdown-cache";
   var BREAKDOWN_CACHE_LIMIT = 400;
   var inFlightBreakdowns = /* @__PURE__ */ new Map();
+  var breakdownMemo = null;
+  function loadBreakdownCache() {
+    if (!breakdownMemo)
+      breakdownMemo = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
+    return breakdownMemo;
+  }
   function getCachedWordBreakdown(sourceText, targetLang) {
-    const cache = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
-    const entry = cache[breakdownCacheKey(sourceText, targetLang)];
+    const entry = loadBreakdownCache()[breakdownCacheKey(sourceText, targetLang)];
     return entry?.tokens?.length ? entry.tokens : null;
   }
   function storeWordBreakdown(sourceText, targetLang, tokens) {
-    const cache = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
+    const cache = loadBreakdownCache();
     cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
     const keys = Object.keys(cache);
     if (keys.length > BREAKDOWN_CACHE_LIMIT) {
@@ -4953,6 +4958,7 @@ ${text}`
     storage_default.setJSON(BREAKDOWN_CACHE_KEY, cache);
   }
   function clearWordBreakdownCache() {
+    breakdownMemo = null;
     storage_default.remove(BREAKDOWN_CACHE_KEY);
   }
   async function fetchWordBreakdown(sourceText, sourceLang, targetLang) {
@@ -5040,8 +5046,12 @@ ${text}`
     hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
     showRomanization: storage.get("show-romanization") === "true",
     learningMode: storage.get("learning-mode") === "true",
+    learningVisible: storage.get("learning-visible") !== "false",
     _qualityByIndex: void 0
   };
+  function isLearningActive() {
+    return state.learningMode && state.learningVisible;
+  }
 
   // src/utils/text.ts
   var INVISIBLE_SEPARATOR_REGEX = /[\u200B\u2060\uFEFF]/g;
@@ -6645,14 +6655,50 @@ ${text}`
     });
   }
   var breakdownLookup = null;
+  var breakdownPrefetch = null;
   var lastLearningKey = "";
   var lastLearningLine = null;
+  var lastPrefetchLine = null;
   var currentTargetLanguage = "";
   var lastLearningCheck = 0;
   var LEARNING_THROTTLE_MS = 120;
+  var LEARNING_PREFETCH_AHEAD = 3;
   function setBreakdownLookup(lookup) {
     breakdownLookup = lookup;
     lastLearningKey = "";
+  }
+  function setBreakdownPrefetch(prefetch) {
+    breakdownPrefetch = prefetch;
+    lastPrefetchLine = null;
+  }
+  function prefetchUpcomingBreakdowns(doc, fromLine) {
+    if (!breakdownPrefetch || lastPrefetchLine === fromLine)
+      return;
+    lastPrefetchLine = fromLine;
+    const lines = Array.from(doc.querySelectorAll("#SpicyLyricsPage .line, .LyricsContent .line"));
+    const start = lines.indexOf(fromLine);
+    if (start < 0)
+      return;
+    const texts = [];
+    for (let i = start + 1; i < lines.length && texts.length < LEARNING_PREFETCH_AHEAD; i++) {
+      if (lines[i].classList.contains("musical-line") || lines[i].classList.contains("bg-line"))
+        continue;
+      const text = extractLineText(lines[i]);
+      if (text)
+        texts.push(text);
+    }
+    if (texts.length > 0)
+      breakdownPrefetch(texts);
+  }
+  function findActiveMusicalLine(doc) {
+    return doc.querySelector(".line.musical-line.Active, .line.musical-line.active");
+  }
+  function clearLearningRow(doc) {
+    if (!lastLearningKey && !doc.querySelector(".slt-learning-row"))
+      return;
+    removeLearningRows(doc);
+    lastLearningKey = "";
+    lastLearningLine = null;
   }
   function setLearningTargetLanguage(lang) {
     if (currentTargetLanguage === lang)
@@ -6663,6 +6709,7 @@ ${text}`
   function invalidateLearningRow() {
     lastLearningKey = "";
     lastLearningLine = null;
+    lastPrefetchLine = null;
     lastLearningCheck = 0;
   }
   function findActiveLine(doc) {
@@ -6676,11 +6723,34 @@ ${text}`
   }
   function removeLearningRows(doc) {
     doc.querySelectorAll(".slt-learning-row").forEach((el) => el.remove());
+    doc.querySelectorAll(".slt-learning-absorbed").forEach((el) => el.classList.remove("slt-learning-absorbed"));
   }
-  function buildLearningRow(doc, tokens, origin) {
+  function absorbsTranslation() {
+    return currentConfig.mode === "interleaved" || currentConfig.mode === "none";
+  }
+  function absorbInterleavedTranslation(line) {
+    if (currentConfig.mode !== "interleaved")
+      return;
+    let node = line.nextElementSibling;
+    while (node && !node.classList.contains("slt-learning-row")) {
+      if (node.classList.contains("slt-interleaved-translation") && !node.classList.contains("slt-learning-absorbed")) {
+        node.classList.add("slt-learning-absorbed");
+      }
+      if (!node.classList.contains("slt-interleaved-translation") && !node.classList.contains("slt-romanization-line") && !node.classList.contains("slt-original-line"))
+        break;
+      node = node.nextElementSibling;
+    }
+  }
+  function buildLearningRow(doc, tokens, origin, translated) {
     const row = doc.createElement("div");
     row.className = "slt-learning-row";
     row.dataset.origin = origin;
+    if (translated && absorbsTranslation()) {
+      const sentence = doc.createElement("div");
+      sentence.className = "slt-learning-translation";
+      sentence.textContent = translated;
+      row.appendChild(sentence);
+    }
     for (const token of tokens) {
       if (!token.source && !token.target)
         continue;
@@ -6734,15 +6804,26 @@ ${text}`
     lastLearningCheck = now;
     if (lastLearningLine && lastLearningKey && lastLearningLine.isConnected && (lastLearningLine.classList.contains("Active") || lastLearningLine.classList.contains("active"))) {
       const existingRow = doc.querySelector(".slt-learning-row");
-      if (existingRow && existingRow.isConnected)
+      if (existingRow && existingRow.isConnected) {
+        absorbInterleavedTranslation(lastLearningLine);
         return;
+      }
     }
     const activeLine = findActiveLine(doc);
-    if (!activeLine)
+    if (!activeLine) {
+      const musicalLine = findActiveMusicalLine(doc);
+      if (musicalLine) {
+        clearLearningRow(doc);
+        prefetchUpcomingBreakdowns(doc, musicalLine);
+      }
       return;
+    }
+    prefetchUpcomingBreakdowns(doc, activeLine);
     const sourceText = extractLineText(activeLine);
-    if (!sourceText)
+    if (!sourceText) {
+      clearLearningRow(doc);
       return;
+    }
     const index = parseInt(activeLine.dataset.sltIndex || "-1", 10);
     const translated = (index >= 0 ? translationMap.get(index) : void 0) || lookupByContent(translationByContent, sourceText) || "";
     if (!translated)
@@ -6752,18 +6833,20 @@ ${text}`
     const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
     if (tokens.length === 0)
       return;
-    const key = `${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);
     if (!anchor || !anchor.parentNode)
       return;
     const existing = doc.querySelector(".slt-learning-row");
     if (existing && existing.isConnected && lastLearningKey === key && existing.previousElementSibling === anchor) {
       lastLearningLine = activeLine;
+      absorbInterleavedTranslation(activeLine);
       return;
     }
     removeLearningRows(doc);
-    const row = buildLearningRow(doc, tokens, origin);
+    const row = buildLearningRow(doc, tokens, origin, translated);
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
+    absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
     lastLearningLine = activeLine;
   }
@@ -7308,6 +7391,25 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     animation: slt-learning-in 180ms ease-out;
 }
 
+.slt-interleaved-translation.slt-learning-absorbed {
+    display: none !important;
+}
+
+.slt-learning-translation {
+    flex-basis: 100%;
+    font-size: calc(0.45em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.25;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.88);
+    margin-bottom: 2px;
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-translation,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
+#SpicyLyricsPage.CardMode .slt-learning-translation {
+    font-size: calc(0.6em * var(--slt-overlay-font-scale, 1));
+}
+
 @keyframes slt-learning-in {
     from { opacity: 0; transform: translateY(-2px); }
     to { opacity: 1; transform: none; }
@@ -7321,7 +7423,7 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     padding: 3px 7px;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.07);
-    border-left: 2px solid rgba(255, 255, 255, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     font-size: calc(0.3em * var(--slt-overlay-font-scale, 1));
     line-height: 1.25;
     font-weight: 600;
@@ -7329,12 +7431,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     max-width: 16em;
 }
 
-.slt-learning-token[data-confidence="high"] { border-left-color: rgba(126, 231, 135, 0.85); }
-.slt-learning-token[data-confidence="medium"] { border-left-color: rgba(255, 209, 102, 0.8); }
-.slt-learning-token[data-confidence="low"] { border-left-color: rgba(255, 255, 255, 0.22); }
+.slt-learning-token[data-confidence="medium"] .slt-learning-target,
+.slt-learning-token[data-confidence="low"] .slt-learning-target {
+    text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+    text-underline-offset: 0.2em;
+}
 
 .slt-learning-row[data-origin="heuristic"] .slt-learning-token {
-    border-left-style: dashed;
+    border-style: dashed;
 }
 
 .slt-learning-source {
@@ -7407,7 +7511,8 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
     animation: spicy-translate-spin 1s linear infinite;
 }
 
-#TranslateToggle.active svg {
+#TranslateToggle.active svg,
+#LearningToggle.active svg {
     color: var(--spice-button-active, #1db954);
 }
 
@@ -8502,7 +8607,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.8" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.9" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -9462,6 +9567,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2.01h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
         <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </svg>`,
+    Learning: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+    </svg>`,
+    LearningOff: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+        <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>`,
     Settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
         <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
     </svg>`,
@@ -9948,10 +10060,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       spicetify.showNotification(message);
     }
   }
+  function showLearningCards() {
+    state.learningVisible = true;
+    storage.set("learning-visible", "true");
+  }
   function enforceLearningCoupling(fieldId, value) {
     if (fieldId === "overlay-mode" && String(value) === "none" && !state.learningMode) {
       storage.set("learning-mode", "true");
       state.learningMode = true;
+      showLearningCards();
       notifySettingCorrection("Learning Mode turned on - display None hides translations, so the cards show them instead");
       return ["learningModeClass"];
     }
@@ -10068,6 +10185,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         break;
       case "learning-mode":
         state.learningMode = Boolean(value);
+        if (state.learningMode)
+          showLearningCards();
         break;
       case "hide-connection-indicator":
         state.hideConnectionIndicator = Boolean(value);
@@ -10658,6 +10777,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (pipWindow) {
       insertTranslateButtonIntoDocument(pipWindow.document);
     }
+    syncLearningButton();
   }
   function insertTranslateButtonIntoCardControls(doc) {
     const cardControls = doc.querySelector("#SpicyLyricsNPVCard .CardControls");
@@ -10701,6 +10821,73 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         viewControls.appendChild(translateButton);
       }
     }
+  }
+  function learningButtonTooltip() {
+    return state.learningVisible ? "Hide Learning Mode" : "Show Learning Mode";
+  }
+  function createLearningButton() {
+    const button = document.createElement("button");
+    button.id = "LearningToggle";
+    button.className = "ViewControl";
+    button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
+    button.classList.toggle("active", state.learningVisible);
+    if (typeof Spicetify !== "undefined" && Spicetify.Tippy) {
+      try {
+        Spicetify.Tippy(button, {
+          ...Spicetify.TippyProps,
+          content: learningButtonTooltip()
+        });
+      } catch (e) {
+        warn("Failed to create tooltip:", e);
+      }
+    }
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleLearningToggle();
+    });
+    return button;
+  }
+  function syncLearningButtonInDocument(doc) {
+    if (!state.learningMode) {
+      doc.querySelectorAll("#LearningToggle").forEach((button) => button.remove());
+      return;
+    }
+    doc.querySelectorAll("#TranslateToggle").forEach((translateButton) => {
+      const next = translateButton.nextElementSibling;
+      if (next && next.id === "LearningToggle")
+        return;
+      const button = createLearningButton();
+      if (translateButton.classList.contains("CardControl"))
+        button.classList.add("CardControl");
+      translateButton.insertAdjacentElement("afterend", button);
+    });
+    doc.querySelectorAll("#LearningToggle").forEach((button) => {
+      const prev = button.previousElementSibling;
+      if (!prev || prev.id !== "TranslateToggle") {
+        button.remove();
+        return;
+      }
+      button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
+      button.classList.toggle("active", state.learningVisible);
+      const btnWithTippy = button;
+      if (btnWithTippy._tippy)
+        btnWithTippy._tippy.setContent(learningButtonTooltip());
+    });
+  }
+  function syncLearningButton() {
+    syncLearningButtonInDocument(document);
+    const pipWindow = getPIPWindow2();
+    if (pipWindow)
+      syncLearningButtonInDocument(pipWindow.document);
+  }
+  function handleLearningToggle() {
+    if (!state.learningMode)
+      return;
+    state.learningVisible = !state.learningVisible;
+    storage.set("learning-visible", state.learningVisible.toString());
+    setOverlayLearningMode(isLearningActive());
+    syncLearningButton();
   }
   async function handleTranslateToggle() {
     if (state.isTranslating)
@@ -11458,7 +11645,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       mode: state.overlayMode,
       syncWordHighlight: state.syncWordHighlight,
       showRomanization: state.showRomanization,
-      learningMode: state.learningMode
+      learningMode: isLearningActive()
     };
     if (!isOverlayActive()) {
       enableOverlay(overlaySettings);
@@ -11704,6 +11891,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (pipWindow) {
       setTimeout(() => {
         insertTranslateButtonIntoDocument(pipWindow.document);
+        syncLearningButtonInDocument(pipWindow.document);
       }, 500);
     }
     if (state.isEnabled) {
@@ -11770,9 +11958,34 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
   }
   var requestedBreakdowns = /* @__PURE__ */ new Set();
+  var failedBreakdowns = /* @__PURE__ */ new Map();
+  var BREAKDOWN_RETRY_MS = 6e4;
+  function requestBreakdown(sourceText, onReady) {
+    const key = `${state.targetLanguage}:${sourceText}`;
+    if (requestedBreakdowns.has(key))
+      return;
+    const failedAt = failedBreakdowns.get(key);
+    if (failedAt && Date.now() - failedAt < BREAKDOWN_RETRY_MS)
+      return;
+    requestedBreakdowns.add(key);
+    const trackUri = getCurrentTrackUri();
+    void fetchWordBreakdown(sourceText, state.detectedLanguage || void 0, state.targetLanguage).then((tokens) => {
+      if (!tokens) {
+        failedBreakdowns.set(key, Date.now());
+        return;
+      }
+      failedBreakdowns.delete(key);
+      if (onReady && getCurrentTrackUri() === trackUri)
+        onReady();
+    }).catch(() => {
+      failedBreakdowns.set(key, Date.now());
+    }).finally(() => {
+      requestedBreakdowns.delete(key);
+    });
+  }
   function registerBreakdownLookup() {
     setBreakdownLookup((sourceText) => {
-      if (!state.learningMode)
+      if (!isLearningActive())
         return null;
       setLearningTargetLanguage(state.targetLanguage);
       const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
@@ -11780,18 +11993,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return cached;
       if (!providerSupportsWordBreakdown())
         return null;
-      const key = `${state.targetLanguage}:${sourceText}`;
-      if (requestedBreakdowns.has(key))
-        return null;
-      requestedBreakdowns.add(key);
-      void fetchWordBreakdown(sourceText, state.detectedLanguage || void 0, state.targetLanguage).then((tokens) => {
-        if (tokens)
-          invalidateLearningRow();
-      }).catch(() => {
-      }).finally(() => {
-        requestedBreakdowns.delete(key);
-      });
+      requestBreakdown(sourceText, invalidateLearningRow);
       return null;
+    });
+    setBreakdownPrefetch((sourceTexts) => {
+      if (!isLearningActive() || !providerSupportsWordBreakdown())
+        return;
+      for (const sourceText of sourceTexts) {
+        if (getCachedWordBreakdown(sourceText, state.targetLanguage))
+          continue;
+        requestBreakdown(sourceText);
+      }
     });
   }
   function setupViewModeObserver() {
@@ -11803,6 +12015,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (isOpen) {
         if (!document.querySelector("#TranslateToggle")) {
           insertTranslateButton();
+        } else {
+          syncLearningButton();
         }
         if (romanizationToggleButton && !romanizationToggleButton.isConnected) {
           romanizationToggleListener = null;
@@ -11840,6 +12054,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         if (pipWindow && !pipWindow.document.querySelector("#TranslateToggle")) {
           insertTranslateButtonIntoDocument(pipWindow.document);
         }
+        if (pipWindow)
+          syncLearningButtonInDocument(pipWindow.document);
       }
     }, 2e3);
   }
@@ -12419,7 +12635,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       setOverlayRomanization(Boolean(value));
     }
     if (effects.includes("learningModeClass")) {
-      setOverlayLearningMode(state.learningMode);
+      setOverlayLearningMode(isLearningActive());
+      syncLearningButton();
     }
     if (effects.includes("romanizationDisplay") || effects.includes("reapplyTranslations") || effects.includes("retranslate")) {
       forceRetranslate();

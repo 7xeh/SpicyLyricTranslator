@@ -25,7 +25,7 @@ const notifications: string[] = [];
 };
 
 const { writeSettingValue, getSettingField } = require('../src/utils/settingsModel') as typeof import('../src/utils/settingsModel');
-const { state } = require('../src/utils/state') as typeof import('../src/utils/state');
+const { state, isLearningActive } = require('../src/utils/state') as typeof import('../src/utils/state');
 
 function reset(mode: 'replace' | 'interleaved' | 'none', learning: boolean): void {
     notifications.length = 0;
@@ -110,4 +110,24 @@ test('switching away from None does not disturb Learning Mode', () => {
 
     assert.equal(state.overlayMode, 'interleaved');
     assert.equal(state.learningMode, true);
+});
+
+test('turning Learning Mode on in settings makes the cards visible again', () => {
+    reset('replace', false);
+    state.learningVisible = false;
+    storageMap.set('spicy-lyric-translator:learning-visible', 'false');
+
+    apply('learning-mode', true);
+
+    assert.equal(state.learningVisible, true);
+    assert.equal(storageMap.get('spicy-lyric-translator:learning-visible'), 'true');
+    assert.equal(isLearningActive(), true);
+});
+
+test('hiding cards from the lyrics screen keeps Learning Mode enabled', () => {
+    reset('replace', true);
+    state.learningVisible = false;
+
+    assert.equal(state.learningMode, true);
+    assert.equal(isLearningActive(), false);
 });

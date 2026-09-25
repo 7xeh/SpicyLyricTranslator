@@ -1481,17 +1481,54 @@ function syncBlurToTranslations(doc: Document): void {
 }
 
 type BreakdownLookup = (sourceText: string, translatedText: string) => BreakdownToken[] | null;
+type BreakdownPrefetch = (sourceTexts: string[]) => void;
 
 let breakdownLookup: BreakdownLookup | null = null;
+let breakdownPrefetch: BreakdownPrefetch | null = null;
 let lastLearningKey = '';
 let lastLearningLine: HTMLElement | null = null;
+let lastPrefetchLine: HTMLElement | null = null;
 let currentTargetLanguage = '';
 let lastLearningCheck = 0;
 const LEARNING_THROTTLE_MS = 120;
+const LEARNING_PREFETCH_AHEAD = 3;
 
 export function setBreakdownLookup(lookup: BreakdownLookup | null): void {
     breakdownLookup = lookup;
     lastLearningKey = '';
+}
+
+export function setBreakdownPrefetch(prefetch: BreakdownPrefetch | null): void {
+    breakdownPrefetch = prefetch;
+    lastPrefetchLine = null;
+}
+
+function prefetchUpcomingBreakdowns(doc: Document, fromLine: HTMLElement): void {
+    if (!breakdownPrefetch || lastPrefetchLine === fromLine) return;
+    lastPrefetchLine = fromLine;
+
+    const lines = Array.from(doc.querySelectorAll('#SpicyLyricsPage .line, .LyricsContent .line')) as HTMLElement[];
+    const start = lines.indexOf(fromLine);
+    if (start < 0) return;
+
+    const texts: string[] = [];
+    for (let i = start + 1; i < lines.length && texts.length < LEARNING_PREFETCH_AHEAD; i++) {
+        if (lines[i].classList.contains('musical-line') || lines[i].classList.contains('bg-line')) continue;
+        const text = extractLineText(lines[i]);
+        if (text) texts.push(text);
+    }
+    if (texts.length > 0) breakdownPrefetch(texts);
+}
+
+function findActiveMusicalLine(doc: Document): HTMLElement | null {
+    return doc.querySelector('.line.musical-line.Active, .line.musical-line.active') as HTMLElement | null;
+}
+
+function clearLearningRow(doc: Document): void {
+    if (!lastLearningKey && !doc.querySelector('.slt-learning-row')) return;
+    removeLearningRows(doc);
+    lastLearningKey = '';
+    lastLearningLine = null;
 }
 
 export function setLearningTargetLanguage(lang: string): void {
@@ -1503,6 +1540,7 @@ export function setLearningTargetLanguage(lang: string): void {
 export function invalidateLearningRow(): void {
     lastLearningKey = '';
     lastLearningLine = null;
+    lastPrefetchLine = null;
     lastLearningCheck = 0;
 }
 
@@ -1517,12 +1555,38 @@ function findActiveLine(doc: Document): HTMLElement | null {
 
 function removeLearningRows(doc: Document): void {
     doc.querySelectorAll('.slt-learning-row').forEach(el => el.remove());
+    doc.querySelectorAll('.slt-learning-absorbed').forEach(el => el.classList.remove('slt-learning-absorbed'));
 }
 
-function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heuristic' | 'model'): HTMLElement {
+function absorbsTranslation(): boolean {
+    return currentConfig.mode === 'interleaved' || currentConfig.mode === 'none';
+}
+
+function absorbInterleavedTranslation(line: HTMLElement): void {
+    if (currentConfig.mode !== 'interleaved') return;
+    let node = line.nextElementSibling as HTMLElement | null;
+    while (node && !node.classList.contains('slt-learning-row')) {
+        if (node.classList.contains('slt-interleaved-translation') && !node.classList.contains('slt-learning-absorbed')) {
+            node.classList.add('slt-learning-absorbed');
+        }
+        if (!node.classList.contains('slt-interleaved-translation')
+            && !node.classList.contains('slt-romanization-line')
+            && !node.classList.contains('slt-original-line')) break;
+        node = node.nextElementSibling as HTMLElement | null;
+    }
+}
+
+function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heuristic' | 'model', translated: string): HTMLElement {
     const row = doc.createElement('div');
     row.className = 'slt-learning-row';
     row.dataset.origin = origin;
+
+    if (translated && absorbsTranslation()) {
+        const sentence = doc.createElement('div');
+        sentence.className = 'slt-learning-translation';
+        sentence.textContent = translated;
+        row.appendChild(sentence);
+    }
 
     for (const token of tokens) {
         if (!token.source && !token.target) continue;
@@ -1590,14 +1654,29 @@ function updateLearningRow(doc: Document): void {
     if (lastLearningLine && lastLearningKey && lastLearningLine.isConnected
         && (lastLearningLine.classList.contains('Active') || lastLearningLine.classList.contains('active'))) {
         const existingRow = doc.querySelector('.slt-learning-row');
-        if (existingRow && existingRow.isConnected) return;
+        if (existingRow && existingRow.isConnected) {
+            absorbInterleavedTranslation(lastLearningLine);
+            return;
+        }
     }
 
     const activeLine = findActiveLine(doc);
-    if (!activeLine) return;
+    if (!activeLine) {
+        const musicalLine = findActiveMusicalLine(doc);
+        if (musicalLine) {
+            clearLearningRow(doc);
+            prefetchUpcomingBreakdowns(doc, musicalLine);
+        }
+        return;
+    }
+
+    prefetchUpcomingBreakdowns(doc, activeLine);
 
     const sourceText = extractLineText(activeLine);
-    if (!sourceText) return;
+    if (!sourceText) {
+        clearLearningRow(doc);
+        return;
+    }
 
     const index = parseInt(activeLine.dataset.sltIndex || '-1', 10);
     const translated = (index >= 0 ? translationMap.get(index) : undefined)
@@ -1610,20 +1689,22 @@ function updateLearningRow(doc: Document): void {
     const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
     if (tokens.length === 0) return;
 
-    const key = `${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);
     if (!anchor || !anchor.parentNode) return;
 
     const existing = doc.querySelector('.slt-learning-row') as HTMLElement | null;
     if (existing && existing.isConnected && lastLearningKey === key && existing.previousElementSibling === anchor) {
         lastLearningLine = activeLine;
+        absorbInterleavedTranslation(activeLine);
         return;
     }
 
     removeLearningRows(doc);
 
-    const row = buildLearningRow(doc, tokens, origin);
+    const row = buildLearningRow(doc, tokens, origin, translated);
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
+    absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
     lastLearningLine = activeLine;
 }
@@ -2337,6 +2418,25 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     animation: slt-learning-in 180ms ease-out;
 }
 
+.slt-interleaved-translation.slt-learning-absorbed {
+    display: none !important;
+}
+
+.slt-learning-translation {
+    flex-basis: 100%;
+    font-size: calc(0.45em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.25;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.88);
+    margin-bottom: 2px;
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-translation,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
+#SpicyLyricsPage.CardMode .slt-learning-translation {
+    font-size: calc(0.6em * var(--slt-overlay-font-scale, 1));
+}
+
 @keyframes slt-learning-in {
     from { opacity: 0; transform: translateY(-2px); }
     to { opacity: 1; transform: none; }
@@ -2350,7 +2450,7 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     padding: 3px 7px;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.07);
-    border-left: 2px solid rgba(255, 255, 255, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     font-size: calc(0.3em * var(--slt-overlay-font-scale, 1));
     line-height: 1.25;
     font-weight: 600;
@@ -2358,12 +2458,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     max-width: 16em;
 }
 
-.slt-learning-token[data-confidence="high"] { border-left-color: rgba(126, 231, 135, 0.85); }
-.slt-learning-token[data-confidence="medium"] { border-left-color: rgba(255, 209, 102, 0.8); }
-.slt-learning-token[data-confidence="low"] { border-left-color: rgba(255, 255, 255, 0.22); }
+.slt-learning-token[data-confidence="medium"] .slt-learning-target,
+.slt-learning-token[data-confidence="low"] .slt-learning-target {
+    text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+    text-underline-offset: 0.2em;
+}
 
 .slt-learning-row[data-origin="heuristic"] .slt-learning-token {
-    border-left-style: dashed;
+    border-style: dashed;
 }
 
 .slt-learning-source {

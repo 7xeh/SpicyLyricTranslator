@@ -1,9 +1,9 @@
 import { storage } from './storage';
-import { state } from './state';
+import { state, isLearningActive } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getContentHashShort } from './updater';
-import { forceRetranslate } from './core';
+import { forceRetranslate, syncLearningButton } from './core';
 import { displayModal, hideModal } from './modal';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
@@ -191,7 +191,8 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
         setOverlayRomanization(Boolean(value));
     }
     if (effects.includes('learningModeClass')) {
-        setOverlayLearningMode(state.learningMode);
+        setOverlayLearningMode(isLearningActive());
+        syncLearningButton();
     }
 
     if (effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate')) {

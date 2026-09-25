@@ -527,10 +527,16 @@ function notifySettingCorrection(message: string): void {
     }
 }
 
+function showLearningCards(): void {
+    state.learningVisible = true;
+    storage.set('learning-visible', 'true');
+}
+
 function enforceLearningCoupling(fieldId: string, value: string | boolean): SettingsEffect[] {
     if (fieldId === 'overlay-mode' && String(value) === 'none' && !state.learningMode) {
         storage.set('learning-mode', 'true');
         state.learningMode = true;
+        showLearningCards();
         notifySettingCorrection('Learning Mode turned on - display None hides translations, so the cards show them instead');
         return ['learningModeClass'];
     }
@@ -651,6 +657,7 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'learning-mode':
             state.learningMode = Boolean(value);
+            if (state.learningMode) showLearningCards();
             break;
         case 'hide-connection-indicator':
             state.hideConnectionIndicator = Boolean(value);

@@ -2973,15 +2973,20 @@ type BreakdownCache = Record<string, BreakdownCacheEntry>;
 const BREAKDOWN_CACHE_KEY = 'breakdown-cache';
 const BREAKDOWN_CACHE_LIMIT = 400;
 const inFlightBreakdowns = new Map<string, Promise<BreakdownToken[] | null>>();
+let breakdownMemo: BreakdownCache | null = null;
+
+function loadBreakdownCache(): BreakdownCache {
+    if (!breakdownMemo) breakdownMemo = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
+    return breakdownMemo;
+}
 
 export function getCachedWordBreakdown(sourceText: string, targetLang: string): BreakdownToken[] | null {
-    const cache = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
-    const entry = cache[breakdownCacheKey(sourceText, targetLang)];
+    const entry = loadBreakdownCache()[breakdownCacheKey(sourceText, targetLang)];
     return entry?.tokens?.length ? entry.tokens : null;
 }
 
 function storeWordBreakdown(sourceText: string, targetLang: string, tokens: BreakdownToken[]): void {
-    const cache = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
+    const cache = loadBreakdownCache();
     cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
 
     const keys = Object.keys(cache);
@@ -2996,6 +3001,7 @@ function storeWordBreakdown(sourceText: string, targetLang: string, tokens: Brea
 }
 
 export function clearWordBreakdownCache(): void {
+    breakdownMemo = null;
     storage.remove(BREAKDOWN_CACHE_KEY);
 }
 

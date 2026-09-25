@@ -1,4 +1,4 @@
-import { state, TranslationQualityMeta } from './state';
+import { state, TranslationQualityMeta, isLearningActive } from './state';
 import { Icons } from './icons';
 import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES } from './translator';
@@ -23,6 +23,8 @@ import {
     pauseActiveSync,
     resumeActiveSync,
     setBreakdownLookup,
+    setBreakdownPrefetch,
+    setOverlayLearningMode,
     invalidateLearningRow,
     setLearningTargetLanguage,
     CINEMA_CONTAINER_SELECTOR,
@@ -405,6 +407,7 @@ export function insertTranslateButton(): void {
     if (pipWindow) {
         insertTranslateButtonIntoDocument(pipWindow.document);
     }
+    syncLearningButton();
 }
 
 function insertTranslateButtonIntoCardControls(doc: Document): boolean {
@@ -455,6 +458,80 @@ function insertTranslateButtonIntoDocument(doc: Document): void {
             viewControls.appendChild(translateButton);
         }
     }
+}
+
+function learningButtonTooltip(): string {
+    return state.learningVisible ? 'Hide Learning Mode' : 'Show Learning Mode';
+}
+
+function createLearningButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.id = 'LearningToggle';
+    button.className = 'ViewControl';
+    button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
+    button.classList.toggle('active', state.learningVisible);
+
+    if (typeof Spicetify !== 'undefined' && Spicetify.Tippy) {
+        try {
+            Spicetify.Tippy(button, {
+                ...Spicetify.TippyProps,
+                content: learningButtonTooltip()
+            });
+        } catch (e) {
+            warn('Failed to create tooltip:', e);
+        }
+    }
+
+    button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleLearningToggle();
+    });
+
+    return button;
+}
+
+function syncLearningButtonInDocument(doc: Document): void {
+    if (!state.learningMode) {
+        doc.querySelectorAll('#LearningToggle').forEach(button => button.remove());
+        return;
+    }
+
+    doc.querySelectorAll('#TranslateToggle').forEach(translateButton => {
+        const next = translateButton.nextElementSibling;
+        if (next && next.id === 'LearningToggle') return;
+        const button = createLearningButton();
+        if (translateButton.classList.contains('CardControl')) button.classList.add('CardControl');
+        translateButton.insertAdjacentElement('afterend', button);
+    });
+
+    doc.querySelectorAll('#LearningToggle').forEach(button => {
+        const prev = button.previousElementSibling;
+        if (!prev || prev.id !== 'TranslateToggle') {
+            button.remove();
+            return;
+        }
+        button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
+        button.classList.toggle('active', state.learningVisible);
+        const btnWithTippy = button as any;
+        if (btnWithTippy._tippy) btnWithTippy._tippy.setContent(learningButtonTooltip());
+    });
+}
+
+export function syncLearningButton(): void {
+    syncLearningButtonInDocument(document);
+    const pipWindow = getPIPWindow();
+    if (pipWindow) syncLearningButtonInDocument(pipWindow.document);
+}
+
+export function handleLearningToggle(): void {
+    if (!state.learningMode) return;
+
+    state.learningVisible = !state.learningVisible;
+    storage.set('learning-visible', state.learningVisible.toString());
+
+    setOverlayLearningMode(isLearningActive());
+    syncLearningButton();
 }
 
 export async function handleTranslateToggle(): Promise<void> {
@@ -1314,7 +1391,7 @@ function applyTranslations(lines: NodeListOf<Element>): number {
         mode: state.overlayMode,
         syncWordHighlight: state.syncWordHighlight,
         showRomanization: state.showRomanization,
-        learningMode: state.learningMode
+        learningMode: isLearningActive()
     };
 
     if (!isOverlayActive()) {
@@ -1595,6 +1672,7 @@ export async function onSpicyLyricsOpen(): Promise<void> {
     if (pipWindow) {
         setTimeout(() => {
             insertTranslateButtonIntoDocument(pipWindow.document);
+            syncLearningButtonInDocument(pipWindow.document);
         }, 500);
     }
 
@@ -1669,10 +1747,39 @@ function cleanupRomanizationWatcher(): void {
 }
 
 const requestedBreakdowns = new Set<string>();
+const failedBreakdowns = new Map<string, number>();
+const BREAKDOWN_RETRY_MS = 60000;
+
+function requestBreakdown(sourceText: string, onReady?: () => void): void {
+    const key = `${state.targetLanguage}:${sourceText}`;
+    if (requestedBreakdowns.has(key)) return;
+
+    const failedAt = failedBreakdowns.get(key);
+    if (failedAt && Date.now() - failedAt < BREAKDOWN_RETRY_MS) return;
+
+    requestedBreakdowns.add(key);
+    const trackUri = getCurrentTrackUri();
+
+    void fetchWordBreakdown(sourceText, state.detectedLanguage || undefined, state.targetLanguage)
+        .then(tokens => {
+            if (!tokens) {
+                failedBreakdowns.set(key, Date.now());
+                return;
+            }
+            failedBreakdowns.delete(key);
+            if (onReady && getCurrentTrackUri() === trackUri) onReady();
+        })
+        .catch(() => {
+            failedBreakdowns.set(key, Date.now());
+        })
+        .finally(() => {
+            requestedBreakdowns.delete(key);
+        });
+}
 
 function registerBreakdownLookup(): void {
     setBreakdownLookup((sourceText: string) => {
-        if (!state.learningMode) return null;
+        if (!isLearningActive()) return null;
         setLearningTargetLanguage(state.targetLanguage);
 
         const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
@@ -1680,20 +1787,16 @@ function registerBreakdownLookup(): void {
 
         if (!providerSupportsWordBreakdown()) return null;
 
-        const key = `${state.targetLanguage}:${sourceText}`;
-        if (requestedBreakdowns.has(key)) return null;
-        requestedBreakdowns.add(key);
-
-        void fetchWordBreakdown(sourceText, state.detectedLanguage || undefined, state.targetLanguage)
-            .then(tokens => {
-                if (tokens) invalidateLearningRow();
-            })
-            .catch(() => {})
-            .finally(() => {
-                requestedBreakdowns.delete(key);
-            });
-
+        requestBreakdown(sourceText, invalidateLearningRow);
         return null;
+    });
+
+    setBreakdownPrefetch((sourceTexts: string[]) => {
+        if (!isLearningActive() || !providerSupportsWordBreakdown()) return;
+        for (const sourceText of sourceTexts) {
+            if (getCachedWordBreakdown(sourceText, state.targetLanguage)) continue;
+            requestBreakdown(sourceText);
+        }
     });
 }
 
@@ -1706,6 +1809,8 @@ export function setupViewModeObserver(): void {
         if (isOpen) {
             if (!document.querySelector('#TranslateToggle')) {
                 insertTranslateButton();
+            } else {
+                syncLearningButton();
             }
 
             if (romanizationToggleButton && !romanizationToggleButton.isConnected) {
@@ -1747,6 +1852,7 @@ export function setupViewModeObserver(): void {
             if (pipWindow && !pipWindow.document.querySelector('#TranslateToggle')) {
                 insertTranslateButtonIntoDocument(pipWindow.document);
             }
+            if (pipWindow) syncLearningButtonInDocument(pipWindow.document);
         }
     }, 2000);
 }

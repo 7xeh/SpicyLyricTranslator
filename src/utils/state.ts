@@ -57,6 +57,7 @@ export interface ExtensionState {
     hideConnectionIndicator: boolean;
     showRomanization: boolean;
     learningMode: boolean;
+    learningVisible: boolean;
     _translationsByIndex?: Map<number, string>;
     _qualityByIndex?: Map<number, TranslationQualityMeta>;
 }
@@ -96,5 +97,10 @@ export const state: ExtensionState = {
     hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
     showRomanization: storage.get('show-romanization') === 'true',
     learningMode: storage.get('learning-mode') === 'true',
+    learningVisible: storage.get('learning-visible') !== 'false',
     _qualityByIndex: undefined
 };
+
+export function isLearningActive(): boolean {
+    return state.learningMode && state.learningVisible;
+}

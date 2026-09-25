@@ -25,7 +25,8 @@ export const styles = `
     animation: spicy-translate-spin 1s linear infinite;
 }
 
-#TranslateToggle.active svg {
+#TranslateToggle.active svg,
+#LearningToggle.active svg {
     color: var(--spice-button-active, #1db954);
 }
 

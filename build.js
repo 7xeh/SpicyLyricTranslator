@@ -9,6 +9,8 @@ const SKIP_BUMP = IS_WATCH || ARGS.includes('--no-bump');
 
 const MANIFEST_PATH = path.resolve(__dirname, 'manifest.json');
 const PACKAGE_PATH = path.resolve(__dirname, 'package.json');
+const README_PATH = path.resolve(__dirname, 'README.md');
+const README_BADGE = /(img\.shields\.io\/badge\/Version-)\d+\.\d+\.\d+(-)/;
 const OUT_DIR = 'dist';
 const OUT_DIR_PATH = path.resolve(__dirname, OUT_DIR);
 const OUT_FILE = path.join(OUT_DIR_PATH, 'spicy-lyric-translater.js');
@@ -46,6 +48,17 @@ const bumpVersion = (version) => {
         major += 1;
     }
     return `${major}.${minor}.${patch}`;
+};
+
+const syncReadmeVersion = (version) => {
+    if (!fs.existsSync(README_PATH)) return;
+    const raw = fs.readFileSync(README_PATH, 'utf8');
+    if (!README_BADGE.test(raw)) {
+        console.warn('[Version] README.md has no version badge to update');
+        return;
+    }
+    const updated = raw.replace(README_BADGE, `$1${version}$2`);
+    if (updated !== raw) fs.writeFileSync(README_PATH, updated);
 };
 
 const formatMs = (ms) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`);
@@ -126,6 +139,7 @@ const run = async () => {
         pkg.data.version = nextVersion;
         writeJson(PACKAGE_PATH, pkg);
     }
+    syncReadmeVersion(nextVersion);
 
     console.log(`✅ Built v${nextVersion} in ${formatMs(Date.now() - startedAt)}`);
 };
