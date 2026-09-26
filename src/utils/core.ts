@@ -27,6 +27,7 @@ import {
     setOverlayLearningMode,
     invalidateLearningRow,
     setLearningTargetLanguage,
+    setLearningSourceLanguage,
     CINEMA_CONTAINER_SELECTOR,
     CINEMA_LYRICS_CONTENT_SELECTOR
 } from './translationOverlay';
@@ -1781,6 +1782,7 @@ function registerBreakdownLookup(): void {
     setBreakdownLookup((sourceText: string) => {
         if (!isLearningActive()) return null;
         setLearningTargetLanguage(state.targetLanguage);
+        setLearningSourceLanguage(state.detectedLanguage || '');
 
         const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
         if (cached) return cached;

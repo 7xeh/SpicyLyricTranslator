@@ -1489,6 +1489,7 @@ let lastLearningKey = '';
 let lastLearningLine: HTMLElement | null = null;
 let lastPrefetchLine: HTMLElement | null = null;
 let currentTargetLanguage = '';
+let currentSourceLanguage = '';
 let lastLearningCheck = 0;
 const LEARNING_THROTTLE_MS = 120;
 const LEARNING_PREFETCH_AHEAD = 3;
@@ -1534,6 +1535,12 @@ function clearLearningRow(doc: Document): void {
 export function setLearningTargetLanguage(lang: string): void {
     if (currentTargetLanguage === lang) return;
     currentTargetLanguage = lang;
+    invalidateLearningRow();
+}
+
+export function setLearningSourceLanguage(lang: string): void {
+    if (currentSourceLanguage === lang) return;
+    currentSourceLanguage = lang;
     invalidateLearningRow();
 }
 
@@ -1686,8 +1693,8 @@ function updateLearningRow(doc: Document): void {
 
     const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
     const origin: 'heuristic' | 'model' = modelTokens ? 'model' : 'heuristic';
-    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
-    if (tokens.length === 0) return;
+    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage, currentSourceLanguage).tokens;
+    if (tokens.length === 0 && !absorbsTranslation()) return;
 
     const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);

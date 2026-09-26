@@ -1919,7 +1919,7 @@ var SpicyLyricTranslater = (() => {
   var KATAKANA_RANGE = /[゠-ヿㇰ-ㇿ]/;
   var HANGUL_RANGE = /[가-힯ᄀ-ᇿ㄰-㆏]/;
   var CJK_RANGE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯ᄀ-ᇿ]/;
-  var TRIM_EDGE_PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+  var TRIM_EDGE_PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu;
   function classifyChar(ch) {
     if (/\s/.test(ch))
       return "space";
@@ -1931,7 +1931,7 @@ var SpicyLyricTranslater = (() => {
       return "katakana";
     if (HANGUL_RANGE.test(ch))
       return "hangul";
-    if (/[\p{L}\p{N}]/u.test(ch))
+    if (/[\p{L}\p{M}\p{N}]/u.test(ch))
       return "word";
     return "other";
   }
@@ -2006,7 +2006,7 @@ var SpicyLyricTranslater = (() => {
     return (text || "").trim().split(/\s+/).filter(Boolean);
   }
   function normalizeToken(text) {
-    return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, "");
   }
   function bigrams(value) {
     if (value.length < 2)
@@ -2181,7 +2181,67 @@ var SpicyLyricTranslater = (() => {
     }
     return merged;
   }
-  function buildHeuristicBreakdown(sourceText, targetText, targetLang) {
+  var SOV_LANGUAGES = /* @__PURE__ */ new Set([
+    "ja",
+    "ko",
+    "hi",
+    "bn",
+    "ur",
+    "pa",
+    "gu",
+    "mr",
+    "ne",
+    "si",
+    "ta",
+    "te",
+    "kn",
+    "ml",
+    "or",
+    "as",
+    "sa",
+    "tr",
+    "az",
+    "uz",
+    "kk",
+    "ky",
+    "tk",
+    "tt",
+    "ba",
+    "mn",
+    "fa",
+    "ps",
+    "ku",
+    "my",
+    "bo",
+    "dz",
+    "eu",
+    "am",
+    "hy",
+    "ka",
+    "la"
+  ]);
+  var VSO_LANGUAGES = /* @__PURE__ */ new Set(["ar", "ga", "gd", "cy", "br", "gv", "mi", "haw", "sm", "to", "tl", "fil"]);
+  var SOV_SCRIPT_RANGE = /[぀-ゟ゠-ヿ가-힯ᄀ-ᇿऀ-෿ༀ-࿿က-႟ሀ-፿]/;
+  var ARABIC_SCRIPT_RANGE = /[؀-ۿݐ-ݿ]/;
+  function wordOrderOf(lang, sample) {
+    const base = (lang || "").toLowerCase().split(/[-_]/)[0];
+    if (SOV_LANGUAGES.has(base))
+      return "sov";
+    if (VSO_LANGUAGES.has(base))
+      return "vso";
+    if (base && base !== "auto" && base !== "unknown")
+      return "svo";
+    const text = sample || "";
+    if (SOV_SCRIPT_RANGE.test(text))
+      return "sov";
+    if (ARABIC_SCRIPT_RANGE.test(text))
+      return "non-svo";
+    return "svo";
+  }
+  function sharesWordOrder(sourceText, targetText, targetLang, sourceLang) {
+    return wordOrderOf(sourceLang, sourceText) === wordOrderOf(targetLang, targetText);
+  }
+  function buildHeuristicBreakdown(sourceText, targetText, targetLang, sourceLang) {
     const sourceTokens = segmentSourceText(sourceText);
     const targetTokens = segmentTargetText(targetText);
     if (sourceTokens.length === 0 || targetTokens.length === 0) {
@@ -2189,6 +2249,7 @@ var SpicyLyricTranslater = (() => {
     }
     const anchors = monotonicAnchors(findAnchorCandidates(sourceTokens, targetTokens));
     const tokens = [];
+    const positional = sharesWordOrder(sourceText, targetText, targetLang, sourceLang);
     let sourceCursor = 0;
     let targetCursor = 0;
     const pushSpan = (sourceEnd, targetEnd) => {
@@ -2196,6 +2257,11 @@ var SpicyLyricTranslater = (() => {
       const targetSpan = targetTokens.slice(targetCursor, targetEnd);
       if (sourceSpan.length === 0 && targetSpan.length === 0)
         return;
+      if (!positional) {
+        for (const source of sourceSpan)
+          tokens.push({ source, target: "", confidence: "low" });
+        return;
+      }
       for (const pair of distributeProportional(sourceSpan, targetSpan, targetLang)) {
         if (!pair.source && !pair.target)
           continue;
@@ -2213,7 +2279,10 @@ var SpicyLyricTranslater = (() => {
       targetCursor = anchor.targetIndex + 1;
     }
     pushSpan(sourceTokens.length, targetTokens.length);
-    return { tokens: tokens.filter((token) => token.source || token.target), origin: "heuristic" };
+    const kept = tokens.filter((token) => token.source || token.target);
+    if (!positional && !kept.some((token) => token.target))
+      return { tokens: [], origin: "heuristic" };
+    return { tokens: kept, origin: "heuristic" };
   }
   function coerceConfidence(value) {
     return value === "high" || value === "medium" || value === "low" ? value : "high";
@@ -4815,8 +4884,67 @@ ${text}`
     }
     return false;
   }
-  function providerSupportsWordBreakdown(api = preferredApi) {
-    return VARIANT_CAPABLE_APIS.includes(api);
+  function providerSupportsWordBreakdown() {
+    return true;
+  }
+  function breakdownKindFor(api = preferredApi) {
+    return VARIANT_CAPABLE_APIS.includes(api) ? "model" : "machine";
+  }
+  var MACHINE_WORD_LOOKUP_LIMIT = 24;
+  var MACHINE_WORD_SINGLE_FALLBACK_LIMIT = 12;
+  function splitLookupLines(text) {
+    return (text || "").replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim());
+  }
+  async function lookupWordsWithGoogle(words, targetLang, sourceLang) {
+    await rateLimitedDelay();
+    const joined = await translateWithGoogle(words.join("\n"), targetLang, sourceLang);
+    const lines = splitLookupLines(joined.translation);
+    while (lines.length > words.length && !lines[lines.length - 1])
+      lines.pop();
+    if (lines.length === words.length && lines.every(Boolean))
+      return lines;
+    if (words.length > MACHINE_WORD_SINGLE_FALLBACK_LIMIT)
+      return null;
+    const singles = await Promise.all(words.map(async (word) => {
+      try {
+        const result = await translateWithGoogle(word, targetLang, sourceLang);
+        return result.translation.trim();
+      } catch {
+        return "";
+      }
+    }));
+    return singles.some(Boolean) ? singles : null;
+  }
+  async function lookupWordsWithMachineTranslation(words, targetLang, sourceLang) {
+    if (preferredApi === "deepl" || preferredApi === "libretranslate") {
+      try {
+        await rateLimitedDelay();
+        const result = await translateBatchArray(words, targetLang);
+        const translations = result.translations.map((value) => (value || "").trim());
+        if (translations.length === words.length && translations.some(Boolean))
+          return translations;
+      } catch (lookupError) {
+        warn("Word lookup via primary provider failed, using Google:", lookupError);
+      }
+    }
+    return lookupWordsWithGoogle(words, targetLang, sourceLang);
+  }
+  async function requestMachineBreakdown(sourceText, targetLang, sourceLang) {
+    const words = segmentSourceText(sourceText);
+    if (words.length === 0 || words.length > MACHINE_WORD_LOOKUP_LIMIT)
+      return null;
+    const unique = Array.from(new Set(words));
+    const translations = await lookupWordsWithMachineTranslation(unique, targetLang, sourceLang);
+    if (!translations)
+      return null;
+    const byWord = /* @__PURE__ */ new Map();
+    unique.forEach((word, index) => byWord.set(word, translations[index] || ""));
+    const tokens = words.map((word) => ({
+      source: word,
+      target: byWord.get(word) || "",
+      confidence: "medium"
+    }));
+    return tokens.some((token) => token.target) ? tokens : null;
   }
   async function requestModelCompletion(prompt, maxTokens) {
     if (preferredApi === "openai") {
@@ -4946,11 +5074,13 @@ ${text}`
   }
   function getCachedWordBreakdown(sourceText, targetLang) {
     const entry = loadBreakdownCache()[breakdownCacheKey(sourceText, targetLang)];
-    return entry?.tokens?.length ? entry.tokens : null;
+    if (!entry?.tokens?.length)
+      return null;
+    return (entry.kind || "model") === breakdownKindFor() ? entry.tokens : null;
   }
   function storeWordBreakdown(sourceText, targetLang, tokens) {
     const cache = loadBreakdownCache();
-    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
+    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now(), kind: breakdownKindFor() };
     const keys = Object.keys(cache);
     if (keys.length > BREAKDOWN_CACHE_LIMIT) {
       keys.sort((a, b) => (cache[a].timestamp || 0) - (cache[b].timestamp || 0)).slice(0, keys.length - BREAKDOWN_CACHE_LIMIT).forEach((key) => delete cache[key]);
@@ -4972,12 +5102,18 @@ ${text}`
     const cached = getCachedWordBreakdown(trimmed, targetLang);
     if (cached)
       return cached;
-    const key = breakdownCacheKey(trimmed, targetLang);
+    const key = `${breakdownKindFor()}:${breakdownCacheKey(trimmed, targetLang)}`;
     const pending = inFlightBreakdowns.get(key);
     if (pending)
       return pending;
     const request = (async () => {
       try {
+        if (breakdownKindFor() === "machine") {
+          const machineTokens = await requestMachineBreakdown(trimmed, targetLang, sourceLang);
+          if (machineTokens)
+            storeWordBreakdown(trimmed, targetLang, machineTokens);
+          return machineTokens;
+        }
         const prompt = buildBreakdownPrompt(
           trimmed,
           getTranslationLanguageName(sourceLang || "auto"),
@@ -6660,6 +6796,7 @@ ${text}`
   var lastLearningLine = null;
   var lastPrefetchLine = null;
   var currentTargetLanguage = "";
+  var currentSourceLanguage = "";
   var lastLearningCheck = 0;
   var LEARNING_THROTTLE_MS = 120;
   var LEARNING_PREFETCH_AHEAD = 3;
@@ -6704,6 +6841,12 @@ ${text}`
     if (currentTargetLanguage === lang)
       return;
     currentTargetLanguage = lang;
+    invalidateLearningRow();
+  }
+  function setLearningSourceLanguage(lang) {
+    if (currentSourceLanguage === lang)
+      return;
+    currentSourceLanguage = lang;
     invalidateLearningRow();
   }
   function invalidateLearningRow() {
@@ -6830,8 +6973,8 @@ ${text}`
       return;
     const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
     const origin = modelTokens ? "model" : "heuristic";
-    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage).tokens;
-    if (tokens.length === 0)
+    const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage, currentSourceLanguage).tokens;
+    if (tokens.length === 0 && !absorbsTranslation())
       return;
     const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);
@@ -8607,7 +8750,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.1.9" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.0" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -9067,7 +9210,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const primaryButton = installable ? `<button class="slt-upd-btn primary" type="button" data-action="install">${isHotfix ? "Apply Hotfix" : "Install & Reload"}</button>` : `<a class="slt-upd-btn primary" href="${escapeHtml(result.remote.releaseUrl)}" target="_blank" rel="noopener noreferrer" data-action="open">View Release</a>`;
     const content = buildUpdaterModal({
       variant: isHotfix ? "hotfix" : "update",
-      icon: isHotfix ? "\u{1F527}" : "\u{1F680}",
+      icon: isHotfix ? "\u{1F527}" : UPDATE_ICON_HTML,
       title,
       subtitle,
       versionRow: { from: fromLabel, to: toLabel },
@@ -9106,10 +9249,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const hashShort = getContentHashShort();
     const content = buildUpdaterModal({
       variant: isHotfix ? "hotfix" : "update",
-      icon: isHotfix ? "\u{1F527}" : "\u2728",
+      icon: isHotfix ? "\u{1F527}" : UPDATE_ICON_HTML,
       title: isHotfix ? "Hotfix applied" : "Updated successfully",
       titleBadges: [`v${version}`, ...hashShort ? [hashShort] : []],
-      subtitle: isHotfix ? "Here's what changed in this hotfix" : "Here's what's new in this release",
+      subtitle: isHotfix ? `The latest v${version} build is now running.` : `Spicy Lyric Translator v${version} is now running.`,
       changelogHtml: formatReleaseNotes(changelog),
       buttonsHtml: `
             <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
@@ -9171,7 +9314,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const hashShort = getContentHashShort();
     const content = buildUpdaterModal({
       variant: "update",
-      icon: "\u{1F4DD}",
+      icon: UPDATE_ICON_HTML,
       title: "What's new",
       titleBadges: [`v${CURRENT_VERSION}`, ...hashShort ? [hashShort] : []],
       subtitle: "Changelog for the version you are running",
@@ -9185,6 +9328,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     content.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => hideModal());
     displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
   }
+  var UPDATE_ICON_HTML = '<img class="slt-upd-hero-emoji" src="https://cdn.discordapp.com/emojis/1526398149407543389.webp?size=96" alt="" draggable="false">';
   function buildUpdaterModal(options) {
     const content = document.createElement("div");
     content.className = `slt-updater-modal slt-upd-${options.variant}`;
@@ -9208,13 +9352,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             </div>
         </div>
         ${versionRow}
-        <div class="slt-upd-notes">
-            <div class="slt-upd-notes-title">Changelog</div>
-            <div class="slt-upd-notes-content">${options.changelogHtml}</div>
+        <div class="slt-upd-notes collapsed">
+            <button class="slt-upd-notes-toggle" type="button" aria-expanded="false">
+                <span class="slt-upd-notes-title">Changelog</span>
+                <span class="slt-upd-notes-toggle-label">Show</span>
+                <span class="slt-upd-notes-chevron" aria-hidden="true">\u25BE</span>
+            </button>
+            <div class="slt-upd-notes-content" hidden>${options.changelogHtml}</div>
         </div>
         ${progress}
         <div class="slt-upd-buttons">${options.buttonsHtml}</div>
     `;
+    const notes = content.querySelector(".slt-upd-notes");
+    const toggle = content.querySelector(".slt-upd-notes-toggle");
+    const notesContent = content.querySelector(".slt-upd-notes-content");
+    const toggleLabel = content.querySelector(".slt-upd-notes-toggle-label");
+    toggle?.addEventListener("click", () => {
+      const expand = notes?.classList.contains("collapsed") ?? false;
+      notes?.classList.toggle("collapsed", !expand);
+      if (notesContent)
+        notesContent.hidden = !expand;
+      toggle.setAttribute("aria-expanded", String(expand));
+      if (toggleLabel)
+        toggleLabel.textContent = expand ? "Hide" : "Show";
+    });
     return content;
   }
   var UPDATER_STYLES = `
@@ -9264,6 +9425,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         font-size: 22px;
         flex-shrink: 0;
         box-shadow: 0 4px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
+    }
+    .slt-upd-hero-emoji {
+        width: 28px;
+        height: 28px;
+        object-fit: contain;
     }
     .slt-upd-hero-text {
         flex: 1;
@@ -9331,29 +9497,63 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         animation: slt-upd-nudge 1.8s ease-in-out infinite;
     }
     .slt-upd-notes {
-        padding: 14px 18px;
         margin-bottom: 16px;
         border-radius: 10px;
-        max-height: 320px;
-        overflow-y: auto;
+        overflow: hidden;
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.06);
     }
-    .slt-upd-notes::-webkit-scrollbar { width: 5px; }
-    .slt-upd-notes::-webkit-scrollbar-track { background: transparent; }
-    .slt-upd-notes::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+    .slt-upd-notes-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 12px 18px;
+        border: none;
+        background: transparent;
+        color: var(--spice-text);
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.2s ease;
+    }
+    .slt-upd-notes-toggle:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+    .slt-upd-notes-toggle:focus-visible {
+        outline: 2px solid var(--slt-cl-accent);
+        outline-offset: -2px;
+    }
     .slt-upd-notes-title {
+        flex: 1;
         font-weight: 600;
         font-size: 12px;
-        margin-bottom: 10px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
+    .slt-upd-notes-toggle-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--slt-cl-accent);
+    }
+    .slt-upd-notes-chevron {
+        color: var(--slt-cl-accent);
+        transition: transform 0.2s ease;
+    }
+    .slt-upd-notes.collapsed .slt-upd-notes-chevron {
+        transform: rotate(-90deg);
+    }
     .slt-upd-notes-content {
+        padding: 0 18px 14px;
+        max-height: 280px;
+        overflow-y: auto;
         color: var(--spice-subtext);
         font-size: 13px;
         line-height: 1.65;
     }
+    .slt-upd-notes-content[hidden] { display: none; }
+    .slt-upd-notes-content::-webkit-scrollbar { width: 5px; }
+    .slt-upd-notes-content::-webkit-scrollbar-track { background: transparent; }
+    .slt-upd-notes-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
     .slt-upd-notes-content strong { color: var(--spice-text); }
     .slt-upd-notes-content del { opacity: 0.5; }
     .slt-upd-muted {
@@ -11988,6 +12188,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (!isLearningActive())
         return null;
       setLearningTargetLanguage(state.targetLanguage);
+      setLearningSourceLanguage(state.detectedLanguage || "");
       const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
       if (cached)
         return cached;

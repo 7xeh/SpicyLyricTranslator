@@ -610,7 +610,7 @@ function presentPrompt(result: UpdateCheckResult): void {
 
     const content = buildUpdaterModal({
         variant: isHotfix ? 'hotfix' : 'update',
-        icon: isHotfix ? '🔧' : '🚀',
+        icon: isHotfix ? '🔧' : UPDATE_ICON_HTML,
         title,
         subtitle,
         versionRow: { from: fromLabel, to: toLabel },
@@ -654,10 +654,10 @@ function showAppliedModal(kind: PromptKind, version: string, changelog: string):
 
     const content = buildUpdaterModal({
         variant: isHotfix ? 'hotfix' : 'update',
-        icon: isHotfix ? '🔧' : '✨',
+        icon: isHotfix ? '🔧' : UPDATE_ICON_HTML,
         title: isHotfix ? 'Hotfix applied' : 'Updated successfully',
         titleBadges: [`v${version}`, ...(hashShort ? [hashShort] : [])],
-        subtitle: isHotfix ? "Here's what changed in this hotfix" : "Here's what's new in this release",
+        subtitle: isHotfix ? `The latest v${version} build is now running.` : `Spicy Lyric Translator v${version} is now running.`,
         changelogHtml: formatReleaseNotes(changelog),
         buttonsHtml: `
             <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
@@ -729,7 +729,7 @@ export async function showCurrentChangelog(): Promise<void> {
 
     const content = buildUpdaterModal({
         variant: 'update',
-        icon: '📝',
+        icon: UPDATE_ICON_HTML,
         title: "What's new",
         titleBadges: [`v${CURRENT_VERSION}`, ...(hashShort ? [hashShort] : [])],
         subtitle: 'Changelog for the version you are running',
@@ -744,6 +744,8 @@ export async function showCurrentChangelog(): Promise<void> {
     content.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => hideModal());
     displayModal({ title: 'Spicy Lyric Translator', content, isLarge: true });
 }
+
+const UPDATE_ICON_HTML = '<img class="slt-upd-hero-emoji" src="https://cdn.discordapp.com/emojis/1526398149407543389.webp?size=96" alt="" draggable="false">';
 
 interface UpdaterModalOptions {
     variant: 'update' | 'hotfix';
@@ -790,13 +792,29 @@ function buildUpdaterModal(options: UpdaterModalOptions): HTMLElement {
             </div>
         </div>
         ${versionRow}
-        <div class="slt-upd-notes">
-            <div class="slt-upd-notes-title">Changelog</div>
-            <div class="slt-upd-notes-content">${options.changelogHtml}</div>
+        <div class="slt-upd-notes collapsed">
+            <button class="slt-upd-notes-toggle" type="button" aria-expanded="false">
+                <span class="slt-upd-notes-title">Changelog</span>
+                <span class="slt-upd-notes-toggle-label">Show</span>
+                <span class="slt-upd-notes-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="slt-upd-notes-content" hidden>${options.changelogHtml}</div>
         </div>
         ${progress}
         <div class="slt-upd-buttons">${options.buttonsHtml}</div>
     `;
+
+    const notes = content.querySelector('.slt-upd-notes') as HTMLElement | null;
+    const toggle = content.querySelector('.slt-upd-notes-toggle') as HTMLButtonElement | null;
+    const notesContent = content.querySelector('.slt-upd-notes-content') as HTMLElement | null;
+    const toggleLabel = content.querySelector('.slt-upd-notes-toggle-label') as HTMLElement | null;
+    toggle?.addEventListener('click', () => {
+        const expand = notes?.classList.contains('collapsed') ?? false;
+        notes?.classList.toggle('collapsed', !expand);
+        if (notesContent) notesContent.hidden = !expand;
+        toggle.setAttribute('aria-expanded', String(expand));
+        if (toggleLabel) toggleLabel.textContent = expand ? 'Hide' : 'Show';
+    });
 
     return content;
 }
@@ -848,6 +866,11 @@ const UPDATER_STYLES = `
         font-size: 22px;
         flex-shrink: 0;
         box-shadow: 0 4px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
+    }
+    .slt-upd-hero-emoji {
+        width: 28px;
+        height: 28px;
+        object-fit: contain;
     }
     .slt-upd-hero-text {
         flex: 1;
@@ -915,29 +938,63 @@ const UPDATER_STYLES = `
         animation: slt-upd-nudge 1.8s ease-in-out infinite;
     }
     .slt-upd-notes {
-        padding: 14px 18px;
         margin-bottom: 16px;
         border-radius: 10px;
-        max-height: 320px;
-        overflow-y: auto;
+        overflow: hidden;
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.06);
     }
-    .slt-upd-notes::-webkit-scrollbar { width: 5px; }
-    .slt-upd-notes::-webkit-scrollbar-track { background: transparent; }
-    .slt-upd-notes::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+    .slt-upd-notes-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 12px 18px;
+        border: none;
+        background: transparent;
+        color: var(--spice-text);
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.2s ease;
+    }
+    .slt-upd-notes-toggle:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+    .slt-upd-notes-toggle:focus-visible {
+        outline: 2px solid var(--slt-cl-accent);
+        outline-offset: -2px;
+    }
     .slt-upd-notes-title {
+        flex: 1;
         font-weight: 600;
         font-size: 12px;
-        margin-bottom: 10px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
+    .slt-upd-notes-toggle-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--slt-cl-accent);
+    }
+    .slt-upd-notes-chevron {
+        color: var(--slt-cl-accent);
+        transition: transform 0.2s ease;
+    }
+    .slt-upd-notes.collapsed .slt-upd-notes-chevron {
+        transform: rotate(-90deg);
+    }
     .slt-upd-notes-content {
+        padding: 0 18px 14px;
+        max-height: 280px;
+        overflow-y: auto;
         color: var(--spice-subtext);
         font-size: 13px;
         line-height: 1.65;
     }
+    .slt-upd-notes-content[hidden] { display: none; }
+    .slt-upd-notes-content::-webkit-scrollbar { width: 5px; }
+    .slt-upd-notes-content::-webkit-scrollbar-track { background: transparent; }
+    .slt-upd-notes-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
     .slt-upd-notes-content strong { color: var(--spice-text); }
     .slt-upd-notes-content del { opacity: 0.5; }
     .slt-upd-muted {

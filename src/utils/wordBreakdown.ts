@@ -20,7 +20,7 @@ const KATAKANA_RANGE = /[゠-ヿㇰ-ㇿ]/;
 const HANGUL_RANGE = /[가-힯ᄀ-ᇿ㄰-㆏]/;
 const CJK_RANGE = /[一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯ᄀ-ᇿ]/;
 
-const TRIM_EDGE_PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+const TRIM_EDGE_PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu;
 
 type CharClass = 'han' | 'hiragana' | 'katakana' | 'hangul' | 'word' | 'space' | 'other';
 
@@ -30,7 +30,7 @@ function classifyChar(ch: string): CharClass {
     if (HIRAGANA_RANGE.test(ch)) return 'hiragana';
     if (KATAKANA_RANGE.test(ch)) return 'katakana';
     if (HANGUL_RANGE.test(ch)) return 'hangul';
-    if (/[\p{L}\p{N}]/u.test(ch)) return 'word';
+    if (/[\p{L}\p{M}\p{N}]/u.test(ch)) return 'word';
     return 'other';
 }
 
@@ -126,7 +126,7 @@ export function normalizeToken(text: string): string {
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '')
         .toLowerCase()
-        .replace(/[^\p{L}\p{N}]/gu, '');
+        .replace(/[^\p{L}\p{M}\p{N}]/gu, '');
 }
 
 function bigrams(value: string): string[] {
@@ -344,7 +344,33 @@ function mergeEmptyTargets(pairs: DistributedPair[]): DistributedPair[] {
     return merged;
 }
 
-export function buildHeuristicBreakdown(sourceText: string, targetText: string, targetLang?: string): LineBreakdown {
+type WordOrder = 'svo' | 'sov' | 'vso' | 'non-svo';
+
+const SOV_LANGUAGES = new Set([
+    'ja', 'ko', 'hi', 'bn', 'ur', 'pa', 'gu', 'mr', 'ne', 'si', 'ta', 'te', 'kn', 'ml', 'or', 'as', 'sa',
+    'tr', 'az', 'uz', 'kk', 'ky', 'tk', 'tt', 'ba', 'mn', 'fa', 'ps', 'ku', 'my', 'bo', 'dz', 'eu', 'am', 'hy', 'ka', 'la'
+]);
+const VSO_LANGUAGES = new Set(['ar', 'ga', 'gd', 'cy', 'br', 'gv', 'mi', 'haw', 'sm', 'to', 'tl', 'fil']);
+
+const SOV_SCRIPT_RANGE = /[぀-ゟ゠-ヿ가-힯ᄀ-ᇿऀ-෿ༀ-࿿က-႟ሀ-፿]/;
+const ARABIC_SCRIPT_RANGE = /[؀-ۿݐ-ݿ]/;
+
+export function wordOrderOf(lang?: string, sample?: string): WordOrder {
+    const base = (lang || '').toLowerCase().split(/[-_]/)[0];
+    if (SOV_LANGUAGES.has(base)) return 'sov';
+    if (VSO_LANGUAGES.has(base)) return 'vso';
+    if (base && base !== 'auto' && base !== 'unknown') return 'svo';
+    const text = sample || '';
+    if (SOV_SCRIPT_RANGE.test(text)) return 'sov';
+    if (ARABIC_SCRIPT_RANGE.test(text)) return 'non-svo';
+    return 'svo';
+}
+
+export function sharesWordOrder(sourceText: string, targetText: string, targetLang?: string, sourceLang?: string): boolean {
+    return wordOrderOf(sourceLang, sourceText) === wordOrderOf(targetLang, targetText);
+}
+
+export function buildHeuristicBreakdown(sourceText: string, targetText: string, targetLang?: string, sourceLang?: string): LineBreakdown {
     const sourceTokens = segmentSourceText(sourceText);
     const targetTokens = segmentTargetText(targetText);
 
@@ -354,6 +380,7 @@ export function buildHeuristicBreakdown(sourceText: string, targetText: string, 
 
     const anchors = monotonicAnchors(findAnchorCandidates(sourceTokens, targetTokens));
     const tokens: BreakdownToken[] = [];
+    const positional = sharesWordOrder(sourceText, targetText, targetLang, sourceLang);
 
     let sourceCursor = 0;
     let targetCursor = 0;
@@ -362,6 +389,11 @@ export function buildHeuristicBreakdown(sourceText: string, targetText: string, 
         const sourceSpan = sourceTokens.slice(sourceCursor, sourceEnd);
         const targetSpan = targetTokens.slice(targetCursor, targetEnd);
         if (sourceSpan.length === 0 && targetSpan.length === 0) return;
+
+        if (!positional) {
+            for (const source of sourceSpan) tokens.push({ source, target: '', confidence: 'low' });
+            return;
+        }
 
         for (const pair of distributeProportional(sourceSpan, targetSpan, targetLang)) {
             if (!pair.source && !pair.target) continue;
@@ -382,7 +414,9 @@ export function buildHeuristicBreakdown(sourceText: string, targetText: string, 
 
     pushSpan(sourceTokens.length, targetTokens.length);
 
-    return { tokens: tokens.filter(token => token.source || token.target), origin: 'heuristic' };
+    const kept = tokens.filter(token => token.source || token.target);
+    if (!positional && !kept.some(token => token.target)) return { tokens: [], origin: 'heuristic' };
+    return { tokens: kept, origin: 'heuristic' };
 }
 
 function coerceConfidence(value: unknown): BreakdownConfidence {

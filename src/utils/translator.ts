@@ -12,7 +12,7 @@ import {
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
 import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
-import { buildBreakdownPrompt, parseModelBreakdown, breakdownCacheKey, BreakdownToken } from './wordBreakdown';
+import { buildBreakdownPrompt, parseModelBreakdown, breakdownCacheKey, segmentSourceText, BreakdownToken } from './wordBreakdown';
 import { DEFAULT_MODELS, resolveModelId } from './modelCatalog';
 
 export interface TranslationResult {
@@ -2841,8 +2841,73 @@ export function deleteTrackCacheEntry(trackUri: string, targetLang?: string): vo
     deleteTrackCache(trackUri, targetLang);
 }
 
-export function providerSupportsWordBreakdown(api: ApiPreference = preferredApi): boolean {
-    return VARIANT_CAPABLE_APIS.includes(api);
+export function providerSupportsWordBreakdown(): boolean {
+    return true;
+}
+
+type BreakdownKind = 'model' | 'machine';
+
+function breakdownKindFor(api: ApiPreference = preferredApi): BreakdownKind {
+    return VARIANT_CAPABLE_APIS.includes(api) ? 'model' : 'machine';
+}
+
+const MACHINE_WORD_LOOKUP_LIMIT = 24;
+const MACHINE_WORD_SINGLE_FALLBACK_LIMIT = 12;
+
+function splitLookupLines(text: string): string[] {
+    return (text || '').replace(/\r\n?/g, '\n').split('\n').map(line => line.trim());
+}
+
+async function lookupWordsWithGoogle(words: string[], targetLang: string, sourceLang?: string): Promise<string[] | null> {
+    await rateLimitedDelay();
+    const joined = await translateWithGoogle(words.join('\n'), targetLang, sourceLang);
+    const lines = splitLookupLines(joined.translation);
+    while (lines.length > words.length && !lines[lines.length - 1]) lines.pop();
+    if (lines.length === words.length && lines.every(Boolean)) return lines;
+
+    if (words.length > MACHINE_WORD_SINGLE_FALLBACK_LIMIT) return null;
+    const singles = await Promise.all(words.map(async word => {
+        try {
+            const result = await translateWithGoogle(word, targetLang, sourceLang);
+            return result.translation.trim();
+        } catch {
+            return '';
+        }
+    }));
+    return singles.some(Boolean) ? singles : null;
+}
+
+async function lookupWordsWithMachineTranslation(words: string[], targetLang: string, sourceLang?: string): Promise<string[] | null> {
+    if (preferredApi === 'deepl' || preferredApi === 'libretranslate') {
+        try {
+            await rateLimitedDelay();
+            const result = await translateBatchArray(words, targetLang);
+            const translations = result.translations.map(value => (value || '').trim());
+            if (translations.length === words.length && translations.some(Boolean)) return translations;
+        } catch (lookupError) {
+            warn('Word lookup via primary provider failed, using Google:', lookupError);
+        }
+    }
+    return lookupWordsWithGoogle(words, targetLang, sourceLang);
+}
+
+async function requestMachineBreakdown(sourceText: string, targetLang: string, sourceLang?: string): Promise<BreakdownToken[] | null> {
+    const words = segmentSourceText(sourceText);
+    if (words.length === 0 || words.length > MACHINE_WORD_LOOKUP_LIMIT) return null;
+
+    const unique = Array.from(new Set(words));
+    const translations = await lookupWordsWithMachineTranslation(unique, targetLang, sourceLang);
+    if (!translations) return null;
+
+    const byWord = new Map<string, string>();
+    unique.forEach((word, index) => byWord.set(word, translations[index] || ''));
+
+    const tokens: BreakdownToken[] = words.map(word => ({
+        source: word,
+        target: byWord.get(word) || '',
+        confidence: 'medium'
+    }));
+    return tokens.some(token => token.target) ? tokens : null;
 }
 
 async function requestModelCompletion(prompt: string, maxTokens: number): Promise<string> {
@@ -2966,6 +3031,7 @@ async function requestModelCompletion(prompt: string, maxTokens: number): Promis
 interface BreakdownCacheEntry {
     tokens: BreakdownToken[];
     timestamp: number;
+    kind?: BreakdownKind;
 }
 
 type BreakdownCache = Record<string, BreakdownCacheEntry>;
@@ -2982,12 +3048,13 @@ function loadBreakdownCache(): BreakdownCache {
 
 export function getCachedWordBreakdown(sourceText: string, targetLang: string): BreakdownToken[] | null {
     const entry = loadBreakdownCache()[breakdownCacheKey(sourceText, targetLang)];
-    return entry?.tokens?.length ? entry.tokens : null;
+    if (!entry?.tokens?.length) return null;
+    return (entry.kind || 'model') === breakdownKindFor() ? entry.tokens : null;
 }
 
 function storeWordBreakdown(sourceText: string, targetLang: string, tokens: BreakdownToken[]): void {
     const cache = loadBreakdownCache();
-    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now() };
+    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now(), kind: breakdownKindFor() };
 
     const keys = Object.keys(cache);
     if (keys.length > BREAKDOWN_CACHE_LIMIT) {
@@ -3018,12 +3085,17 @@ export async function fetchWordBreakdown(
     const cached = getCachedWordBreakdown(trimmed, targetLang);
     if (cached) return cached;
 
-    const key = breakdownCacheKey(trimmed, targetLang);
+    const key = `${breakdownKindFor()}:${breakdownCacheKey(trimmed, targetLang)}`;
     const pending = inFlightBreakdowns.get(key);
     if (pending) return pending;
 
     const request = (async (): Promise<BreakdownToken[] | null> => {
         try {
+            if (breakdownKindFor() === 'machine') {
+                const machineTokens = await requestMachineBreakdown(trimmed, targetLang, sourceLang);
+                if (machineTokens) storeWordBreakdown(trimmed, targetLang, machineTokens);
+                return machineTokens;
+            }
             const prompt = buildBreakdownPrompt(
                 trimmed,
                 getTranslationLanguageName(sourceLang || 'auto'),

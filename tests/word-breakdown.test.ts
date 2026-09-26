@@ -8,7 +8,9 @@ import {
     parseModelBreakdown,
     breakdownCacheKey,
     hasCjk,
-    chunkTargetSpan
+    chunkTargetSpan,
+    wordOrderOf,
+    sharesWordOrder
 } from '../src/utils/wordBreakdown';
 
 test('segmentSourceText splits Latin text and strips edge punctuation', () => {
@@ -91,7 +93,7 @@ test('heuristic breakdown reports low confidence when counts are uneven', () => 
 });
 
 test('heuristic breakdown still produces tokens for CJK sources', () => {
-    const result = buildHeuristicBreakdown('君の名は', 'What is your name');
+    const result = buildHeuristicBreakdown('我们今天一起走', 'We walk together today', 'en', 'zh-CN');
 
     assert.ok(result.tokens.length > 1, JSON.stringify(result.tokens));
     assert.ok(result.tokens.every(token => token.source || token.target));
@@ -197,4 +199,30 @@ test('every target word survives chunked distribution', () => {
     const words = result.tokens.map(t => t.target).join(' ').split(/\s+/).filter(Boolean);
 
     assert.deepEqual(words, ['The', 'roar', 'of', 'thunder', 'will', 'tear', 'us', 'apart']);
+});
+
+test('Devanagari and Bengali tokens keep their vowel signs', () => {
+    assert.deepEqual(segmentSourceText('तेरी मेरी कहानी'), ['तेरी', 'मेरी', 'कहानी']);
+    assert.deepEqual(segmentSourceText('তোমার আমার গান'), ['তোমার', 'আমার', 'গান']);
+});
+
+test('word order is inferred from language codes and scripts', () => {
+    assert.equal(wordOrderOf('ja'), 'sov');
+    assert.equal(wordOrderOf('hi-IN'), 'sov');
+    assert.equal(wordOrderOf('en'), 'svo');
+    assert.equal(wordOrderOf(undefined, 'তোমার আমার গান'), 'sov');
+    assert.equal(wordOrderOf(undefined, '空を見上げて'), 'sov');
+    assert.equal(wordOrderOf(undefined, '我们今天一起走'), 'svo');
+    assert.equal(sharesWordOrder('jag saknar dig', 'I miss you', 'en', 'sv'), true);
+    assert.equal(sharesWordOrder('तेरी मेरी कहानी', 'our story', 'en', 'hi'), false);
+});
+
+test('heuristic breakdown never slices by position across word orders', () => {
+    const result = buildHeuristicBreakdown('तेरी मेरी कहानी', 'The story of you and me', 'en', 'hi');
+    assert.deepEqual(result.tokens, []);
+});
+
+test('heuristic breakdown keeps shared anchors across word orders without guessing the rest', () => {
+    const result = buildHeuristicBreakdown('東京 で 君 を 待つ', 'I wait for you in Tokyo', 'en', 'ja');
+    assert.ok(result.tokens.every(token => !token.target || token.confidence === 'high'), JSON.stringify(result.tokens));
 });
