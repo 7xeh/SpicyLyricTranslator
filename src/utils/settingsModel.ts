@@ -1,5 +1,7 @@
 import { state } from './state';
+import type { NotificationLevel } from './state';
 import { storage } from './storage';
+import { notify } from './notify';
 import { OverlayMode } from './translationOverlay';
 import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolveTargetLanguage } from './translator';
 import type { ApiPreference, CustomApiFormat } from './translator';
@@ -34,17 +36,33 @@ export interface SettingsField {
 export interface SettingsCategory {
     id: string;
     label: string;
+    icon: string;
+    description: string;
     sections: string[];
 }
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-    { id: 'slt-cat-translation', label: 'Translation', sections: ['Translation', 'Behaviour'] },
+    {
+        id: 'slt-cat-translation',
+        label: 'Translation',
+        icon: '文',
+        description: 'The language you read in, how translations sit on the lyrics, and when they run.',
+        sections: ['Translation', 'Behaviour']
+    },
     {
         id: 'slt-cat-providers',
         label: 'Providers',
+        icon: '⇄',
+        description: 'Which service does the translating, plus its key and model.',
         sections: ['Provider', 'Custom API', 'LibreTranslate', 'DeepL', 'OpenAI', 'Gemini', 'Grok', 'Claude']
     },
-    { id: 'slt-cat-interface', label: 'Interface', sections: ['Interface'] }
+    {
+        id: 'slt-cat-interface',
+        label: 'Interface',
+        icon: '◐',
+        description: 'Notifications and the badges shown around the lyrics.',
+        sections: ['Interface']
+    }
 ];
 
 export const API_OPTIONS: SettingsOption[] = [
@@ -363,13 +381,19 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         defaultValue: false
     },
     {
-        id: 'show-notifications',
+        id: 'notification-level',
         section: 'Interface',
-        keywords: 'notifications toasts messages popup',
-        label: 'Show Notifications',
-        type: 'toggle',
-        storageKey: 'show-notifications',
-        defaultValue: true
+        keywords: 'notifications toasts messages popup alerts errors quiet silent',
+        label: 'Notifications',
+        type: 'select',
+        storageKey: 'notification-level',
+        defaultValue: 'all',
+        options: [
+            { value: 'all', text: 'All' },
+            { value: 'errors', text: 'Errors and warnings only' },
+            { value: 'off', text: 'Off' }
+        ],
+        description: 'Which pop-up messages to show. Update prompts always appear, and warnings and errors are kept in the notification inbox either way.'
     },
     {
         id: 'learning-mode',
@@ -521,10 +545,7 @@ function configureTranslationApi(): void {
 }
 
 function notifySettingCorrection(message: string): void {
-    const spicetify = (globalThis as any).Spicetify;
-    if (state.showNotifications && spicetify?.showNotification) {
-        spicetify.showNotification(message);
-    }
+    notify({ kind: 'info', title: message, key: 'slt-setting-correction' });
 }
 
 function showLearningCards(): void {
@@ -649,8 +670,8 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'auto-translate':
             state.autoTranslate = Boolean(value);
             break;
-        case 'show-notifications':
-            state.showNotifications = Boolean(value);
+        case 'notification-level':
+            state.notificationLevel = String(value) as NotificationLevel;
             break;
         case 'show-quality-indicator':
             state.showQualityIndicator = Boolean(value);

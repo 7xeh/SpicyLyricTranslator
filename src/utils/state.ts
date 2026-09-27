@@ -14,6 +14,14 @@ function resolveStoredTargetLanguage(): string {
     );
 }
 
+export type NotificationLevel = 'all' | 'errors' | 'off';
+
+function resolveStoredNotificationLevel(): NotificationLevel {
+    const stored = storage.get('notification-level');
+    if (stored === 'all' || stored === 'errors' || stored === 'off') return stored;
+    return storage.get('show-notifications') === 'false' ? 'off' : 'all';
+}
+
 export interface TranslationQualityMeta {
     source: 'cache' | 'api';
     api?: string;
@@ -28,6 +36,7 @@ export interface ExtensionState {
     targetLanguage: string;
     autoTranslate: boolean;
     showNotifications: boolean;
+    notificationLevel: NotificationLevel;
     preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom';
     customApiUrl: string;
     customApiKey: string;
@@ -67,7 +76,13 @@ export const state: ExtensionState = {
     isTranslating: false,
     targetLanguage: resolveStoredTargetLanguage(),
     autoTranslate: storage.get('auto-translate') === 'true',
-    showNotifications: storage.get('show-notifications') !== 'false',
+    notificationLevel: resolveStoredNotificationLevel(),
+    get showNotifications(): boolean {
+        return this.notificationLevel !== 'off';
+    },
+    set showNotifications(value: boolean) {
+        this.notificationLevel = value ? 'all' : 'off';
+    },
     preferredApi: (storage.get('preferred-api') as 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom') || 'google',
     customApiUrl: storage.get('custom-api-url') || '',
     customApiKey: storage.getSecret('custom-api-key') || '',

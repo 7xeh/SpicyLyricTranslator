@@ -337,8 +337,8 @@ var SpicyLyricTranslater = (() => {
     const target = normalizeLanguageBase(targetLang);
     return Boolean(source && target && source === target);
   }
-  function hasNonLatinScript(text) {
-    return /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(text || "");
+  function hasNonLatinScript(text3) {
+    return /[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\uAC00-\uD7AF\u1100-\u11FF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(text3 || "");
   }
   function isSameLanguageNoopCache(entry, targetLang) {
     if (!isSameCacheLanguage(entry.lang, targetLang))
@@ -1283,10 +1283,10 @@ var SpicyLyricTranslater = (() => {
     const normalized = normalizeLanguageCode(code);
     return normalized === "zh-hani" ? "zh-hans" : normalized;
   }
-  function detectChineseScript(text) {
+  function detectChineseScript(text3) {
     let simplified = 0;
     let traditional = 0;
-    for (const char of text || "") {
+    for (const char of text3 || "") {
       if (SIMPLIFIED_ONLY_CHARS.has(char))
         simplified++;
       else if (TRADITIONAL_ONLY_CHARS.has(char))
@@ -1323,8 +1323,8 @@ var SpicyLyricTranslater = (() => {
     const indices = getSampleIndices(lines.length);
     return indices.map((i) => lines[i]).filter((line) => line && line.trim().length > 0 && !/^[•♪♫\s\-–—]+$/.test(line.trim())).join(" ");
   }
-  function tokenizeWords(text) {
-    const normalized = text.replace(/[’ʼ‘`´]/g, "'");
+  function tokenizeWords(text3) {
+    const normalized = text3.replace(/[’ʼ‘`´]/g, "'");
     const matches = normalized.toLowerCase().match(/[\p{L}']+/gu);
     if (!matches)
       return [];
@@ -1458,12 +1458,12 @@ var SpicyLyricTranslater = (() => {
     }
     return { romaji, specific, strong };
   }
-  function detectRomanizedJapanese(text) {
-    if (!text)
+  function detectRomanizedJapanese(text3) {
+    if (!text3)
       return null;
-    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(text))
+    if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(text3))
       return null;
-    const words = tokenizeWords(text);
+    const words = tokenizeWords(text3);
     if (words.length < 4)
       return null;
     const { romaji, specific, strong } = countRomajiTokens(words);
@@ -1520,12 +1520,12 @@ var SpicyLyricTranslater = (() => {
     chars: new Set(entry.chars.split(""))
   }));
   var VIETNAMESE_MARKER_REGEX = /[ơướờởỡợứừửữự]/i;
-  function detectByDistinctiveLatinMarkers(text) {
-    if (!text)
+  function detectByDistinctiveLatinMarkers(text3) {
+    if (!text3)
       return null;
-    if (VIETNAMESE_MARKER_REGEX.test(text))
+    if (VIETNAMESE_MARKER_REGEX.test(text3))
       return null;
-    const lower = text.toLowerCase();
+    const lower = text3.toLowerCase();
     const counts = {};
     for (const char of lower) {
       for (const marker of DISTINCTIVE_MARKER_SETS) {
@@ -1546,19 +1546,19 @@ var SpicyLyricTranslater = (() => {
     const confidence = Math.min(0.9, 0.78 + Math.min(topCount, 6) * 0.02);
     return { code: topCode, confidence };
   }
-  function detectLanguageHeuristic(text) {
-    if (!text)
+  function detectLanguageHeuristic(text3) {
+    if (!text3)
       return null;
-    const hasNonLatinScript2 = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text);
+    const hasNonLatinScript2 = NON_LATIN_SCRIPT_DETECTION_REGEX.test(text3);
     const minLength = hasNonLatinScript2 ? 1 : 10;
-    if (text.length < minLength) {
+    if (text3.length < minLength) {
       return null;
     }
-    const distinctive = detectByDistinctiveLatinMarkers(text);
+    const distinctive = detectByDistinctiveLatinMarkers(text3);
     if (distinctive) {
       return distinctive;
     }
-    const normalizedText = text.trim();
+    const normalizedText = text3.trim();
     let totalChars = 0;
     const scriptCounts = {};
     for (const char of normalizedText) {
@@ -1627,8 +1627,8 @@ var SpicyLyricTranslater = (() => {
     }
     return null;
   }
-  async function detectLanguageViaAPI(text) {
-    const sample = text.slice(0, 500);
+  async function detectLanguageViaAPI(text3) {
+    const sample = text3.slice(0, 500);
     const params = new URLSearchParams({
       client: "gtx",
       sl: "auto",
@@ -1726,8 +1726,8 @@ var SpicyLyricTranslater = (() => {
     }
     return count;
   }
-  function isLikelyNonTargetLine(text, targetLanguage) {
-    const trimmed = (text || "").trim();
+  function isLikelyNonTargetLine(text3, targetLanguage) {
+    const trimmed = (text3 || "").trim();
     if (!trimmed)
       return false;
     if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed)) {
@@ -1935,8 +1935,8 @@ var SpicyLyricTranslater = (() => {
       return "word";
     return "other";
   }
-  function hasCjk(text) {
-    return CJK_RANGE.test(text || "");
+  function hasCjk(text3) {
+    return CJK_RANGE.test(text3 || "");
   }
   function splitHanRun(run) {
     if (run.length <= 3)
@@ -1951,8 +1951,8 @@ var SpicyLyricTranslater = (() => {
     }
     return parts;
   }
-  function segmentSourceText(text) {
-    const raw = (text || "").trim();
+  function segmentSourceText(text3) {
+    const raw = (text3 || "").trim();
     if (!raw)
       return [];
     if (!hasCjk(raw)) {
@@ -2002,11 +2002,11 @@ var SpicyLyricTranslater = (() => {
     flush();
     return tokens.filter(Boolean);
   }
-  function segmentTargetText(text) {
-    return (text || "").trim().split(/\s+/).filter(Boolean);
+  function segmentTargetText(text3) {
+    return (text3 || "").trim().split(/\s+/).filter(Boolean);
   }
-  function normalizeToken(text) {
-    return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, "");
+  function normalizeToken(text3) {
+    return (text3 || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, "");
   }
   function bigrams(value) {
     if (value.length < 2)
@@ -2231,10 +2231,10 @@ var SpicyLyricTranslater = (() => {
       return "vso";
     if (base && base !== "auto" && base !== "unknown")
       return "svo";
-    const text = sample || "";
-    if (SOV_SCRIPT_RANGE.test(text))
+    const text3 = sample || "";
+    if (SOV_SCRIPT_RANGE.test(text3))
       return "sov";
-    if (ARABIC_SCRIPT_RANGE.test(text))
+    if (ARABIC_SCRIPT_RANGE.test(text3))
       return "non-svo";
     return "svo";
   }
@@ -2291,14 +2291,14 @@ var SpicyLyricTranslater = (() => {
     return typeof value === "string" ? value.trim() : "";
   }
   function optionalString(value) {
-    const text = coerceString(value);
-    return text ? text : void 0;
+    const text3 = coerceString(value);
+    return text3 ? text3 : void 0;
   }
   function parseModelBreakdown(raw) {
-    const text = (raw || "").trim();
-    if (!text)
+    const text3 = (raw || "").trim();
+    if (!text3)
       return null;
-    const withoutFences = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const withoutFences = text3.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const start = withoutFences.indexOf("[");
     const end = withoutFences.lastIndexOf("]");
     if (start === -1 || end === -1 || end <= start)
@@ -2315,18 +2315,18 @@ var SpicyLyricTranslater = (() => {
     for (const entry of parsed) {
       if (!entry || typeof entry !== "object")
         continue;
-      const record = entry;
-      const source = coerceString(record.source ?? record.s);
-      const target = coerceString(record.target ?? record.t);
+      const record2 = entry;
+      const source = coerceString(record2.source ?? record2.s);
+      const target = coerceString(record2.target ?? record2.t);
       if (!source && !target)
         continue;
       tokens.push({
         source,
         target,
-        lemma: optionalString(record.lemma ?? record.l),
-        pos: optionalString(record.pos ?? record.p),
-        note: optionalString(record.note ?? record.n),
-        confidence: coerceConfidence(record.confidence)
+        lemma: optionalString(record2.lemma ?? record2.l),
+        pos: optionalString(record2.pos ?? record2.p),
+        note: optionalString(record2.note ?? record2.n),
+        confidence: coerceConfidence(record2.confidence)
       });
     }
     return tokens.length > 0 ? tokens : null;
@@ -2710,20 +2710,20 @@ var SpicyLyricTranslater = (() => {
     }
     return `${lines.length}:${(hash >>> 0).toString(36)}`;
   }
-  function hasMixedLatinAndNonLatin(text) {
-    if (!text)
+  function hasMixedLatinAndNonLatin(text3) {
+    if (!text3)
       return false;
-    const hasLatin = /[A-Za-z]/.test(text);
-    const hasNonLatin = NON_LATIN_SEGMENT_REGEX.test(text);
+    const hasLatin = /[A-Za-z]/.test(text3);
+    const hasNonLatin = NON_LATIN_SEGMENT_REGEX.test(text3);
     NON_LATIN_SEGMENT_REGEX.lastIndex = 0;
     return hasLatin && hasNonLatin;
   }
   function normalizeComparisonText(value) {
     return (value || "").toLowerCase().replace(/[\u200B\u2060\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
   }
-  function getLatinSkeleton(text) {
+  function getLatinSkeleton(text3) {
     return normalizeComparisonText(
-      (text || "").replace(NON_LATIN_SEGMENT_REGEX, " ").replace(/\s+/g, " ").trim()
+      (text3 || "").replace(NON_LATIN_SEGMENT_REGEX, " ").replace(/\s+/g, " ").trim()
     );
   }
   function isSuspiciousMixedLineTranslation(source, translated) {
@@ -2766,10 +2766,10 @@ var SpicyLyricTranslater = (() => {
     const base = (targetLang || "").toLowerCase().split(/[-_]/)[0];
     return !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el", "fa", "ur", "bn", "ta", "te", "kn", "ml", "gu", "pa", "or", "si", "my", "km", "lo", "ka", "am", "yi", "ug"].includes(base);
   }
-  function sourceHasNonLatinScript(text) {
-    if (!text)
+  function sourceHasNonLatinScript(text3) {
+    if (!text3)
       return false;
-    const hit = NON_LATIN_SEGMENT_REGEX.test(text);
+    const hit = NON_LATIN_SEGMENT_REGEX.test(text3);
     NON_LATIN_SEGMENT_REGEX.lastIndex = 0;
     return hit;
   }
@@ -2785,8 +2785,8 @@ var SpicyLyricTranslater = (() => {
     }
     return isLikelyNonTargetLine(source, targetLang);
   }
-  function getConfidentLineLanguage(text) {
-    const detected = detectLanguageHeuristic(text);
+  function getConfidentLineLanguage(text3) {
+    const detected = detectLanguageHeuristic(text3);
     return detected && detected.confidence >= 0.6 ? detected.code : void 0;
   }
   function getConfidentLineLanguages(lines) {
@@ -2802,8 +2802,8 @@ var SpicyLyricTranslater = (() => {
     }
     return languages;
   }
-  function getLineSourceLangHint(text, targetLang, fallbackSourceLang, mixedSourceTrack = false) {
-    const lineLang = getConfidentLineLanguage(text);
+  function getLineSourceLangHint(text3, targetLang, fallbackSourceLang, mixedSourceTrack = false) {
+    const lineLang = getConfidentLineLanguage(text3);
     if (lineLang) {
       return lineLang;
     }
@@ -2815,16 +2815,16 @@ var SpicyLyricTranslater = (() => {
     }
     return void 0;
   }
-  function looksLikeMarkerDebris(text) {
-    if (!text)
+  function looksLikeMarkerDebris(text3) {
+    if (!text3)
       return false;
-    if (/\[\[\s*SLT/i.test(text))
+    if (/\[\[\s*SLT/i.test(text3))
       return true;
-    if (/\bSLT[_\s-]*BATCH\b/i.test(text))
+    if (/\bSLT[_\s-]*BATCH\b/i.test(text3))
       return true;
-    if (/\]\]/.test(text) && /\b\d+\b/.test(text) && text.length < 60)
+    if (/\]\]/.test(text3) && /\b\d+\b/.test(text3) && text3.length < 60)
       return true;
-    if (/^\s*[A-Za-z]{2,}_\d+\s*\]?\]?/.test(text))
+    if (/^\s*[A-Za-z]{2,}_\d+\s*\]?\]?/.test(text3))
       return true;
     return false;
   }
@@ -2949,8 +2949,8 @@ var SpicyLyricTranslater = (() => {
     const message = err instanceof Error ? err.message : String(err || "");
     return /API error: (5\d\d|429)\b/.test(message);
   }
-  function createProviderHttpError(providerName, status, errorText) {
-    const message = `${providerName} API error: ${status}${errorText ? ` ${sanitizeProviderErrorText(errorText).slice(0, 240)}` : ""}`;
+  function createProviderHttpError(providerName2, status, errorText) {
+    const message = `${providerName2} API error: ${status}${errorText ? ` ${sanitizeProviderErrorText(errorText).slice(0, 240)}` : ""}`;
     if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
       return new NonRetryableProviderError(message, status);
     }
@@ -2959,8 +2959,8 @@ var SpicyLyricTranslater = (() => {
   function createProviderConfigError(message) {
     return new NonRetryableProviderError(message);
   }
-  function sanitizeProviderErrorText(text) {
-    return (text || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-...").replace(/AIza[A-Za-z0-9_-]+/g, "AIza...").replace(/AQ\.[A-Za-z0-9_.-]+/g, "AQ...");
+  function sanitizeProviderErrorText(text3) {
+    return (text3 || "").replace(/sk-[A-Za-z0-9_-]+/g, "sk-...").replace(/AIza[A-Za-z0-9_-]+/g, "AIza...").replace(/AQ\.[A-Za-z0-9_.-]+/g, "AQ...");
   }
   function getSpicetifyCorsProxyUrl(url) {
     return `${SPICETIFY_CORS_PROXY_BASE}${url}`;
@@ -2986,11 +2986,11 @@ var SpicyLyricTranslater = (() => {
     const status = Number(match[1]);
     return Number.isFinite(status) ? status : null;
   }
-  function normalizeCosmosError(err, providerName) {
+  function normalizeCosmosError(err, providerName2) {
     const status = getCosmosErrorStatus(err);
-    const message = err instanceof Error ? err.message : String(err || `${providerName} request failed`);
+    const message = err instanceof Error ? err.message : String(err || `${providerName2} request failed`);
     if (status !== null && status >= 400 && status < 600) {
-      return createProviderHttpError(providerName, status, message);
+      return createProviderHttpError(providerName2, status, message);
     }
     return err instanceof Error ? err : new Error(message);
   }
@@ -3007,7 +3007,7 @@ var SpicyLyricTranslater = (() => {
       return true;
     return isLikelyCorsOrNetworkError(err);
   }
-  async function runProviderTransports(transports, providerName) {
+  async function runProviderTransports(transports, providerName2) {
     let lastError = null;
     for (const transport of transports) {
       try {
@@ -3016,10 +3016,10 @@ var SpicyLyricTranslater = (() => {
         if (!isTransportFailure(err)) {
           throw err;
         }
-        lastError = err instanceof Error ? err : new Error(String(err || `${providerName} request failed`));
+        lastError = err instanceof Error ? err : new Error(String(err || `${providerName2} request failed`));
       }
     }
-    throw lastError || new Error(`${providerName} request failed`);
+    throw lastError || new Error(`${providerName2} request failed`);
   }
   function orderProviderTransports(viaCosmos, viaFetch, url, preferCosmos) {
     const transports = [];
@@ -3039,53 +3039,53 @@ var SpicyLyricTranslater = (() => {
   function cosmosCanCarryHeaders(headers) {
     return Object.keys(headers).every((key) => key.toLowerCase() === "content-type");
   }
-  function rejectCosmosErrorPayload(data, providerName) {
+  function rejectCosmosErrorPayload(data, providerName2) {
     if (!data || typeof data !== "object" || Array.isArray(data))
       return data;
     const payload = data;
     if (typeof payload.code === "number" && "error" in payload && payload.message === "Failed to fetch") {
-      throw createProviderHttpError(providerName, payload.code, String(payload.error || ""));
+      throw createProviderHttpError(providerName2, payload.code, String(payload.error || ""));
     }
     return data;
   }
-  function normalizeProviderJsonPayload(data, providerName) {
+  function normalizeProviderJsonPayload(data, providerName2) {
     if (typeof data !== "string") {
       return data;
     }
     const trimmed = data.trim();
     if (!trimmed) {
-      throw new NonRetryableProviderError(`${providerName} API returned an empty response`);
+      throw new NonRetryableProviderError(`${providerName2} API returned an empty response`);
     }
     if (trimmed.startsWith("<")) {
-      throw new NonRetryableProviderError(`${providerName} API returned HTML instead of JSON. Check the endpoint URL or API key.`);
+      throw new NonRetryableProviderError(`${providerName2} API returned HTML instead of JSON. Check the endpoint URL or API key.`);
     }
     try {
       return JSON.parse(trimmed);
     } catch {
-      throw new NonRetryableProviderError(`${providerName} API returned invalid JSON: ${trimmed.slice(0, 160)}`);
+      throw new NonRetryableProviderError(`${providerName2} API returned invalid JSON: ${trimmed.slice(0, 160)}`);
     }
   }
-  async function readProviderJsonResponse(response, providerName) {
+  async function readProviderJsonResponse(response, providerName2) {
     const responseText = await response.text().catch(() => "");
     if (!response.ok) {
-      throw createProviderHttpError(providerName, response.status, responseText);
+      throw createProviderHttpError(providerName2, response.status, responseText);
     }
-    return normalizeProviderJsonPayload(responseText, providerName);
+    return normalizeProviderJsonPayload(responseText, providerName2);
   }
-  async function postJsonProvider(url, body, headers, providerName, options = {}) {
+  async function postJsonProvider(url, body, headers, providerName2, options = {}) {
     const cosmos = getCosmosAsync();
     const cosmosPost = cosmosCanCarryHeaders(headers) ? cosmos?.post : void 0;
     const viaCosmos = cosmosPost ? async () => {
       try {
         return normalizeProviderJsonPayload(
           rejectCosmosErrorPayload(
-            await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName),
-            providerName
+            await withTimeout(cosmosPost(url, body, headers), PROVIDER_REQUEST_TIMEOUT_MS, providerName2),
+            providerName2
           ),
-          providerName
+          providerName2
         );
       } catch (err) {
-        throw normalizeCosmosError(err, providerName);
+        throw normalizeCosmosError(err, providerName2);
       }
     } : null;
     const viaFetch = async (target) => {
@@ -3093,17 +3093,17 @@ var SpicyLyricTranslater = (() => {
         method: "POST",
         headers,
         body: JSON.stringify(body)
-      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
-      return readProviderJsonResponse(response, providerName);
+      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName2);
+      return readProviderJsonResponse(response, providerName2);
     };
     return runProviderTransports(
       orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
-      providerName
+      providerName2
     );
   }
-  function buildLibreTranslateForm(text, targetLang) {
+  function buildLibreTranslateForm(text3, targetLang) {
     const params = new URLSearchParams();
-    const values = Array.isArray(text) ? text : [text];
+    const values = Array.isArray(text3) ? text3 : [text3];
     values.forEach((value) => params.append("q", value));
     params.set("source", "auto");
     params.set("target", getApiTargetLanguage(targetLang));
@@ -3127,7 +3127,7 @@ var SpicyLyricTranslater = (() => {
     });
     return result;
   }
-  async function postFormProvider(url, params, providerName, options = {}) {
+  async function postFormProvider(url, params, providerName2, options = {}) {
     const cosmos = getCosmosAsync();
     const cosmosPost = cosmos?.post;
     const viaCosmos = cosmosPost ? async () => {
@@ -3137,26 +3137,26 @@ var SpicyLyricTranslater = (() => {
             await withTimeout(
               cosmosPost(url, formToJsonObject(params), { "Content-Type": "application/json" }),
               PROVIDER_REQUEST_TIMEOUT_MS,
-              providerName
+              providerName2
             ),
-            providerName
+            providerName2
           ),
-          providerName
+          providerName2
         );
       } catch (err) {
-        throw normalizeCosmosError(err, providerName);
+        throw normalizeCosmosError(err, providerName2);
       }
     } : null;
     const viaFetch = async (target) => {
       const response = await fetchWithTimeout(target, {
         method: "POST",
         body: params
-      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName);
-      return readProviderJsonResponse(response, providerName);
+      }, PROVIDER_REQUEST_TIMEOUT_MS, providerName2);
+      return readProviderJsonResponse(response, providerName2);
     };
     return runProviderTransports(
       orderProviderTransports(viaCosmos, viaFetch, url, Boolean(options.preferCosmos)),
-      providerName
+      providerName2
     );
   }
   async function retryWithBackoff(fn, maxRetries = RATE_LIMIT.maxRetries, baseDelay = RATE_LIMIT.minDelayMs) {
@@ -3377,9 +3377,9 @@ var SpicyLyricTranslater = (() => {
   function getApiTargetLanguage(targetLang) {
     return getLanguageVariantByCode(targetLang)?.baseCode || targetLang;
   }
-  function getCachedTranslation(text, targetLang) {
+  function getCachedTranslation(text3, targetLang) {
     const cache = storage_default.getJSON("translation-cache", {});
-    const key = `${targetLang}:${text}`;
+    const key = `${targetLang}:${text3}`;
     const cached = cache[key];
     if (cached) {
       if (typeof cached.timestamp === "number" && Date.now() - cached.timestamp < CACHE_EXPIRY) {
@@ -3392,7 +3392,7 @@ var SpicyLyricTranslater = (() => {
           };
           storage_default.setJSON("translation-cache", cache);
         }
-        if (isSuspiciousMixedLineTranslation(text, normalized)) {
+        if (isSuspiciousMixedLineTranslation(text3, normalized)) {
           delete cache[key];
           storage_default.setJSON("translation-cache", cache);
           return null;
@@ -3402,8 +3402,8 @@ var SpicyLyricTranslater = (() => {
           storage_default.setJSON("translation-cache", cache);
           return null;
         }
-        if (normalized === text) {
-          if (shouldInvalidateIdentityTranslation(text, targetLang)) {
+        if (normalized === text3) {
+          if (shouldInvalidateIdentityTranslation(text3, targetLang)) {
             delete cache[key];
             storage_default.setJSON("translation-cache", cache);
             return null;
@@ -3417,10 +3417,10 @@ var SpicyLyricTranslater = (() => {
     }
     return null;
   }
-  function setCacheEntry(cache, text, targetLang, translation, api) {
-    const key = `${targetLang}:${text}`;
+  function setCacheEntry(cache, text3, targetLang, translation, api) {
+    const key = `${targetLang}:${text3}`;
     const normalizedTranslation = normalizeTranslatedLine(translation || "");
-    if (normalizedTranslation === text && shouldInvalidateIdentityTranslation(text, targetLang)) {
+    if (normalizedTranslation === text3 && shouldInvalidateIdentityTranslation(text3, targetLang)) {
       delete cache[key];
       return;
     }
@@ -3430,9 +3430,9 @@ var SpicyLyricTranslater = (() => {
       api
     };
   }
-  function cacheTranslation(text, targetLang, translation, api) {
+  function cacheTranslation(text3, targetLang, translation, api) {
     const cache = storage_default.getJSON("translation-cache", {});
-    setCacheEntry(cache, text, targetLang, translation, api);
+    setCacheEntry(cache, text3, targetLang, translation, api);
     pruneTranslationCache(cache);
     storage_default.setJSON("translation-cache", cache);
   }
@@ -3449,8 +3449,8 @@ var SpicyLyricTranslater = (() => {
       return "auto";
     return API_SOURCE_LANG_OVERRIDES[value] || value || "auto";
   }
-  async function translateWithGoogle(text, targetLang, sourceLang) {
-    const encodedText = encodeURIComponent(text);
+  async function translateWithGoogle(text3, targetLang, sourceLang) {
+    const encodedText = encodeURIComponent(text3);
     const sl = normalizeSourceLangHint(sourceLang);
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${getApiTargetLanguage(targetLang)}&dt=t&q=${encodedText}`;
     const response = await fetch(url);
@@ -3514,11 +3514,11 @@ var SpicyLyricTranslater = (() => {
     }
     return url;
   }
-  async function translateWithLibreTranslate(text, targetLang) {
+  async function translateWithLibreTranslate(text3, targetLang) {
     const url = validateLibreTranslateConfig();
     const data = await postFormProvider(
       url,
-      buildLibreTranslateForm(text, targetLang),
+      buildLibreTranslateForm(text3, targetLang),
       "LibreTranslate",
       { preferCosmos: true }
     );
@@ -3528,7 +3528,7 @@ var SpicyLyricTranslater = (() => {
     }
     throw new Error("Invalid response from LibreTranslate API");
   }
-  async function translateWithDeepL(text, targetLang) {
+  async function translateWithDeepL(text3, targetLang) {
     if (!deeplApiKey) {
       throw createProviderConfigError("DeepL API key not configured. Set it in Settings.");
     }
@@ -3537,7 +3537,7 @@ var SpicyLyricTranslater = (() => {
     const url = `${baseUrl}/v2/translate`;
     const data = await postJsonProvider(
       getSpicetifyCorsProxyUrl(url),
-      buildDeepLBody([text], targetLang),
+      buildDeepLBody([text3], targetLang),
       getDeepLHeaders(deeplApiKey),
       "DeepL"
     );
@@ -3550,14 +3550,14 @@ var SpicyLyricTranslater = (() => {
     }
     throw new Error("Invalid response from DeepL API");
   }
-  async function translateWithOpenAI(text, targetLang) {
+  async function translateWithOpenAI(text3, targetLang) {
     if (!openaiApiKey) {
       throw createProviderConfigError("OpenAI API key not configured. Set it in Settings.");
     }
     const langName = getTranslationLanguageName(targetLang);
     const data = await postJsonProvider(
       "https://api.openai.com/v1/chat/completions",
-      buildOpenAIChatBody(text, langName),
+      buildOpenAIChatBody(text3, langName),
       {
         "Authorization": `Bearer ${openaiApiKey}`,
         "Content-Type": "application/json"
@@ -3589,11 +3589,11 @@ var SpicyLyricTranslater = (() => {
   function getOpenAIReasoningEffort(model) {
     return model === "gpt-5.5" ? "none" : "low";
   }
-  function buildOpenAIChatBody(text, langName) {
+  function buildOpenAIChatBody(text3, langName) {
     const model = normalizeOpenAIModelName(openaiModel);
     const useSpeedMode = isOpenAIReasoningModel(model);
     const instruction = buildLyricsTranslationInstruction(langName);
-    const outputTokenBudget = Math.max(text.length * 4, useSpeedMode ? 8e3 : 2048);
+    const outputTokenBudget = Math.max(text3.length * 4, useSpeedMode ? 8e3 : 2048);
     const body = {
       model,
       messages: [
@@ -3603,7 +3603,7 @@ var SpicyLyricTranslater = (() => {
         },
         {
           role: "user",
-          content: text
+          content: text3
         }
       ],
       max_completion_tokens: outputTokenBudget
@@ -3642,7 +3642,7 @@ var SpicyLyricTranslater = (() => {
       "x-goog-api-key": apiKey
     };
   }
-  async function translateWithGemini(text, targetLang) {
+  async function translateWithGemini(text3, targetLang) {
     if (!geminiApiKey) {
       throw createProviderConfigError("Gemini API key not configured. Set it in Settings.");
     }
@@ -3656,14 +3656,14 @@ var SpicyLyricTranslater = (() => {
               {
                 text: `${buildLyricsTranslationInstruction(langName)}
 
-${text}`
+${text3}`
               }
             ]
           }
         ],
         generationConfig: {
           temperature: geminiTemperature,
-          maxOutputTokens: Math.max(text.length * 3, 2048)
+          maxOutputTokens: Math.max(text3.length * 3, 2048)
         }
       },
       getGeminiHeaders(geminiApiKey),
@@ -3679,7 +3679,7 @@ ${text}`
     }
     throw new Error("Invalid response from Gemini API");
   }
-  async function translateWithGrok(text, targetLang) {
+  async function translateWithGrok(text3, targetLang) {
     if (!grokApiKey) {
       throw createProviderConfigError("Grok (xAI) API key not configured. Set it in Settings.");
     }
@@ -3691,10 +3691,10 @@ ${text}`
         model,
         messages: [
           { role: "system", content: buildLyricsTranslationInstruction(langName) },
-          { role: "user", content: text }
+          { role: "user", content: text3 }
         ],
         temperature: 0.3,
-        max_tokens: Math.max(text.length * 3, 2048)
+        max_tokens: Math.max(text3.length * 3, 2048)
       },
       {
         "Authorization": `Bearer ${grokApiKey}`,
@@ -3715,7 +3715,7 @@ ${text}`
   function anthropicModelSupportsThinkingToggle(model) {
     return model === "claude-sonnet-5" || model === "claude-opus-4-8";
   }
-  async function translateWithAnthropic(text, targetLang) {
+  async function translateWithAnthropic(text3, targetLang) {
     if (!anthropicApiKey) {
       throw createProviderConfigError("Claude (Anthropic) API key not configured. Set it in Settings.");
     }
@@ -3723,10 +3723,10 @@ ${text}`
     const model = normalizeAnthropicModelName(anthropicModel);
     const body = {
       model,
-      max_tokens: Math.min(8192, Math.max(text.length * 2, 1024)),
+      max_tokens: Math.min(8192, Math.max(text3.length * 2, 1024)),
       system: buildLyricsTranslationInstruction(langName),
       messages: [
-        { role: "user", content: text }
+        { role: "user", content: text3 }
       ]
     };
     if (anthropicModelSupportsThinkingToggle(model)) {
@@ -3825,7 +3825,7 @@ ${text}`
     }
     return url;
   }
-  function buildCustomSingleBody(text, targetLang, format) {
+  function buildCustomSingleBody(text3, targetLang, format) {
     const langName = getTranslationLanguageName(targetLang);
     if (format === "openai") {
       return {
@@ -3837,11 +3837,11 @@ ${text}`
           },
           {
             role: "user",
-            content: text
+            content: text3
           }
         ],
         temperature: 0.3,
-        max_tokens: Math.max(text.length * 3, 500)
+        max_tokens: Math.max(text3.length * 3, 500)
       };
     }
     if (format === "gemini") {
@@ -3852,27 +3852,27 @@ ${text}`
               {
                 text: `${buildLyricsTranslationInstruction(langName)}
 
-${text}`
+${text3}`
               }
             ]
           }
         ],
         generationConfig: {
           temperature: geminiTemperature,
-          maxOutputTokens: Math.max(text.length * 3, 500)
+          maxOutputTokens: Math.max(text3.length * 3, 500)
         }
       };
     }
     if (format === "deepl") {
       return {
-        text: [text],
+        text: [text3],
         target_lang: getDeepLTargetLanguage(targetLang)
       };
     }
     const apiLang = getApiTargetLanguage(targetLang);
     return {
-      text,
-      q: text,
+      text: text3,
+      q: text3,
       source: "auto",
       target: apiLang,
       target_lang: apiLang,
@@ -3922,13 +3922,13 @@ ${text}`
     }
     return null;
   }
-  async function translateWithCustomApi(text, targetLang) {
+  async function translateWithCustomApi(text3, targetLang) {
     const format = customApiFormat || "generic";
     const url = format === "openai" ? getOpenAiCompatibleUrl(validateCustomApiUrl()) : validateCustomApiUrl();
     try {
       const data = await postJsonProvider(
         url,
-        buildCustomSingleBody(text, targetLang, format),
+        buildCustomSingleBody(text3, targetLang, format),
         getCustomApiHeaders(format),
         "Custom API",
         { preferCosmos: true }
@@ -4077,8 +4077,8 @@ ${text}`
     const combinedText = lines.map((line, index) => `${BATCH_MARKER_PREFIX}${markerNonce}_${index}]]${line}`).join("\n");
     return { combinedText, markerNonce };
   }
-  function hasInternalBatchMarkers(text) {
-    return (text || "").includes(BATCH_MARKER_PREFIX) || /\[\[\s*SLT[\s_-]*BATCH/i.test(text || "");
+  function hasInternalBatchMarkers(text3) {
+    return (text3 || "").includes(BATCH_MARKER_PREFIX) || /\[\[\s*SLT[\s_-]*BATCH/i.test(text3 || "");
   }
   function parseMarkedBatchResponse(translatedText, expectedCount, markerNonce) {
     const markerRegex = new RegExp(`\\[\\[SLT_BATCH_${markerNonce}_(\\d+)\\]\\]`, "g");
@@ -4111,11 +4111,11 @@ ${text}`
     }
     return byIndex;
   }
-  function normalizeTranslatedLine(text) {
-    return text.replace(/```[a-z0-9_-]*/gi, "").replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/[\u200B\u2060\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
+  function normalizeTranslatedLine(text3) {
+    return text3.replace(/```[a-z0-9_-]*/gi, "").replace(/\[\[\s*SLT[\s_-]*BATCH[^\]]*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9]+[_\s-]*BATCH[_\s-]*[A-Za-z0-9]*[_\s-]*\d+\s*\]\]/gi, "").replace(/\[\[\s*[A-Za-z0-9_\s-]*\d+\s*\]\]/g, "").replace(/\bSLT[\s_-]*BATCH[\s_-]*[A-Za-z0-9_-]*\b/gi, "").replace(/^\s*[A-Za-z]{2,12}[_\s-]+\d+\s*\]?\]?\s*/g, "").replace(/\r?\n+/g, " ").replace(/[\u200B\u2060\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
   }
-  function foldWrapperLineForComparison(text) {
-    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  function foldWrapperLineForComparison(text3) {
+    return (text3 || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   }
   function isBatchWrapperLine(line) {
     const folded = foldWrapperLineForComparison(line);
@@ -4125,8 +4125,8 @@ ${text}`
       return true;
     return /^(here('|')?s|here is|here are|sure[,!. ]|translation:?|translated lyrics:?|ban dich:?|duoi day|day la)/.test(folded);
   }
-  function removeBatchWrapperLines(text) {
-    return (text || "").split(/\r?\n/).filter((line) => !isBatchWrapperLine(line)).join("\n");
+  function removeBatchWrapperLines(text3) {
+    return (text3 || "").split(/\r?\n/).filter((line) => !isBatchWrapperLine(line)).join("\n");
   }
   function parseBatchTextFallbacks(translatedText, expectedCount) {
     const batchText = removeBatchWrapperLines(translatedText);
@@ -4320,45 +4320,45 @@ ${text}`
       detectedLang
     };
   }
-  async function translateText(text, targetLang, sourceLang) {
-    const cached = getCachedTranslation(text, targetLang);
+  async function translateText(text3, targetLang, sourceLang) {
+    const cached = getCachedTranslation(text3, targetLang);
     if (cached) {
       return {
-        originalText: text,
+        originalText: text3,
         translatedText: cached,
         targetLanguage: targetLang
       };
     }
     const tryGoogle = async () => {
-      const result = await translateWithGoogle(text, targetLang, sourceLang);
+      const result = await translateWithGoogle(text3, targetLang, sourceLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryLibreTranslate = async () => {
-      const translation = await translateWithLibreTranslate(text, targetLang);
+      const translation = await translateWithLibreTranslate(text3, targetLang);
       return { translation, detectedLang: void 0 };
     };
     const tryCustom = async () => {
-      const result = await translateWithCustomApi(text, targetLang);
+      const result = await translateWithCustomApi(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryDeepL = async () => {
-      const result = await translateWithDeepL(text, targetLang);
+      const result = await translateWithDeepL(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryOpenAI = async () => {
-      const result = await translateWithOpenAI(text, targetLang);
+      const result = await translateWithOpenAI(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryGemini = async () => {
-      const result = await translateWithGemini(text, targetLang);
+      const result = await translateWithGemini(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryGrok = async () => {
-      const result = await translateWithGrok(text, targetLang);
+      const result = await translateWithGrok(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     const tryAnthropic = async () => {
-      const result = await translateWithAnthropic(text, targetLang);
+      const result = await translateWithAnthropic(text3, targetLang);
       return { translation: result.translation, detectedLang: result.detectedLang };
     };
     let primaryApi;
@@ -4400,9 +4400,9 @@ ${text}`
     }
     try {
       const result = await primaryApi();
-      cacheTranslation(text, targetLang, result.translation, preferredApi);
+      cacheTranslation(text3, targetLang, result.translation, preferredApi);
       return {
-        originalText: text,
+        originalText: text3,
         translatedText: result.translation,
         detectedLanguage: result.detectedLang,
         targetLanguage: targetLang,
@@ -4412,7 +4412,7 @@ ${text}`
       if (isNonRetryableProviderError(primaryError)) {
         throw primaryError;
       }
-      if (hasInternalBatchMarkers(text)) {
+      if (hasInternalBatchMarkers(text3)) {
         if (isProviderOverloadError(primaryError)) {
           throw primaryError;
         }
@@ -4423,9 +4423,9 @@ ${text}`
       for (const fallbackApi of fallbackApis) {
         try {
           const result = await fallbackApi.fn();
-          cacheTranslation(text, targetLang, result.translation, fallbackApi.name);
+          cacheTranslation(text3, targetLang, result.translation, fallbackApi.name);
           return {
-            originalText: text,
+            originalText: text3,
             translatedText: result.translation,
             detectedLanguage: result.detectedLang,
             targetLanguage: targetLang,
@@ -4892,8 +4892,8 @@ ${text}`
   }
   var MACHINE_WORD_LOOKUP_LIMIT = 24;
   var MACHINE_WORD_SINGLE_FALLBACK_LIMIT = 12;
-  function splitLookupLines(text) {
-    return (text || "").replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim());
+  function splitLookupLines(text3) {
+    return (text3 || "").replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim());
   }
   async function lookupWordsWithGoogle(words, targetLang, sourceLang) {
     await rateLimitedDelay();
@@ -5147,12 +5147,24 @@ ${text}`
       storage.get("preferred-api") || "google"
     );
   }
+  function resolveStoredNotificationLevel() {
+    const stored = storage.get("notification-level");
+    if (stored === "all" || stored === "errors" || stored === "off")
+      return stored;
+    return storage.get("show-notifications") === "false" ? "off" : "all";
+  }
   var state = {
     isEnabled: storage.get("translation-enabled") === "true",
     isTranslating: false,
     targetLanguage: resolveStoredTargetLanguage(),
     autoTranslate: storage.get("auto-translate") === "true",
-    showNotifications: storage.get("show-notifications") !== "false",
+    notificationLevel: resolveStoredNotificationLevel(),
+    get showNotifications() {
+      return this.notificationLevel !== "off";
+    },
+    set showNotifications(value) {
+      this.notificationLevel = value ? "all" : "off";
+    },
     preferredApi: storage.get("preferred-api") || "google",
     customApiUrl: storage.get("custom-api-url") || "",
     customApiKey: storage.getSecret("custom-api-key") || "",
@@ -5193,19 +5205,19 @@ ${text}`
   var INVISIBLE_SEPARATOR_REGEX = /[\u200B\u2060\uFEFF]/g;
   var DIRECTION_MARK_REGEX = /[\u200E\u200F]/g;
   var ZERO_WIDTH_REGEX = /[\u200B\u200E\u200F\u2060\uFEFF]/g;
-  function cleanLyricText(text) {
-    return (text || "").replace(DIRECTION_MARK_REGEX, "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
+  function cleanLyricText(text3) {
+    return (text3 || "").replace(DIRECTION_MARK_REGEX, "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
   }
-  function normalizeLyricMatchKey(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200F\u2060\uFEFF]+/gu, "").trim();
+  function normalizeLyricMatchKey(text3) {
+    return (text3 || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200F\u2060\uFEFF]+/gu, "").trim();
   }
-  function hasLyricText(text) {
-    return typeof text === "string" && text.replace(ZERO_WIDTH_REGEX, "").trim() !== "";
+  function hasLyricText(text3) {
+    return typeof text3 === "string" && text3.replace(ZERO_WIDTH_REGEX, "").trim() !== "";
   }
-  function pickLyricDisplayText(text, romanizedText) {
-    if (hasLyricText(text))
-      return text;
-    return hasLyricText(romanizedText) ? romanizedText : text ?? "";
+  function pickLyricDisplayText(text3, romanizedText) {
+    if (hasLyricText(text3))
+      return text3;
+    return hasLyricText(romanizedText) ? romanizedText : text3 ?? "";
   }
 
   // src/utils/lyricsFetcher.ts
@@ -5501,13 +5513,13 @@ ${text}`
     if (!lyrics.Lines)
       return [];
     return lyrics.Lines.filter((line) => hasLyricText(line.Text) || hasLyricText(line.TransliteratedText)).map((line) => {
-      const text = pickLyricDisplayText(line.Text, line.TransliteratedText);
+      const text3 = pickLyricDisplayText(line.Text, line.TransliteratedText);
       return {
-        text: cleanLyricText(text),
+        text: cleanLyricText(text3),
         startTime: 0,
         endTime: 0,
         isInstrumental: false,
-        romanizedText: line.TransliteratedText && line.TransliteratedText !== text ? line.TransliteratedText : void 0
+        romanizedText: line.TransliteratedText && line.TransliteratedText !== text3 ? line.TransliteratedText : void 0
       };
     });
   }
@@ -5635,16 +5647,16 @@ ${text}`
   var originalByContent = /* @__PURE__ */ new Map();
   var qualityByContent = /* @__PURE__ */ new Map();
   var timingByContent = /* @__PURE__ */ new Map();
-  function normalizeCompare(text) {
-    return normalizeLyricMatchKey(text);
+  function normalizeCompare(text3) {
+    return normalizeLyricMatchKey(text3);
   }
-  function buildContentLookupKeys(text) {
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
+  function buildContentLookupKeys(text3) {
+    const nonLatinOnly = text3.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    const latinOnly = text3.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
     return {
-      norm: normalizeCompare(text),
-      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeCompare(nonLatinOnly) : "",
-      latinNorm: latinOnly && latinOnly !== text ? normalizeCompare(latinOnly) : ""
+      norm: normalizeCompare(text3),
+      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text3 ? normalizeCompare(nonLatinOnly) : "",
+      latinNorm: latinOnly && latinOnly !== text3 ? normalizeCompare(latinOnly) : ""
     };
   }
   function lookupByKeys(map, keys) {
@@ -5685,10 +5697,10 @@ ${text}`
     }
     return void 0;
   }
-  function lookupByContent(map, text) {
-    if (!text || map.size === 0)
+  function lookupByContent(map, text3) {
+    if (!text3 || map.size === 0)
       return void 0;
-    return lookupByKeys(map, buildContentLookupKeys(text));
+    return lookupByKeys(map, buildContentLookupKeys(text3));
   }
   function hasContentData() {
     return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
@@ -5704,11 +5716,11 @@ ${text}`
     let contentLines = 0;
     let matchedLines = 0;
     for (let index = 0; index < lines.length; index++) {
-      const text = lineTexts[index];
-      if (!text)
+      const text3 = lineTexts[index];
+      if (!text3)
         continue;
       contentLines++;
-      const keys = buildContentLookupKeys(text);
+      const keys = buildContentLookupKeys(text3);
       const t = lookupByKeys(translationByContent, keys);
       if (t) {
         nextTranslation.set(index, t);
@@ -5768,11 +5780,11 @@ ${text}`
       currentConfig.showRomanization ? "1" : "0"
     ];
     for (let i = 0; i < lines.length; i++) {
-      const text = lineTexts[i];
+      const text3 = lineTexts[i];
       const tr = translationMap.get(i) || "";
       const rom = romanizationMap.get(i) || "";
       const orig = originalTextMap.get(i) || "";
-      parts.push(`${text}${tr}${rom}${orig}`);
+      parts.push(`${text3}${tr}${rom}${orig}`);
     }
     return parts.join("");
   }
@@ -5807,8 +5819,8 @@ ${text}`
     lastRenderedLinesMap.delete(doc);
     lastRenderedOutputMap.delete(doc);
   }
-  function buildRomanizationLine(doc, index, timingInfo, line, text) {
-    const romanized = text !== void 0 ? text : romanizationMap.get(index);
+  function buildRomanizationLine(doc, index, timingInfo, line, text3) {
+    const romanized = text3 !== void 0 ? text3 : romanizationMap.get(index);
     if (!romanized || !romanized.trim())
       return null;
     if (timingInfo?.isInstrumental)
@@ -5826,8 +5838,8 @@ ${text}`
       romanEl.classList.add("active");
     return romanEl;
   }
-  function siblingSkippingRomanization(el, dir) {
-    let cur = dir === "next" ? el.nextElementSibling : el.previousElementSibling;
+  function siblingSkippingRomanization(el2, dir) {
+    let cur = dir === "next" ? el2.nextElementSibling : el2.previousElementSibling;
     while (cur && cur.classList.contains("slt-romanization-line")) {
       cur = dir === "next" ? cur.nextElementSibling : cur.previousElementSibling;
     }
@@ -5858,8 +5870,8 @@ ${text}`
     }
     return "";
   }
-  function isMostlyLatin(text) {
-    const letters = (text || "").replace(/[^\p{L}]/gu, "");
+  function isMostlyLatin(text3) {
+    const letters = (text3 || "").replace(/[^\p{L}]/gu, "");
     if (!letters)
       return false;
     const latin = letters.replace(/[^\p{Script=Latin}]/gu, "");
@@ -5987,19 +5999,19 @@ ${text}`
   function computeWordUnits(line) {
     const units = [];
     const allElements = line.querySelectorAll(".word:not(.dot), .letterGroup, .syllable");
-    for (const el of Array.from(allElements)) {
-      if (el.closest(".letterGroup") && !el.classList.contains("letterGroup")) {
+    for (const el2 of Array.from(allElements)) {
+      if (el2.closest(".letterGroup") && !el2.classList.contains("letterGroup")) {
         continue;
       }
       let isNested = false;
       for (const unit of units) {
-        if (unit.contains(el) && unit !== el) {
+        if (unit.contains(el2) && unit !== el2) {
           isNested = true;
           break;
         }
       }
       if (!isNested) {
-        units.push(el);
+        units.push(el2);
       }
     }
     return units;
@@ -6026,15 +6038,15 @@ ${text}`
     }
     return prev;
   }
-  function adjacentOriginalLine(el) {
-    if (el.classList.contains("slt-original-line")) {
-      let next = el.nextElementSibling;
+  function adjacentOriginalLine(el2) {
+    if (el2.classList.contains("slt-original-line")) {
+      let next = el2.nextElementSibling;
       while (next && !next.classList.contains("line")) {
         next = next.nextElementSibling;
       }
       return next;
     }
-    return findOriginalLineForTranslation(el);
+    return findOriginalLineForTranslation(el2);
   }
   function applyReplaceMode(doc) {
     invalidateWordUnitsCache();
@@ -6166,9 +6178,9 @@ ${text}`
       claimed.add(replaceEl);
       refreshRomanization(replaceEl);
     });
-    doc.querySelectorAll(".slt-replace-line, .slt-original-line, .slt-romanization-line").forEach((el) => {
-      if (!claimed.has(el))
-        el.remove();
+    doc.querySelectorAll(".slt-replace-line, .slt-original-line, .slt-romanization-line").forEach((el2) => {
+      if (!claimed.has(el2))
+        el2.remove();
     });
     markRenderComplete(doc);
   }
@@ -6203,13 +6215,13 @@ ${text}`
   function lineHasWordStructure(line) {
     return !!line.querySelector(".word:not(.dot), .letterGroup, .word-group, .syllable");
   }
-  function splitIntoGraphemes(text) {
+  function splitIntoGraphemes(text3) {
     const segmenterCtor = globalThis.Intl?.Segmenter;
     if (typeof segmenterCtor === "function") {
       const segmenter = new segmenterCtor(void 0, { granularity: "grapheme" });
-      return Array.from(segmenter.segment(text), (segment) => segment.segment);
+      return Array.from(segmenter.segment(text3), (segment) => segment.segment);
     }
-    return Array.from(text);
+    return Array.from(text3);
   }
   function appendSyncWordLetters(doc, wordEl, word, appendTrailingSpace) {
     const graphemes = splitIntoGraphemes(word);
@@ -6409,9 +6421,9 @@ ${text}`
           warn("Failed to process line", index, ":", lineErr);
         }
       });
-      doc.querySelectorAll(".slt-interleaved-translation, .slt-original-line, .slt-romanization-line").forEach((el) => {
-        if (!claimed.has(el))
-          el.remove();
+      doc.querySelectorAll(".slt-interleaved-translation, .slt-original-line, .slt-romanization-line").forEach((el2) => {
+        if (!claimed.has(el2))
+          el2.remove();
       });
       markRenderComplete(doc);
     } catch (err) {
@@ -6446,19 +6458,19 @@ ${text}`
   function updateOverlayConfig(config) {
     currentConfig = { ...currentConfig, ...config };
   }
-  function setStyleProp(el, prop, value) {
-    if (el.style.getPropertyValue(prop) !== value) {
-      el.style.setProperty(prop, value);
+  function setStyleProp(el2, prop, value) {
+    if (el2.style.getPropertyValue(prop) !== value) {
+      el2.style.setProperty(prop, value);
     }
   }
-  function clearStyleProp(el, prop) {
-    if (el.style.getPropertyValue(prop) !== "") {
-      el.style.removeProperty(prop);
+  function clearStyleProp(el2, prop) {
+    if (el2.style.getPropertyValue(prop) !== "") {
+      el2.style.removeProperty(prop);
     }
   }
-  function setDataProp(el, key, value) {
-    if (el.dataset[key] !== value) {
-      el.dataset[key] = value;
+  function setDataProp(el2, key, value) {
+    if (el2.dataset[key] !== value) {
+      el2.dataset[key] = value;
     }
   }
   var MIRRORED_LINE_STYLE_PROPS = [
@@ -6820,9 +6832,9 @@ ${text}`
     for (let i = start + 1; i < lines.length && texts.length < LEARNING_PREFETCH_AHEAD; i++) {
       if (lines[i].classList.contains("musical-line") || lines[i].classList.contains("bg-line"))
         continue;
-      const text = extractLineText(lines[i]);
-      if (text)
-        texts.push(text);
+      const text3 = extractLineText(lines[i]);
+      if (text3)
+        texts.push(text3);
     }
     if (texts.length > 0)
       breakdownPrefetch(texts);
@@ -6865,8 +6877,8 @@ ${text}`
     return null;
   }
   function removeLearningRows(doc) {
-    doc.querySelectorAll(".slt-learning-row").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-learning-absorbed").forEach((el) => el.classList.remove("slt-learning-absorbed"));
+    doc.querySelectorAll(".slt-learning-row").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-learning-absorbed").forEach((el2) => el2.classList.remove("slt-learning-absorbed"));
   }
   function absorbsTranslation() {
     return currentConfig.mode === "interleaved" || currentConfig.mode === "none";
@@ -7007,32 +7019,32 @@ ${text}`
     return anchor;
   }
   function restoreOriginalLines(doc) {
-    doc.querySelectorAll(".slt-interleaved-translation").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-sync-translation").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-romanization-line").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-original-line").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
-    doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
-    doc.querySelectorAll("[data-slt-original-html]").forEach((el) => {
-      const original = el.dataset.sltOriginalHtml;
+    doc.querySelectorAll(".slt-interleaved-translation").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-sync-translation").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-romanization-line").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-original-line").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-replace-line").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".slt-replace-hidden").forEach((el2) => el2.classList.remove("slt-replace-hidden"));
+    doc.querySelectorAll("[data-slt-original-html]").forEach((el2) => {
+      const original = el2.dataset.sltOriginalHtml;
       if (original !== void 0) {
-        el.innerHTML = original;
-        delete el.dataset.sltOriginalHtml;
+        el2.innerHTML = original;
+        delete el2.dataset.sltOriginalHtml;
       }
     });
-    doc.querySelectorAll("[data-slt-original-text]").forEach((el) => {
-      const original = el.dataset.sltOriginalText;
+    doc.querySelectorAll("[data-slt-original-text]").forEach((el2) => {
+      const original = el2.dataset.sltOriginalText;
       if (original !== void 0) {
-        el.textContent = original;
-        delete el.dataset.sltOriginalText;
+        el2.textContent = original;
+        delete el2.dataset.sltOriginalText;
       }
     });
-    doc.querySelectorAll("[data-slt-replaced-with]").forEach((el) => {
-      delete el.dataset.sltReplacedWith;
+    doc.querySelectorAll("[data-slt-replaced-with]").forEach((el2) => {
+      delete el2.dataset.sltReplacedWith;
     });
-    doc.querySelectorAll(".spicy-translation-container").forEach((el) => el.remove());
-    doc.querySelectorAll(".spicy-hidden-original").forEach((el) => {
-      el.classList.remove("spicy-hidden-original");
+    doc.querySelectorAll(".spicy-translation-container").forEach((el2) => el2.remove());
+    doc.querySelectorAll(".spicy-hidden-original").forEach((el2) => {
+      el2.classList.remove("spicy-hidden-original");
     });
     doc.querySelectorAll(".spicy-original-wrapper").forEach((wrapper) => {
       const parent = wrapper.parentElement;
@@ -7044,11 +7056,11 @@ ${text}`
         }
       }
     });
-    doc.querySelectorAll(".slt-overlay-parent, .spicy-translated").forEach((el) => {
-      el.classList.remove("slt-overlay-parent", "spicy-translated");
+    doc.querySelectorAll(".slt-overlay-parent, .spicy-translated").forEach((el2) => {
+      el2.classList.remove("slt-overlay-parent", "spicy-translated");
     });
-    doc.querySelectorAll(".slt-sync-word").forEach((el) => {
-      el.classList.remove("slt-word-past", "slt-word-active", "slt-word-future");
+    doc.querySelectorAll(".slt-sync-word").forEach((el2) => {
+      el2.classList.remove("slt-word-past", "slt-word-active", "slt-word-future");
     });
   }
   function applyNoneMode(doc) {
@@ -7077,9 +7089,9 @@ ${text}`
         line.parentNode.insertBefore(romanEl, line.nextSibling);
         claimed.add(romanEl);
       });
-      doc.querySelectorAll(".slt-romanization-line").forEach((el) => {
-        if (!claimed.has(el))
-          el.remove();
+      doc.querySelectorAll(".slt-romanization-line").forEach((el2) => {
+        if (!claimed.has(el2))
+          el2.remove();
       });
     } else {
       lines.forEach((line, index) => {
@@ -7136,9 +7148,9 @@ ${text}`
     lastActiveLineUpdate = now;
     try {
       if (currentConfig.mode === "interleaved" || currentConfig.mode === "replace" || currentConfig.mode === "none") {
-        doc.querySelectorAll(".slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line").forEach((el) => {
-          const orig = adjacentOriginalLine(el);
-          el.classList.toggle("active", !!orig && isLineActive(orig));
+        doc.querySelectorAll(".slt-replace-line, .slt-interleaved-translation, .slt-romanization-line, .slt-original-line").forEach((el2) => {
+          const orig = adjacentOriginalLine(el2);
+          el2.classList.toggle("active", !!orig && isLineActive(orig));
         });
       }
     } catch (err) {
@@ -7325,7 +7337,7 @@ ${text}`
       if (interleavedOverlay)
         interleavedOverlay.remove();
       restoreOriginalLines(doc);
-      doc.querySelectorAll(".slt-learning-row").forEach((el) => el.remove());
+      doc.querySelectorAll(".slt-learning-row").forEach((el2) => el2.remove());
     };
     cleanup(document);
     const pipWindow = getPIPWindow();
@@ -8592,134 +8604,1447 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     document.head.appendChild(styleElement);
   }
 
-  // src/utils/modal.ts
-  var CLOSE_SVG = '<svg width="18" height="18" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><title>Close</title><path d="M31.098 29.794L16.955 15.65 31.097 1.51 29.683.093 15.54 14.237 1.4.094-.016 1.508 14.126 15.65-.016 29.795l1.414 1.414L15.54 17.065l14.144 14.143" fill="currentColor" fill-rule="evenodd"></path></svg>';
-  var activeModal = null;
-  var activeOnClose = null;
-  function escapeForHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-  function spicyLyricsAvailable() {
+  // src/utils/uiTheme.ts
+  var MONO_BASE = "#1b1b1b";
+  var MONO_OVERRIDES = {
+    "--slt-ui-accent": "oklch(0.93 0 0)",
+    "--slt-ui-accent-hover": "oklch(0.98 0 0)",
+    "--slt-ui-accent-ink": MONO_BASE,
+    "--slt-ui-field": MONO_BASE,
+    "--slt-ui-field-deep": "#151515",
+    "--slt-ui-raised": "#242424",
+    "--slt-ui-band": "linear-gradient(90deg, oklch(0.62 0 0), oklch(0.93 0 0))"
+  };
+  function spicyThemesState() {
     try {
-      if (globalThis.SpicyLyrics)
-        return true;
-      if (typeof customElements !== "undefined" && customElements.get("sl-generic-modal"))
-        return true;
-      if (typeof document !== "undefined" && document.querySelector("#SpicyLyricsPage, sl-generic-modal, .sl-modal-overlay"))
-        return true;
+      const state3 = window.SpicyThemes?.getState?.();
+      return state3 && typeof state3 === "object" ? state3 : null;
     } catch {
+      return null;
     }
-    return false;
   }
-  function hideModal() {
-    if (activeModal) {
-      const modal = activeModal;
-      const onClose = activeOnClose;
-      activeModal = null;
-      activeOnClose = null;
-      const finish = () => {
+  function spicyThemesActive() {
+    const state3 = spicyThemesState();
+    return !!state3 && state3.isEnabled !== false && !!state3.activeTheme && typeof state3.activeTheme === "object";
+  }
+  var themeState = {
+    get activeTheme() {
+      const state3 = spicyThemesState();
+      return spicyThemesActive() && state3?.activeTheme ? state3.activeTheme : {};
+    }
+  };
+  function adaptToneVars(tone, vars) {
+    if (tone !== "accent" || spicyThemesActive())
+      return vars;
+    const out = {};
+    for (const [key, value] of Object.entries(vars)) {
+      out[key] = key in MONO_OVERRIDES ? MONO_OVERRIDES[key] : value.replace(/oklch\(\s*([\d.]+)\s+[\d.]+\s+[\d.]+\s*\)/g, "oklch($1 0 0)");
+    }
+    out["--slt-ui-knob"] = MONO_BASE;
+    return out;
+  }
+
+  // src/utils/icons.ts
+  var Icons = {
+    Translate: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2.01h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+    </svg>`,
+    TranslateOff: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2.01h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>`,
+    Learning: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+    </svg>`,
+    LearningOff: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+        <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>`,
+    Settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+    </svg>`,
+    Loading: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="spicy-translate-loading">
+        <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+    </svg>`,
+    Connection: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+    </svg>`,
+    Users: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+    </svg>`
+  };
+
+  // src/utils/surface.ts
+  var STYLE_ID = "slt-ui-styles";
+  var EASE = "cubic-bezier(0.2, 0.9, 0.1, 1)";
+  var BRAND_HUE = 28;
+  var BRAND_CHROMA = 0.16;
+  var reducedMotion = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  function prefersReducedMotion() {
+    return !!reducedMotion?.matches;
+  }
+  function parseColor(value) {
+    if (typeof value !== "string")
+      return null;
+    const v = value.trim();
+    const rgb = v.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)/i);
+    if (rgb)
+      return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+    let hex = v.replace(/^#/, "");
+    if (!/^[0-9a-f]{3,8}$/i.test(hex))
+      return null;
+    if (hex.length === 3 || hex.length === 4)
+      hex = hex.split("").slice(0, 3).map((c) => c + c).join("");
+    if (hex.length < 6)
+      return null;
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+  }
+  function toOklch([r8, g8, b8]) {
+    const lin = (v) => {
+      const c2 = v / 255;
+      return c2 <= 0.04045 ? c2 / 12.92 : Math.pow((c2 + 0.055) / 1.055, 2.4);
+    };
+    const r = lin(r8), g = lin(g8), b = lin(b8);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+    const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+    const c = Math.sqrt(A * A + B * B);
+    let h = Math.atan2(B, A) * 180 / Math.PI;
+    if (h < 0)
+      h += 360;
+    return { l: L, c, h };
+  }
+  var clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  var fmt = (n, d = 3) => Number(n.toFixed(d));
+  var ok = (l, c, h) => `oklch(${fmt(l)} ${fmt(c)} ${fmt(h, 1)})`;
+  var ACCENT_KEYS = [
+    "playerAccentColor",
+    "highlightColor",
+    "gradientStartColor",
+    "gradientEndColor",
+    "activeGlowColor",
+    "glowColor",
+    "eqColor",
+    "activeLineColor",
+    "sungLineColor",
+    "animBgColor",
+    "bgGlowColor"
+  ];
+  var BAND_KEYS = [
+    "activeLineColor",
+    "gradientStartColor",
+    "gradientEndColor",
+    "activeGlowColor",
+    "sungLineColor",
+    "glowColor",
+    "notSungLineColor"
+  ];
+  function themeAccent(theme) {
+    let best = null;
+    for (const key of ACCENT_KEYS) {
+      const rgb = parseColor(String(theme[key] ?? ""));
+      if (!rgb)
+        continue;
+      const { c, h } = toOklch(rgb);
+      if (!best || c > best.c)
+        best = { h, c };
+    }
+    if (!best || best.c < 0.035)
+      return { h: BRAND_HUE, c: BRAND_CHROMA };
+    return best;
+  }
+  function themeBand(theme, accent) {
+    const seen = /* @__PURE__ */ new Set();
+    const stops = [];
+    for (const key of BAND_KEYS) {
+      const rgb = parseColor(String(theme[key] ?? ""));
+      if (!rgb)
+        continue;
+      const { l, c, h } = toOklch(rgb);
+      const id = `${Math.round(l * 20)}:${Math.round(c * 40)}:${Math.round(h / 20)}`;
+      if (seen.has(id))
+        continue;
+      seen.add(id);
+      stops.push(ok(clamp(l, 0.55, 0.92), c, h));
+      if (stops.length >= 4)
+        break;
+    }
+    if (stops.length < 2)
+      stops.push(accent);
+    stops.unshift(accent);
+    return `linear-gradient(90deg, ${stops.join(", ")})`;
+  }
+  var FIXED_TONES = {
+    hotfix: { h: 72, c: 0.15 },
+    error: { h: 24, c: 0.17 },
+    success: { h: 152, c: 0.14 }
+  };
+  function baseToneVars(tone = "accent") {
+    const theme = themeState.activeTheme;
+    const base = tone === "accent" ? themeAccent(theme) : FIXED_TONES[tone];
+    const h = base.h;
+    const c = clamp(base.c, 0.09, 0.19);
+    const accent = ok(0.76, c, h);
+    const band = tone === "accent" ? themeBand(theme, accent) : `linear-gradient(90deg, ${ok(0.72, c, h - 18)}, ${accent}, ${ok(0.82, c * 0.8, h + 22)})`;
+    return {
+      "--slt-ui-hue": String(fmt(h, 1)),
+      "--slt-ui-accent": accent,
+      "--slt-ui-accent-hover": ok(0.83, c * 0.9, h),
+      "--slt-ui-accent-ink": ok(0.22, Math.min(c, 0.08), h),
+      "--slt-ui-accent-soft": `color-mix(in oklab, ${accent} 16%, transparent)`,
+      "--slt-ui-accent-line": `color-mix(in oklab, ${accent} 42%, transparent)`,
+      "--slt-ui-field": ok(0.215, Math.min(c * 0.1, 0.012), h),
+      "--slt-ui-field-deep": ok(0.18, Math.min(c * 0.08, 9e-3), h),
+      "--slt-ui-raised": ok(0.255, Math.min(c * 0.1, 0.012), h),
+      "--slt-ui-ink": ok(0.97, 4e-3, h),
+      "--slt-ui-ink-muted": ok(0.78, 8e-3, h),
+      "--slt-ui-ink-faint": ok(0.62, 8e-3, h),
+      "--slt-ui-line": "rgba(255, 255, 255, 0.08)",
+      "--slt-ui-band": band
+    };
+  }
+  var painted = /* @__PURE__ */ new Set();
+  function paintTone(el2, tone = "accent") {
+    const vars = toneVars(tone);
+    Object.entries(vars).forEach(([k, v]) => el2.style.setProperty(k, v));
+    el2.dataset.sltTone = tone;
+    for (const entry of painted) {
+      if (entry.el === el2) {
+        entry.tone = tone;
+        return;
+      }
+    }
+    painted.add({ el: el2, tone });
+  }
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    Object.entries(props).forEach(([key, value]) => {
+      if (value === void 0 || value === false)
+        return;
+      if (key === "class")
+        node.className = String(value);
+      else if (key === "text")
+        node.textContent = String(value);
+      else if (key === "html")
+        node.innerHTML = String(value);
+      else
+        node.setAttribute(key, value === true ? "" : String(value));
+    });
+    children.forEach((child) => {
+      if (child === null || child === void 0 || child === false)
+        return;
+      node.append(child);
+    });
+    return node;
+  }
+  function text(content, variant = "") {
+    return el("p", { class: `slt-ui-text${variant ? ` slt-ui-text-${variant}` : ""}`, text: content });
+  }
+  var CLOSE_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  var CHEVRON_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function ensureSurfaceStyles() {
+    if (document.getElementById(STYLE_ID))
+      return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = SURFACE_STYLES;
+    document.head.appendChild(style);
+  }
+  var stack = [];
+  var keyListenerBound = false;
+  function topSurface() {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (!stack[i].closed)
+        return stack[i];
+    }
+    return null;
+  }
+  function openSurfaces() {
+    return stack.filter((s) => !s.closed);
+  }
+  function focusables(root) {
+    return Array.from(root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((n) => n.offsetParent !== null || n === document.activeElement);
+  }
+  function onDocumentKey(event) {
+    const top = topSurface();
+    if (!top)
+      return;
+    if (event.key === "Escape") {
+      const target = event.target;
+      const local = target?.closest?.("[data-slt-esc-local]");
+      if (local && top.panel.contains(local) && local.value)
+        return;
+      if (document.querySelector(".slt-ui-menu")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeMenus();
+        return;
+      }
+      if (top.root.dataset.dismissible === "false")
+        return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      top.dismiss();
+      return;
+    }
+    if (event.key !== "Tab")
+      return;
+    const items = focusables(top.panel);
+    if (!items.length)
+      return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const current = document.activeElement;
+    const inside = !!current && top.panel.contains(current);
+    if (event.shiftKey && (current === first || !inside)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (current === last || !inside)) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+  function bindKeys() {
+    if (keyListenerBound)
+      return;
+    keyListenerBound = true;
+    document.addEventListener("keydown", onDocumentKey, true);
+  }
+  function unbindKeysIfIdle() {
+    if (topSurface() || !keyListenerBound)
+      return;
+    keyListenerBound = false;
+    document.removeEventListener("keydown", onDocumentKey, true);
+  }
+  function closeMenus() {
+    document.querySelectorAll(".slt-ui-menu").forEach((menu) => {
+      menu._sltCleanup?.();
+      menu.remove();
+    });
+  }
+  function openMenu(anchor, items, within) {
+    closeMenus();
+    ensureSurfaceStyles();
+    const host = within || anchor.closest("[data-slt-tone]") || document.body;
+    const menu = el("div", { class: "slt-ui-menu", role: "menu" });
+    items.forEach((item) => {
+      const btn = el(
+        "button",
+        { class: "slt-ui-menu-item", type: "button", role: "menuitem" },
+        el("span", { class: "slt-ui-menu-label", text: item.label }),
+        item.hint ? el("span", { class: "slt-ui-menu-hint", text: item.hint }) : null
+      );
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeMenus();
+        item.onClick();
+      });
+      menu.append(btn);
+    });
+    host.append(menu);
+    const a = anchor.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    const top = a.top - m.height - 6 >= 8 ? a.top - m.height - 6 : a.bottom + 6;
+    const left = clamp(a.right - m.width, 8, window.innerWidth - m.width - 8);
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.querySelector("button")?.focus({ preventScroll: true });
+    const onDown = (e) => {
+      if (e.target instanceof Node && (menu.contains(e.target) || anchor.contains(e.target)))
+        return;
+      closeMenus();
+    };
+    const onKey = (e) => {
+      const buttons = Array.from(menu.querySelectorAll("button"));
+      const index = buttons.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        buttons[(index + 1) % buttons.length]?.focus();
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        buttons[(index - 1 + buttons.length) % buttons.length]?.focus();
+      }
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    menu.addEventListener("keydown", onKey);
+    menu._sltCleanup = () => window.removeEventListener("pointerdown", onDown, true);
+    if (!prefersReducedMotion()) {
+      menu.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 160, easing: EASE });
+    }
+  }
+  function renderActions(footer, actions, handle) {
+    footer.innerHTML = "";
+    footer.hidden = actions.length === 0;
+    actions.forEach((action) => {
+      const kind = action.kind || "quiet";
+      const cls = `slt-ui-btn slt-ui-btn-${kind}${action.menu ? " slt-ui-btn-menu" : ""}`;
+      const node = action.href ? el("a", { class: cls, href: action.href, target: "_blank", rel: "noopener noreferrer", "data-action": action.id }) : el("button", { class: cls, type: "button", "data-action": action.id });
+      node.append(el("span", { class: "slt-ui-btn-label", text: action.label }));
+      if (action.menu)
+        node.insertAdjacentHTML("beforeend", CHEVRON_SVG);
+      node.addEventListener("click", async (event) => {
+        if (action.menu) {
+          event.preventDefault();
+          openMenu(node, action.menu, handle.root);
+          return;
+        }
+        if (!action.href)
+          event.preventDefault();
+        if (handle.root.classList.contains("slt-ui-busy"))
+          return;
         try {
-          modal.remove();
+          await action.onClick?.(handle);
+        } finally {
+          if (!action.keepOpen && !handle.closed)
+            handle.close();
+        }
+      });
+      footer.append(node);
+    });
+  }
+  function eyebrow(label) {
+    const node = el("div", { class: "slt-ui-eyebrow" });
+    node.innerHTML = `<span class="slt-ui-eyebrow-mark">${Icons.Translate}</span>`;
+    node.append(el("span", { text: label }));
+    return node;
+  }
+  function stagger(nodes, offset = 0) {
+    let i = offset;
+    for (const node of nodes) {
+      node.style.setProperty("--slt-ui-i", String(i++));
+    }
+  }
+  function buildPanel(options, handleRef, kind) {
+    const panel = el("section", {
+      class: `slt-ui-panel slt-ui-${kind} slt-ui-size-${options.size || "md"}${options.bare ? " slt-ui-bare" : ""}${options.className ? ` ${options.className}` : ""}`,
+      role: kind === "dialog" ? "dialog" : "region",
+      "aria-modal": kind === "dialog" ? "true" : void 0,
+      tabindex: "-1"
+    });
+    const titleId = `slt-ui-title-${Math.random().toString(36).slice(2, 8)}`;
+    panel.setAttribute("aria-labelledby", titleId);
+    const titleEl = el("h2", { class: "slt-ui-title", id: titleId, text: options.title });
+    const closeBtn = el("button", { class: "slt-ui-x", type: "button", "aria-label": kind === "dock" ? "Hide" : "Close", html: CLOSE_SVG });
+    closeBtn.addEventListener("click", () => handleRef.current?.dismiss());
+    if (!options.bare) {
+      const head = el(
+        "header",
+        { class: "slt-ui-head slt-ui-stagger" },
+        eyebrow(options.eyebrow || "Spicy Lyric Translator"),
+        titleEl
+      );
+      panel.append(head);
+      if (options.closeButton !== false && options.dismissible !== false)
+        panel.append(closeBtn);
+    } else {
+      titleEl.classList.add("slt-ui-sr");
+      panel.append(titleEl);
+    }
+    const body = el("div", { class: "slt-ui-body" });
+    (options.body || []).forEach((node) => {
+      const child = typeof node === "string" ? text(node) : node;
+      child.classList.add("slt-ui-stagger");
+      body.append(child);
+    });
+    if (options.content)
+      body.append(options.content);
+    panel.append(body);
+    const footer = el("footer", { class: "slt-ui-actions slt-ui-stagger" });
+    panel.append(footer);
+    return { panel, body, footer, titleEl };
+  }
+  function makeHandle(root, parts, options, teardown) {
+    const handle = {
+      root,
+      panel: parts.panel,
+      body: parts.body,
+      footer: parts.footer,
+      closed: false,
+      close: (opts = {}) => {
+        if (handle.closed)
+          return;
+        handle.closed = true;
+        closeMenus();
+        teardown(opts);
+        try {
+          options.onClose?.();
         } catch {
         }
-        if (typeof onClose === "function") {
+      },
+      dismiss: () => {
+        if (handle.closed || options.dismissible === false)
+          return;
+        handle.close();
+        try {
+          options.onDismiss?.();
+        } catch {
+        }
+      },
+      setBusy: (busy, label) => {
+        root.classList.toggle("slt-ui-busy", busy);
+        parts.footer.querySelectorAll("button").forEach((b) => {
+          b.disabled = busy;
+        });
+        const primary = parts.footer.querySelector(".slt-ui-btn-primary .slt-ui-btn-label");
+        if (primary) {
+          if (busy && label) {
+            primary.dataset.idle = primary.dataset.idle || primary.textContent || "";
+            primary.textContent = label;
+          } else if (!busy && primary.dataset.idle) {
+            primary.textContent = primary.dataset.idle;
+            delete primary.dataset.idle;
+          }
+        }
+      },
+      setActions: (actions) => renderActions(parts.footer, actions, handle),
+      setTitle: (title) => {
+        parts.titleEl.textContent = title;
+      },
+      setTone: (tone) => paintTone(root, tone)
+    };
+    return handle;
+  }
+  function openDialog(options) {
+    ensureSurfaceStyles();
+    const overlay = el("div", { class: `slt-ui-overlay slt-ui-place-${options.placement || "center"}`, "data-slt-ui": "dialog" });
+    overlay.dataset.dismissible = String(options.dismissible !== false);
+    if (openSurfaces().some((s) => s.root.classList.contains("slt-ui-overlay")))
+      overlay.classList.add("slt-ui-stacked");
+    paintTone(overlay, options.tone || "accent");
+    const ref = { current: null };
+    const parts = buildPanel(options, ref, "dialog");
+    overlay.append(parts.panel);
+    const previousFocus = document.activeElement;
+    let pressedBackdrop = false;
+    overlay.addEventListener("pointerdown", (e) => {
+      pressedBackdrop = e.target === overlay;
+    });
+    overlay.addEventListener("click", (e) => {
+      if (pressedBackdrop && e.target === overlay)
+        ref.current?.dismiss();
+      pressedBackdrop = false;
+    });
+    const handle = makeHandle(overlay, parts, options, ({ silent }) => {
+      const index = stack.indexOf(handle);
+      if (index >= 0)
+        stack.splice(index, 1);
+      unbindKeysIfIdle();
+      if (previousFocus && previousFocus.isConnected)
+        previousFocus.focus({ preventScroll: true });
+      overlay.classList.remove("slt-ui-open");
+      overlay.classList.add("slt-ui-closing");
+      if (silent || prefersReducedMotion())
+        overlay.remove();
+      else
+        setTimeout(() => overlay.remove(), 200);
+    });
+    ref.current = handle;
+    renderActions(parts.footer, options.actions || [], handle);
+    stagger(parts.panel.querySelectorAll(".slt-ui-stagger"));
+    document.body.append(overlay);
+    stack.push(handle);
+    bindKeys();
+    overlay.getBoundingClientRect();
+    overlay.classList.add("slt-ui-open");
+    const origin = options.origin;
+    if (origin && !prefersReducedMotion()) {
+      const r = parts.panel.getBoundingClientRect();
+      parts.panel.animate([
+        { clipPath: insetFrom(origin, r, 14), opacity: 0.6 },
+        { clipPath: "inset(0 round 18px)", opacity: 1 }
+      ], { duration: 460, easing: EASE });
+    }
+    const primary = parts.footer.querySelector(".slt-ui-btn-primary");
+    const autofocus = parts.panel.querySelector("[data-slt-autofocus]");
+    (autofocus || primary || parts.panel).focus({ preventScroll: true });
+    return handle;
+  }
+  function insetFrom(o, r, radius) {
+    const top = clamp(o.top - r.top, 0, r.height);
+    const left = clamp(o.left - r.left, 0, r.width);
+    const right = clamp(r.right - o.right, 0, r.width);
+    const bottom = clamp(r.bottom - o.bottom, 0, r.height);
+    if (top + bottom >= r.height - 4 || left + right >= r.width - 4) {
+      return `inset(${fmt(r.height / 2 - 20, 0)}px ${fmt(r.width / 2 - 60, 0)}px round ${radius}px)`;
+    }
+    return `inset(${fmt(top, 0)}px ${fmt(right, 0)}px ${fmt(bottom, 0)}px ${fmt(left, 0)}px round ${radius}px)`;
+  }
+  var dockHandle = null;
+  function activeDock() {
+    return dockHandle && !dockHandle.closed ? dockHandle : null;
+  }
+  function openDock(options) {
+    ensureSurfaceStyles();
+    dockHandle?.close({ silent: true });
+    const region2 = toastRegion();
+    const wrap = el("div", { class: "slt-ui-dock-wrap", "data-slt-ui": "dock" });
+    paintTone(wrap, options.tone || "accent");
+    const ref = { current: null };
+    const parts = buildPanel({ ...options, size: "sm" }, ref, "dock");
+    wrap.append(parts.panel);
+    const handle = makeHandle(wrap, parts, options, ({ silent, to }) => {
+      if (dockHandle === handle)
+        dockHandle = null;
+      if (silent || prefersReducedMotion()) {
+        wrap.remove();
+        return;
+      }
+      const r = parts.panel.getBoundingClientRect();
+      const anim = parts.panel.animate([
+        { clipPath: "inset(0 round 18px)", opacity: 1 },
+        to ? { clipPath: insetFrom(to, r, 14), opacity: 0 } : { clipPath: `inset(${fmt(r.height - 6, 0)}px 0 0 0 round 18px)`, opacity: 0 }
+      ], { duration: 260, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" });
+      anim.onfinish = () => wrap.remove();
+      window.setTimeout(() => wrap.remove(), 400);
+    });
+    ref.current = handle;
+    renderActions(parts.footer, options.actions || [], handle);
+    stagger(parts.panel.querySelectorAll(".slt-ui-stagger"));
+    region2.prepend(wrap);
+    dockHandle = handle;
+    wrap.getBoundingClientRect();
+    wrap.classList.add("slt-ui-open");
+    if (!prefersReducedMotion()) {
+      const r = parts.panel.getBoundingClientRect();
+      const from = options.origin ? insetFrom(options.origin, r, 14) : `inset(${fmt(r.height - 8, 0)}px 0 0 0 round 18px)`;
+      parts.panel.animate([
+        { clipPath: from },
+        { clipPath: "inset(0 round 18px)" }
+      ], { duration: 480, easing: EASE });
+    }
+    return handle;
+  }
+  var region = null;
+  var regionObserver = null;
+  var observedBar = null;
+  function placeRegion() {
+    if (!region)
+      return;
+    const bar = document.querySelector(".Root__now-playing-bar");
+    let bottom = 16;
+    if (bar) {
+      const rect = bar.getBoundingClientRect();
+      if (rect.height > 0 && rect.top < window.innerHeight)
+        bottom = Math.max(16, window.innerHeight - rect.top + 12);
+    }
+    region.style.setProperty("--slt-ui-region-bottom", `${Math.round(bottom)}px`);
+    if (bar !== observedBar && typeof ResizeObserver !== "undefined") {
+      regionObserver?.disconnect();
+      observedBar = bar;
+      if (bar) {
+        regionObserver = new ResizeObserver(placeRegion);
+        regionObserver.observe(bar);
+      }
+    }
+  }
+  function toastRegion() {
+    ensureSurfaceStyles();
+    if (!region || !region.isConnected) {
+      region = el("div", { class: "slt-ui-region", "aria-live": "polite" });
+      paintTone(region, "accent");
+      document.body.append(region);
+      window.addEventListener("resize", placeRegion);
+    }
+    placeRegion();
+    return region;
+  }
+  var SURFACE_STYLES = `
+.slt-ui-overlay,
+.slt-ui-region,
+.slt-ui-menu {
+    --slt-ui-ease: ${EASE};
+    font-family: var(--encore-body-font-stack, var(--fallback-fonts, system-ui, sans-serif));
+    -webkit-font-smoothing: antialiased;
+    color: var(--slt-ui-ink);
+    letter-spacing: 0;
+}
+.slt-ui-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147482000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0);
+    -webkit-backdrop-filter: blur(0) saturate(1);
+    backdrop-filter: blur(0) saturate(1);
+    transition: background-color 0.24s var(--slt-ui-ease), backdrop-filter 0.24s var(--slt-ui-ease), -webkit-backdrop-filter 0.24s var(--slt-ui-ease);
+}
+.slt-ui-overlay.slt-ui-place-top {
+    align-items: flex-start;
+    padding-top: min(14vh, 120px);
+}
+.slt-ui-overlay.slt-ui-open {
+    background: rgba(0, 0, 0, 0.6);
+    -webkit-backdrop-filter: blur(6px) saturate(1.1);
+    backdrop-filter: blur(6px) saturate(1.1);
+}
+.slt-ui-overlay.slt-ui-stacked.slt-ui-open {
+    background: rgba(0, 0, 0, 0.32);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+}
+.slt-ui-overlay.slt-ui-closing {
+    pointer-events: none;
+    transition-duration: 0.16s;
+}
+.slt-ui-overlay.slt-ui-peek {
+    background: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+}
+.slt-ui-overlay.slt-ui-peek .slt-ui-panel {
+    opacity: 0.06 !important;
+    transform: scale(0.99) !important;
+    transition: opacity 0.18s var(--slt-ui-ease), transform 0.18s var(--slt-ui-ease);
+}
+.slt-ui-panel {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: min(var(--slt-ui-w, 30rem), 100%);
+    max-height: 100%;
+    overflow: hidden;
+    border-radius: 18px;
+    border: 1px solid var(--slt-ui-line);
+    outline: none;
+    background: linear-gradient(180deg, var(--slt-ui-field) 0%, var(--slt-ui-field-deep) 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 24px 60px -24px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(0, 0, 0, 0.25);
+    color: var(--slt-ui-ink);
+    font-size: 14px;
+    line-height: 1.45;
+}
+.slt-ui-size-sm { --slt-ui-w: 25rem; }
+.slt-ui-size-md { --slt-ui-w: 31rem; }
+.slt-ui-size-lg { --slt-ui-w: 42rem; }
+.slt-ui-size-xl { --slt-ui-w: 68rem; }
+.slt-ui-dialog {
+    opacity: 0;
+    transform: translateY(10px);
+    transform: translateY(8px) scale(0.985);
+    transition: opacity 0.2s var(--slt-ui-ease), transform 0.4s var(--slt-ui-ease);
+}
+.slt-ui-open > .slt-ui-dialog {
+    opacity: 1;
+    transform: none;
+}
+.slt-ui-closing > .slt-ui-dialog {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+    transition-duration: 0.16s;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+.slt-ui-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 26px 56px 4px 26px;
+}
+.slt-ui-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-ui-eyebrow-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-ui-eyebrow-mark svg { width: 14px; height: 14px; }
+.slt-ui-title {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 750;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--slt-ui-ink);
+    overflow-wrap: anywhere;
+}
+.slt-ui-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.slt-ui-x {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--slt-ui-ink-muted);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+.slt-ui-x:hover { background: var(--slt-ui-line); color: var(--slt-ui-ink); }
+.slt-ui-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 26px 4px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    overscroll-behavior: contain;
+}
+.slt-ui-bare .slt-ui-body { padding: 0; gap: 0; flex: 1 1 auto; }
+.slt-ui-body::-webkit-scrollbar { width: 6px; }
+.slt-ui-body::-webkit-scrollbar-thumb { background: var(--slt-ui-line); border-radius: 6px; }
+.slt-ui-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-ui-text-quiet { font-size: 12.5px; color: var(--slt-ui-ink-faint); }
+.slt-ui-text-strong { color: var(--slt-ui-ink); font-weight: 600; }
+.slt-ui-text a, .slt-ui-link {
+    color: var(--slt-ui-ink);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--slt-ui-accent-line);
+    text-underline-offset: 3px;
+}
+.slt-ui-text a:hover, .slt-ui-link:hover { text-decoration-color: var(--slt-ui-accent); }
+.slt-ui-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 18px 26px 24px;
+}
+.slt-ui-actions[hidden] { display: none; }
+.slt-ui-bare .slt-ui-actions { display: none; }
+.slt-ui-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+    min-height: 40px;
+    margin: 0;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 12px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+.slt-ui-btn:active:not(:disabled) { transform: scale(0.97); }
+.slt-ui-btn:disabled { opacity: 0.55; cursor: default; }
+.slt-ui-btn-primary {
+    background: var(--slt-ui-accent);
+    color: var(--slt-ui-accent-ink);
+}
+.slt-ui-btn-primary:hover:not(:disabled) { background: var(--slt-ui-accent-hover); }
+.slt-ui-btn-quiet {
+    background: transparent;
+    color: var(--slt-ui-ink-muted);
+    padding: 0 14px;
+}
+.slt-ui-btn-quiet:hover:not(:disabled) { background: var(--slt-ui-line); color: var(--slt-ui-ink); }
+.slt-ui-btn-ghost {
+    background: var(--slt-ui-line);
+    color: var(--slt-ui-ink);
+}
+.slt-ui-btn-ghost:hover:not(:disabled) { background: color-mix(in oklab, var(--slt-ui-ink) 17%, transparent); }
+.slt-ui-btn-danger {
+    background: color-mix(in oklab, oklch(0.65 0.18 24) 18%, transparent);
+    color: oklch(0.85 0.09 24);
+}
+.slt-ui-btn-danger:hover:not(:disabled) { background: color-mix(in oklab, oklch(0.65 0.18 24) 28%, transparent); }
+.slt-ui-btn-menu svg { opacity: 0.7; }
+.slt-ui-btn:focus-visible,
+.slt-ui-x:focus-visible,
+.slt-ui-menu-item:focus-visible,
+.slt-ui-toast button:focus-visible {
+    outline: 2px solid var(--slt-ui-accent);
+    outline-offset: 2px;
+}
+.slt-ui-busy .slt-ui-btn-primary .slt-ui-btn-label::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in oklab, var(--slt-ui-accent-ink) 30%, transparent);
+    border-top-color: var(--slt-ui-accent-ink);
+    animation: slt-ui-spin 0.8s linear infinite;
+}
+@keyframes slt-ui-spin { to { transform: rotate(360deg); } }
+.slt-ui-stagger {
+    transition: opacity 0.34s var(--slt-ui-ease), transform 0.44s var(--slt-ui-ease), filter 0.44s var(--slt-ui-ease);
+    transition-delay: calc(120ms + var(--slt-ui-i, 0) * 40ms);
+}
+.slt-ui-overlay:not(.slt-ui-open):not(.slt-ui-closing) .slt-ui-stagger,
+.slt-ui-dock-wrap:not(.slt-ui-open) .slt-ui-stagger {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(3px);
+}
+.slt-ui-menu {
+    position: fixed;
+    z-index: 2147482600;
+    min-width: 200px;
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid var(--slt-ui-line);
+    background: linear-gradient(170deg, var(--slt-ui-raised), var(--slt-ui-field));
+    box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.75);
+}
+.slt-ui-menu-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+.slt-ui-menu-item:hover, .slt-ui-menu-item:focus { background: var(--slt-ui-line); outline: none; }
+.slt-ui-menu-hint { font-size: 11.5px; font-weight: 500; color: var(--slt-ui-ink-faint); }
+.slt-ui-region {
+    position: fixed;
+    left: 16px;
+    bottom: var(--slt-ui-region-bottom, 96px);
+    z-index: 2147482500;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: flex-start;
+    gap: 10px;
+    width: min(400px, calc(100vw - 32px));
+    pointer-events: none;
+}
+.slt-ui-region > * { pointer-events: auto; }
+.slt-ui-dock-wrap { width: 100%; }
+.slt-ui-dock {
+    width: 100%;
+    max-height: min(70vh, 560px);
+    box-shadow:
+        inset 0 1px 0 color-mix(in oklab, var(--slt-ui-ink) 10%, transparent),
+        0 22px 50px -18px rgba(0, 0, 0, 0.8);
+}
+.slt-ui-dock .slt-ui-head { padding: 22px 52px 2px 22px; }
+.slt-ui-dock .slt-ui-title { font-size: 20px; }
+.slt-ui-dock .slt-ui-body { padding: 10px 22px 2px; }
+.slt-ui-dock .slt-ui-actions { padding: 16px 22px 20px; }
+.slt-ui-dock .slt-ui-x { top: 14px; right: 14px; }
+.slt-ui-toast {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 13px 12px 14px 14px;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid var(--slt-ui-line);
+    background: linear-gradient(180deg, var(--slt-ui-raised) 0%, var(--slt-ui-field) 100%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--slt-ui-ink) 10%, transparent), 0 16px 36px -14px rgba(0, 0, 0, 0.75);
+    color: var(--slt-ui-ink);
+    font-size: 13px;
+}
+.slt-ui-toast-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: var(--slt-ui-accent-soft);
+    color: var(--slt-ui-accent);
+}
+.slt-ui-toast-icon svg { width: 15px; height: 15px; }
+.slt-ui-toast-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 3px; }
+.slt-ui-toast-title { font-weight: 650; font-size: 13.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.slt-ui-toast-count {
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--slt-ui-line);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-ui-toast-desc { font-size: 12.5px; line-height: 1.45; color: var(--slt-ui-ink-muted); overflow-wrap: anywhere; }
+.slt-ui-toast-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.slt-ui-toast-btn {
+    appearance: none;
+    border: 0;
+    border-radius: 9px;
+    padding: 6px 11px;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    background: var(--slt-ui-line);
+    color: var(--slt-ui-ink);
+    transition: background-color 0.15s ease;
+}
+.slt-ui-toast-btn:hover { background: color-mix(in oklab, var(--slt-ui-ink) 18%, transparent); }
+.slt-ui-toast-btn.slt-ui-toast-btn-primary { background: var(--slt-ui-accent); color: var(--slt-ui-accent-ink); }
+.slt-ui-toast-btn.slt-ui-toast-btn-primary:hover { background: var(--slt-ui-accent-hover); }
+.slt-ui-toast-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--slt-ui-ink-faint);
+    cursor: pointer;
+}
+.slt-ui-toast-x:hover { background: var(--slt-ui-line); color: var(--slt-ui-ink); }
+.slt-ui-toast-timer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: transparent;
+}
+.slt-ui-toast-timer i {
+    display: block;
+    height: 100%;
+    background: color-mix(in oklab, var(--slt-ui-accent) 55%, transparent);
+    transform-origin: left center;
+}
+.slt-ui-dock .slt-ui-actions { justify-content: flex-start; }
+.slt-ui-dock .slt-ui-actions .slt-ui-btn-primary { order: -1; flex: 1 1 100%; }
+.slt-ui-dock .slt-ui-actions .slt-ui-btn-ghost { margin-left: auto; }
+.slt-ui-text[hidden] { display: none; }
+.slt-ui-form { display: flex; flex-direction: column; gap: 12px; }
+.slt-ui-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 650; color: var(--slt-ui-ink-muted); }
+.slt-ui-input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 11px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-field-deep) 80%, black);
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.slt-ui-input:focus { border-color: var(--slt-ui-accent); box-shadow: 0 0 0 3px var(--slt-ui-accent-soft); }
+.slt-ui-input::placeholder { color: var(--slt-ui-ink-faint); }
+body.slt-update-waiting #TranslateToggle { position: relative; }
+body.slt-update-waiting #TranslateToggle::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: oklch(0.8 0.15 ${BRAND_HUE});
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+.slt-ui-ring { width: 18px; height: 18px; transform: rotate(-90deg); }
+.slt-ui-ring circle { fill: none; stroke-width: 2.4; }
+.slt-ui-ring .slt-ui-ring-track { stroke: var(--slt-ui-line); }
+.slt-ui-ring .slt-ui-ring-fill { stroke: var(--slt-ui-accent); stroke-linecap: round; transition: stroke-dashoffset 0.9s linear; }
+@media (prefers-reduced-motion: reduce) {
+    .slt-ui-overlay, .slt-ui-panel, .slt-ui-stagger, .slt-ui-toast {
+        transition-duration: 0.01ms !important;
+        transition-delay: 0s !important;
+        animation-duration: 0.01ms !important;
+    }
+    .slt-ui-dialog, .slt-ui-stagger { transform: none !important; filter: none !important; clip-path: none !important; }
+}
+`;
+  function toneVars(tone = "accent") {
+    return adaptToneVars(tone, baseToneVars(tone));
+  }
+
+  // src/utils/toast.ts
+  var MAX_VISIBLE = 3;
+  var INBOX_KEY = "notification-inbox";
+  var INBOX_LIMIT = 40;
+  var DEFAULT_DURATION = {
+    info: 4200,
+    success: 4200,
+    warning: 8e3,
+    error: 8e3,
+    update: Infinity
+  };
+  var TONE = {
+    info: "accent",
+    success: "success",
+    warning: "hotfix",
+    error: "error",
+    update: "accent"
+  };
+  var ICONS = {
+    info: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 7.2v3.9M8 4.9v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    success: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.4l2.9 2.9 6.1-6.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l6.3 11H1.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3.2M8 11.6v.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    error: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    update: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.8M4.3 7.3L8 3.6l3.7 3.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  var live = [];
+  var queue = [];
+  var hovering = false;
+  var hoverBound = false;
+  var inboxListeners = /* @__PURE__ */ new Set();
+  var inboxActions = /* @__PURE__ */ new Map();
+  function readInbox() {
+    try {
+      const raw = storage.get(INBOX_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((e) => e && typeof e.title === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  function writeInbox(entries) {
+    storage.set(INBOX_KEY, JSON.stringify(entries.slice(0, INBOX_LIMIT)));
+    inboxListeners.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+      }
+    });
+  }
+  function getInbox() {
+    return readInbox();
+  }
+  function unreadCount() {
+    return readInbox().filter((e) => !e.read).length;
+  }
+  function markInboxRead() {
+    const entries = readInbox();
+    if (!entries.some((e) => !e.read))
+      return;
+    writeInbox(entries.map((e) => ({ ...e, read: true })));
+  }
+  function clearInbox() {
+    writeInbox([]);
+  }
+  function removeInboxEntries(match) {
+    const entries = readInbox();
+    const next = entries.filter((e) => !match(e));
+    if (next.length !== entries.length)
+      writeInbox(next);
+  }
+  function onInboxChange(listener) {
+    inboxListeners.add(listener);
+    return () => inboxListeners.delete(listener);
+  }
+  function registerInboxAction(id, run) {
+    inboxActions.set(id, run);
+  }
+  function runInboxAction(id) {
+    const run = inboxActions.get(id);
+    if (!run)
+      return false;
+    run();
+    return true;
+  }
+  function record(options) {
+    const kind = options.kind || "info";
+    const wants = options.inbox ?? (kind === "warning" || kind === "error" || kind === "update");
+    if (!wants)
+      return;
+    const entries = readInbox();
+    const id = options.key || `${kind}:${options.title}`;
+    const next = {
+      id,
+      kind,
+      title: options.title,
+      description: options.description,
+      at: Date.now(),
+      read: false,
+      actionId: options.inboxAction?.id,
+      actionLabel: options.inboxAction?.label
+    };
+    writeInbox([next, ...entries.filter((e) => e.id !== id)]);
+  }
+  function bindHover(region2) {
+    if (hoverBound)
+      return;
+    hoverBound = true;
+    region2.addEventListener("mouseenter", () => {
+      hovering = true;
+      live.forEach(pause);
+    });
+    region2.addEventListener("mouseleave", () => {
+      hovering = false;
+      live.forEach(resume);
+    });
+  }
+  function pause(t) {
+    if (t.timer === null)
+      return;
+    window.clearTimeout(t.timer);
+    t.timer = null;
+    t.remaining -= Date.now() - t.startedAt;
+    t.barAnim?.pause();
+  }
+  function resume(t) {
+    if (t.closed || !Number.isFinite(t.remaining) || t.timer !== null)
+      return;
+    t.startedAt = Date.now();
+    t.timer = window.setTimeout(() => t.handle.close("timeout"), Math.max(400, t.remaining));
+    t.barAnim?.play();
+  }
+  function startTimer(t, duration) {
+    if (t.timer !== null)
+      window.clearTimeout(t.timer);
+    t.timer = null;
+    t.barAnim?.cancel();
+    t.barAnim = null;
+    t.remaining = duration;
+    const bar = t.bar.firstElementChild;
+    if (!Number.isFinite(duration)) {
+      t.bar.hidden = true;
+      return;
+    }
+    t.bar.hidden = false;
+    if (!prefersReducedMotion()) {
+      t.barAnim = bar.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration, easing: "linear", fill: "forwards" });
+    }
+    if (hovering) {
+      t.barAnim?.pause();
+      return;
+    }
+    t.startedAt = Date.now();
+    t.timer = window.setTimeout(() => t.handle.close("timeout"), duration);
+  }
+  function fill(node, t) {
+    const o = t.options;
+    const kind = o.kind || "info";
+    paintTone(node, o.tone || TONE[kind]);
+    node.setAttribute("role", kind === "error" || kind === "warning" ? "alert" : "status");
+    const icon = node.querySelector(".slt-ui-toast-icon");
+    icon.innerHTML = ICONS[kind];
+    const title = node.querySelector(".slt-ui-toast-title");
+    title.textContent = o.title;
+    if (t.count > 1)
+      title.append(el("span", { class: "slt-ui-toast-count", text: `\xD7${t.count}` }));
+    const desc = node.querySelector(".slt-ui-toast-desc");
+    desc.textContent = o.description || "";
+    desc.hidden = !o.description;
+    const actions = node.querySelector(".slt-ui-toast-actions");
+    actions.innerHTML = "";
+    const all = [...o.actions || []];
+    if (o.undo) {
+      const undo = o.undo;
+      all.unshift({ label: "Undo", primary: !(o.actions || []).some((a) => a.primary), onClick: () => undo() });
+    }
+    all.forEach((action) => {
+      const btn = el("button", { class: `slt-ui-toast-btn${action.primary ? " slt-ui-toast-btn-primary" : ""}`, type: "button", text: action.label });
+      btn.addEventListener("click", (event) => {
+        action.onClick(event, t.handle);
+        t.handle.close("action");
+      });
+      actions.append(btn);
+    });
+    actions.hidden = all.length === 0;
+  }
+  function mount(options) {
+    const region2 = toastRegion();
+    bindHover(region2);
+    const node = el(
+      "div",
+      { class: "slt-ui-toast" },
+      el("span", { class: "slt-ui-toast-icon" }),
+      el(
+        "div",
+        { class: "slt-ui-toast-text" },
+        el("div", { class: "slt-ui-toast-title" }),
+        el("div", { class: "slt-ui-toast-desc" }),
+        el("div", { class: "slt-ui-toast-actions" })
+      ),
+      el("button", { class: "slt-ui-toast-x", type: "button", "aria-label": "Dismiss", html: CLOSE_SVG })
+    );
+    const bar = el("div", { class: "slt-ui-toast-timer" }, el("i"));
+    node.append(bar);
+    const t = {
+      handle: null,
+      options,
+      count: 1,
+      timer: null,
+      startedAt: Date.now(),
+      remaining: 0,
+      bar,
+      barAnim: null,
+      closed: false
+    };
+    t.handle = {
+      el: node,
+      rect: () => node.getBoundingClientRect(),
+      update: (patch) => {
+        t.options = { ...t.options, ...patch };
+        fill(node, t);
+        if (patch.duration !== void 0 || patch.kind) {
+          startTimer(t, t.options.duration ?? DEFAULT_DURATION[t.options.kind || "info"]);
+        }
+      },
+      close: (reason = "dismiss") => {
+        if (t.closed)
+          return;
+        t.closed = true;
+        if (t.timer !== null)
+          window.clearTimeout(t.timer);
+        t.barAnim?.cancel();
+        const index = live.indexOf(t);
+        if (index >= 0)
+          live.splice(index, 1);
+        if (reason === "dismiss") {
           try {
-            onClose();
+            t.options.onDismiss?.();
           } catch {
           }
         }
-      };
-      const overlay = modal.querySelector(".sl-modal-overlay-animated");
-      if (overlay) {
-        overlay.classList.remove("Active");
-        setTimeout(finish, 250);
+        const done = () => {
+          node.remove();
+          flushQueue();
+        };
+        if (prefersReducedMotion() || reason === "replace") {
+          done();
+          return;
+        }
+        const h = node.offsetHeight;
+        const anim = node.animate([
+          { opacity: 1, transform: "none", height: `${h}px`, marginBottom: "0px" },
+          { opacity: 0, transform: "translateX(-14px)", height: `${h}px`, marginBottom: "0px", offset: 0.55 },
+          { opacity: 0, transform: "translateX(-14px)", height: "0px", marginBottom: "-10px", paddingTop: "0px", paddingBottom: "0px" }
+        ], { duration: 320, easing: "cubic-bezier(0.4, 0, 0.2, 1)", fill: "forwards" });
+        let finished = false;
+        const once = () => {
+          if (finished)
+            return;
+          finished = true;
+          done();
+        };
+        anim.onfinish = once;
+        window.setTimeout(once, 480);
+      }
+    };
+    node.querySelector(".slt-ui-toast-x")?.addEventListener("click", () => t.handle.close("dismiss"));
+    fill(node, t);
+    region2.append(node);
+    live.push(t);
+    startTimer(t, options.duration ?? DEFAULT_DURATION[options.kind || "info"]);
+    if (!prefersReducedMotion()) {
+      node.animate([
+        { clipPath: "inset(0 100% 0 0 round 14px)", opacity: 0.4 },
+        { clipPath: "inset(0 0 0 0 round 14px)", opacity: 1 }
+      ], { duration: 420, easing: "cubic-bezier(0.2, 0.9, 0.1, 1)" });
+    }
+    return t.handle;
+  }
+  function flushQueue() {
+    while (queue.length && live.length < MAX_VISIBLE) {
+      const next = queue.shift();
+      next.resolve(mount(next.options));
+    }
+  }
+  function toast(options) {
+    record(options);
+    if (options.key) {
+      const existing = live.find((t) => t.options.key === options.key && !t.closed);
+      if (existing) {
+        existing.count += options.undo ? 0 : 1;
+        if (options.undo)
+          existing.count = 1;
+        existing.options = { ...existing.options, ...options };
+        fill(existing.handle.el, existing);
+        startTimer(existing, options.duration ?? DEFAULT_DURATION[options.kind || "info"]);
+        if (!prefersReducedMotion()) {
+          existing.handle.el.animate([{ transform: "translateX(4px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" });
+        }
+        return existing.handle;
+      }
+    }
+    if (live.length >= MAX_VISIBLE) {
+      const evictable = live.find((t) => Number.isFinite(t.remaining) && !t.options.undo);
+      if (evictable) {
+        evictable.handle.close("replace");
       } else {
-        finish();
-      }
-      return;
-    }
-    const spicetify = globalThis.Spicetify;
-    spicetify?.PopupModal?.hide();
-  }
-  function createModalHost() {
-    try {
-      const template = document.createElement("template");
-      template.innerHTML = "<sl-generic-modal></sl-generic-modal>";
-      const parsed = template.content.firstElementChild;
-      if (parsed)
-        return parsed;
-    } catch {
-    }
-    try {
-      return document.createElement("sl-generic-modal");
-    } catch {
-    }
-    return document.createElement("div");
-  }
-  function displaySpicetifyModal(options) {
-    const spicetify = globalThis.Spicetify;
-    spicetify?.PopupModal?.display({
-      title: options.title,
-      content: options.content,
-      isLarge: options.isLarge
-    });
-  }
-  function displayModal(options) {
-    if (!spicyLyricsAvailable()) {
-      displaySpicetifyModal(options);
-      return;
-    }
-    if (activeModal) {
-      try {
-        activeModal.remove();
-      } catch {
-      }
-      activeModal = null;
-      activeOnClose = null;
-    }
-    let host;
-    try {
-      host = createModalHost();
-      host.classList.add("SpicyLyricsModal");
-      document.body.append(host);
-    } catch (hostError) {
-      displaySpicetifyModal(options);
-      return;
-    }
-    const containerClass = options.isLarge ? "sl-modal-container-large" : "sl-modal-container";
-    host.innerHTML = `
-<div class="sl-modal-overlay sl-modal-overlay-animated" style="z-index: 100;">
-    <div class="sl-modal" tabindex="-1" role="dialog" aria-modal="true" aria-label="${escapeForHtml(options.title || "")}">
-        <div class="${containerClass}">
-            <div class="sl-modal-header">
-                <h1 class="sl-modal-title">${escapeForHtml(options.title || "")}</h1>
-                <button aria-label="Close" class="sl-modal-close-btn" type="button">${CLOSE_SVG}</button>
-            </div>
-            <div class="sl-modal-main-section">
-                <main class="sl-modal-content"></main>
-            </div>
-        </div>
-    </div>
-</div>`;
-    const main = host.querySelector("main.sl-modal-content");
-    if (main) {
-      if (typeof options.content === "string") {
-        main.innerHTML = options.content;
-      } else if (options.content instanceof Node) {
-        main.append(options.content);
+        let resolved = null;
+        const proxy = {
+          el: document.createElement("div"),
+          rect: () => resolved ? resolved.rect() : new DOMRect(),
+          update: (patch) => resolved?.update(patch),
+          close: (reason) => {
+            if (resolved)
+              resolved.close(reason);
+            else {
+              const i = queue.findIndex((q) => q.options === options);
+              if (i >= 0)
+                queue.splice(i, 1);
+            }
+          }
+        };
+        queue.push({ options, resolve: (h) => {
+          resolved = h;
+        } });
+        return proxy;
       }
     }
-    activeModal = host;
-    activeOnClose = options.onClose ?? null;
-    host.querySelector(".sl-modal-close-btn")?.addEventListener("click", () => hideModal());
-    const overlay = host.querySelector(".sl-modal-overlay");
-    overlay?.addEventListener("click", (event) => {
-      if (event.target === event.currentTarget)
-        hideModal();
-    });
-    setTimeout(() => {
-      host.querySelector(".sl-modal-overlay-animated")?.classList.add("Active");
-    }, 50);
+    return mount(options);
+  }
+  function dismissToast(key) {
+    live.filter((t) => t.options.key === key).forEach((t) => t.handle.close("replace"));
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (queue[i].options.key === key)
+        queue.splice(i, 1);
+    }
   }
 
   // src/utils/updater.ts
@@ -8771,7 +10096,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     pending: "pending-update",
     snooze: "update-snooze",
     lastVersion: "last-known-version",
-    lastHash: "last-known-hash"
+    lastHash: "last-known-hash",
+    skip: "update-skip"
   };
   var LEGACY_STORAGE_KEYS = [
     "pending-update-version",
@@ -8816,6 +10142,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function getContentHashShort(length = 8) {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
+  function getBuildHash() {
+    return !"ec23f9e492e0c78e583e5d11acc70efb2a7b6a004af17e8cd371df4671f70e81".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ec23f9e492e0c78e583e5d11acc70efb2a7b6a004af17e8cd371df4671f70e81" : "";
+  }
+  function getDisplayHash() {
+    if (LOADED_HASH)
+      return { hash: LOADED_HASH, source: "delivered" };
+    const build = getBuildHash();
+    if (build)
+      return { hash: build, source: "build" };
+    return { hash: "", source: "" };
+  }
   async function fetchWithTimeout2(input, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -8834,9 +10171,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return url;
     }
   }
-  async function computeSHA256(text) {
+  async function computeSHA256(text3) {
     try {
-      const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+      const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text3));
       return Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
     } catch {
       return null;
@@ -8844,12 +10181,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   function wait(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
-  function notify(message, isError = false) {
-    try {
-      Spicetify.showNotification?.(message, isError);
-    } catch {
-    }
   }
   async function fetchSelfHostedRelease() {
     try {
@@ -8961,7 +10292,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return `hotfix:${result.remote.version.text}:${result.hash}`;
     return null;
   }
+  function runCheck(trigger) {
+    if (!inFlightCheck) {
+      lastCheckTime = Date.now();
+      inFlightCheck = resolveUpdateStatus(trigger).finally(() => {
+        inFlightCheck = null;
+      });
+    }
+    return inFlightCheck;
+  }
   function isSnoozed(key) {
+    if (storage.get(STORAGE_KEYS.skip) === key)
+      return true;
     try {
       const raw = storage.get(STORAGE_KEYS.snooze);
       if (!raw)
@@ -8972,25 +10314,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return false;
     }
   }
-  function snooze(key) {
-    storage.set(STORAGE_KEYS.snooze, JSON.stringify({ key, until: Date.now() + SNOOZE_MS }));
+  function snooze(key, ms = SNOOZE_MS) {
+    storage.set(STORAGE_KEYS.snooze, JSON.stringify({ key, until: Date.now() + ms }));
   }
-  function isUpdaterModalOpen() {
-    try {
-      return !!document.querySelector(".slt-updater-modal");
-    } catch {
-      return false;
-    }
+  function clearSnooze() {
+    storage.remove(STORAGE_KEYS.snooze);
+    storage.remove(STORAGE_KEYS.skip);
   }
   async function checkForUpdates(options = {}) {
     const trigger = typeof options === "boolean" ? options ? "manual" : "auto" : options.trigger ?? "manual";
-    if (!inFlightCheck) {
-      lastCheckTime = Date.now();
-      inFlightCheck = resolveUpdateStatus(trigger).finally(() => {
-        inFlightCheck = null;
-      });
-    }
-    const result = await inFlightCheck;
+    const result = await runCheck(trigger);
     if (result.status === "error") {
       increaseBackoff();
     } else {
@@ -8999,11 +10332,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const key = getPromptKey(result);
     if (key && !isInstalling) {
       if (trigger === "manual") {
-        storage.remove(STORAGE_KEYS.snooze);
-        presentPrompt(result);
-      } else if (!isSnoozed(key) && !isUpdaterModalOpen()) {
-        presentPrompt(result);
+        clearSnooze();
+        presentPrompt(result, "manual");
+      } else if (!isSnoozed(key)) {
+        presentPrompt(result, "auto");
+      } else if (storage.get(STORAGE_KEYS.skip) !== key) {
+        setWaiting(result);
       }
+    } else if (!key) {
+      setWaiting(null);
     }
     if (schedulerStarted && !isInstalling) {
       scheduleNextCheck();
@@ -9011,7 +10348,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return result;
   }
   async function getUpdateInfo() {
-    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus("manual");
+    const result = await runCheck("manual");
     if (result.status === "error")
       return null;
     return {
@@ -9022,42 +10359,53 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       releaseUrl: result.remote.releaseUrl
     };
   }
-  async function runManualUpdateCheck(button, options = {}) {
+  async function runManualUpdateCheck(button) {
     if (button?.disabled)
       return null;
-    const idleText = button?.dataset.sltIdleText || button?.textContent || "Check for Updates";
-    const setButton = (text, disabled) => {
+    const idleText = button?.dataset.sltIdleText || button?.textContent || "Check for updates";
+    const setButton = (label, disabled) => {
       if (!button)
         return;
       button.dataset.sltIdleText = idleText;
-      button.textContent = text;
+      button.textContent = label;
       button.disabled = disabled;
     };
-    const restoreLater = (text) => {
-      setButton(text, true);
+    const restoreLater = (label) => {
+      setButton(label, true);
       window.setTimeout(() => setButton(idleText, false), 2500);
     };
-    setButton("Checking...", true);
-    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus("manual");
+    setButton("Checking\u2026", true);
+    const result = await runCheck("manual");
     if (result.status === "update" || result.status === "hotfix") {
       setButton(idleText, false);
-      try {
-        await options.beforePrompt?.();
-      } catch {
-      }
-      storage.remove(STORAGE_KEYS.snooze);
+      clearSnooze();
       resetBackoff();
-      presentPrompt(result);
+      presentPrompt(result, "manual");
       return result;
     }
     if (result.status === "current") {
       resetBackoff();
       restoreLater("Up to date");
-      notify(`You're on the latest version (v${result.current.text})`);
+      setWaiting(null);
+      toast({
+        kind: "success",
+        key: "slt-update-check",
+        title: "You're up to date",
+        description: `v${result.current.text} is the latest Spicy Lyric Translator.`
+      });
       return result;
     }
+    increaseBackoff();
     restoreLater("Check failed");
-    notify(`Couldn't check for updates: ${result.message}`, true);
+    toast({
+      kind: "error",
+      key: "slt-update-check",
+      title: "Couldn't check for updates",
+      description: result.message,
+      actions: [{ label: "Try again", onClick: () => {
+        runManualUpdateCheck(button);
+      } }]
+    });
     return result;
   }
   function getScheduledDelay() {
@@ -9128,31 +10476,119 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return null;
     }
   }
-  async function installUpdate(result, content) {
+  function playbackInfo() {
+    try {
+      const player = Spicetify.Player;
+      const item = player?.data?.item;
+      if (!item?.uri)
+        return null;
+      const duration = Number(player.getDuration?.() ?? item.duration?.milliseconds ?? player.data?.duration ?? 0) || 0;
+      return {
+        uri: item.uri,
+        name: item.name || "this song",
+        duration,
+        progress: Number(player.getProgress?.() ?? 0) || 0,
+        playing: !!player.isPlaying?.()
+      };
+    } catch {
+      return null;
+    }
+  }
+  function canWaitForSong() {
+    const info = playbackInfo();
+    return !!info && info.playing && info.duration > 0 && info.duration - info.progress > 8e3;
+  }
+  function formatClock(ms) {
+    const total = Math.max(0, Math.round(ms / 1e3));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+  var songWaiter = null;
+  var waitToast = null;
+  function waitForSongEnd(onEnd, onTick) {
+    const startUri = playbackInfo()?.uri;
+    let done = false;
+    const onSong = () => finish();
+    const interval = window.setInterval(() => {
+      const info = playbackInfo();
+      if (!info)
+        return;
+      if (startUri && info.uri !== startUri) {
+        finish();
+        return;
+      }
+      onTick(info);
+    }, 1e3);
+    const cleanup = () => {
+      window.clearInterval(interval);
+      try {
+        Spicetify.Player.removeEventListener("songchange", onSong);
+      } catch {
+      }
+    };
+    const finish = () => {
+      if (done)
+        return;
+      done = true;
+      cleanup();
+      onEnd();
+    };
+    try {
+      Spicetify.Player.addEventListener("songchange", onSong);
+    } catch {
+    }
+    const first = playbackInfo();
+    if (first)
+      onTick(first);
+    return () => {
+      if (done)
+        return;
+      done = true;
+      cleanup();
+    };
+  }
+  function cancelSongWait() {
+    songWaiter?.();
+    songWaiter = null;
+    waitToast = null;
+    dismissToast("slt-update-wait");
+  }
+  var waitingResult = null;
+  function setWaiting(result) {
+    waitingResult = result && (result.status === "update" || result.status === "hotfix") ? result : null;
+    try {
+      document.body.classList.toggle("slt-update-waiting", !!waitingResult);
+    } catch {
+    }
+    if (!waitingResult)
+      removeInboxEntries((e) => e.id === "slt-update");
+  }
+  function hasWaitingUpdate() {
+    return waitingResult ? { kind: waitingResult.status, version: waitingResult.remote.version.text } : null;
+  }
+  function openWaitingUpdate(origin) {
+    if (waitingResult) {
+      openUpdateCard(waitingResult, origin);
+      return;
+    }
+    checkForUpdates({ trigger: "manual" }).catch(() => {
+    });
+  }
+  registerInboxAction("open-update", () => openWaitingUpdate());
+  async function installUpdate(result, ui, options = {}) {
     if (isInstalling)
       return;
     isInstalling = true;
+    cancelSongWait();
     if (checkTimer !== null) {
       window.clearTimeout(checkTimer);
       checkTimer = null;
     }
-    const progress = content.querySelector(".slt-upd-progress");
-    const progressFill = content.querySelector(".slt-upd-progress-fill");
-    const progressText = content.querySelector(".slt-upd-progress-text");
-    const buttons = content.querySelector(".slt-upd-buttons");
-    const step = async (percent, text, delayMs) => {
-      if (progressFill)
-        progressFill.style.width = `${percent}%`;
-      if (progressText)
-        progressText.textContent = text;
+    const step = async (percent, label, delayMs) => {
+      ui.progress(percent, label);
       await wait(delayMs);
     };
-    if (progress)
-      progress.style.display = "block";
-    if (buttons)
-      buttons.style.display = "none";
     try {
-      await step(20, "Preparing update...", 250);
+      await step(18, "Getting things ready\u2026", 220);
       let changelog = result.remote.changelog;
       if (!changelog) {
         changelog = await fetchChangelogForVersion(result.remote.version.text);
@@ -9163,110 +10599,328 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         fromVersion: result.current.text,
         fromHash: LOADED_HASH,
         changelog,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        resume: !!options.resume
       };
       if (!storage.set(STORAGE_KEYS.pending, JSON.stringify(pending))) {
         throw new Error("Could not save update state");
       }
-      storage.remove(STORAGE_KEYS.snooze);
-      await step(70, result.status === "hotfix" ? "Hotfix ready" : `v${pending.version} ready`, 300);
-      await step(100, "Reloading Spotify...", 350);
+      clearSnooze();
+      removeInboxEntries((e) => e.id === "slt-update");
+      await step(70, result.status === "hotfix" ? "Patch ready" : `v${pending.version} ready`, 280);
+      await step(100, "Reloading Spotify\u2026", 320);
       clearLoaderMetadata();
       window.location.reload();
     } catch (e) {
       error("Update install failed:", e);
       storage.remove(STORAGE_KEYS.pending);
       isInstalling = false;
-      if (progress) {
-        progress.innerHTML = `<div class="slt-upd-error">Update couldn't be installed. Restart Spotify to try again.</div>`;
-      }
-      if (buttons) {
-        buttons.style.display = "flex";
-        buttons.innerHTML = `
-                <button class="slt-upd-btn secondary" type="button" data-action="close">Close</button>
-                <button class="slt-upd-btn primary" type="button" data-action="reload">Reload Now</button>
-            `;
-        buttons.querySelector('[data-action="close"]')?.addEventListener("click", () => hideModal());
-        buttons.querySelector('[data-action="reload"]')?.addEventListener("click", () => window.location.reload());
-      }
+      ui.fail("The update couldn't be installed. Restart Spotify to try again.");
       if (schedulerStarted)
         scheduleNextCheck();
     }
   }
-  function presentPrompt(result) {
+  function backgroundUi() {
+    return {
+      progress: () => {
+      },
+      fail: (message) => {
+        toast({ kind: "error", title: "Update didn't install", description: message });
+      }
+    };
+  }
+  function versionLabels(result) {
+    if (result.status === "hotfix") {
+      return {
+        from: `v${result.current.text} \xB7 ${getContentHashShort() || "current"}`,
+        to: `v${result.remote.version.text} \xB7 ${result.hash.substring(0, 8)}`
+      };
+    }
+    return { from: `v${result.current.text}`, to: `v${result.remote.version.text}` };
+  }
+  function versionRow(from, to) {
+    return el(
+      "div",
+      { class: "slt-upd-versions" },
+      el("span", { class: "slt-upd-chip", text: from }),
+      el("span", { class: "slt-upd-flow", "aria-hidden": "true" }),
+      el("span", { class: "slt-upd-chip slt-upd-chip-to", text: to })
+    );
+  }
+  function notesBlock(changelogHtml, expanded) {
+    const content = el("div", { class: "slt-upd-notes-content", html: changelogHtml });
+    const node = el("div", { class: "slt-upd-notes" }, el("div", { class: "slt-upd-notes-title", text: "Changelog" }), content);
+    node.hidden = !expanded;
+    const action = {
+      id: "notes",
+      label: expanded ? "Hide changelog" : "Show changelog",
+      kind: "quiet",
+      keepOpen: true,
+      onClick: (handle) => {
+        const open = node.hidden;
+        node.hidden = !open;
+        const label = handle.footer.querySelector('[data-action="notes"] .slt-ui-btn-label');
+        if (label)
+          label.textContent = open ? "Hide changelog" : "Show changelog";
+        handle.footer.querySelector('[data-action="notes"]')?.setAttribute("aria-expanded", String(open));
+        if (open) {
+          node.scrollTop = 0;
+          if (!prefersReducedMotion()) {
+            node.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: "ease-out" });
+          }
+        }
+      }
+    };
+    return { node, content, action };
+  }
+  function progressRing() {
+    const node = el("span", { class: "slt-upd-ring-wrap" });
+    node.innerHTML = '<svg class="slt-ui-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="slt-ui-ring-track" cx="10" cy="10" r="7.5"/><circle class="slt-ui-ring-fill" cx="10" cy="10" r="7.5" stroke-dasharray="47.12" stroke-dashoffset="47.12"/></svg>';
+    const fill2 = node.querySelector(".slt-ui-ring-fill");
+    return {
+      node,
+      set: (fraction) => fill2.setAttribute("stroke-dashoffset", String(47.12 * (1 - Math.min(1, Math.max(0, fraction)))))
+    };
+  }
+  function presentPrompt(result, trigger) {
     if (result.status !== "update" && result.status !== "hotfix")
       return;
+    setWaiting(result);
     const key = getPromptKey(result);
-    const existing = document.querySelector(".slt-updater-modal[data-prompt-key]");
-    if (existing?.dataset.promptKey === key)
+    if (activeCardKey === key && activeDock())
       return;
+    if (trigger === "manual") {
+      dismissToast("slt-update");
+      openUpdateCard(result);
+      return;
+    }
+    const isHotfix = result.status === "hotfix";
+    let opened = false;
+    toast({
+      kind: "update",
+      tone: isHotfix ? "hotfix" : "accent",
+      key: "slt-update",
+      title: isHotfix ? `A patch for v${result.current.text} is ready` : `Spicy Lyric Translator v${result.remote.version.text} is out`,
+      description: isHotfix ? "Same version, a few fixes. It takes one quick reload." : `You're on v${result.current.text}.`,
+      duration: Infinity,
+      inboxAction: { id: "open-update", label: "Open" },
+      actions: [{
+        label: "Details",
+        primary: true,
+        onClick: (_event, handle) => {
+          opened = true;
+          const rect = handle.rect();
+          handle.close("replace");
+          openUpdateCard(result, rect);
+        }
+      }],
+      onDismiss: () => {
+        if (!opened)
+          snooze(key);
+      }
+    });
+  }
+  var activeCardKey = null;
+  function openUpdateCard(result, origin) {
+    ensureUpdaterStyles();
+    dismissToast("slt-update");
+    const key = getPromptKey(result);
     const isHotfix = result.status === "hotfix";
     const installable = isHotfix || result.installable;
-    const remoteVersion = result.remote.version.text;
-    const fromLabel = isHotfix ? `v${result.current.text} \xB7 ${getContentHashShort() || "current"}` : `v${result.current.text}`;
-    const toLabel = isHotfix ? `v${remoteVersion} \xB7 ${result.hash.substring(0, 8)}` : `v${remoteVersion}`;
-    const title = isHotfix ? "Hotfix available" : "Update available";
-    const subtitle = isHotfix ? `A patched build of v${remoteVersion} is ready. It only takes a quick reload.` : installable ? `Spicy Lyric Translator v${remoteVersion} is ready to install.` : `v${remoteVersion} is out. This copy was installed manually, so grab the new build from GitHub.`;
-    const primaryButton = installable ? `<button class="slt-upd-btn primary" type="button" data-action="install">${isHotfix ? "Apply Hotfix" : "Install & Reload"}</button>` : `<a class="slt-upd-btn primary" href="${escapeHtml(result.remote.releaseUrl)}" target="_blank" rel="noopener noreferrer" data-action="open">View Release</a>`;
-    const content = buildUpdaterModal({
-      variant: isHotfix ? "hotfix" : "update",
-      icon: isHotfix ? "\u{1F527}" : UPDATE_ICON_HTML,
-      title,
-      subtitle,
-      versionRow: { from: fromLabel, to: toLabel },
-      changelogHtml: result.remote.changelog ? formatReleaseNotes(result.remote.changelog) : '<span class="slt-upd-muted">Loading changelog...</span>',
-      buttonsHtml: `
-            <button class="slt-upd-btn secondary" type="button" data-action="later">Later</button>
-            ${primaryButton}
-        `,
-      withProgress: installable
-    });
-    content.dataset.promptKey = key;
+    const labels = versionLabels(result);
+    const lead = text(installable ? "Installing reloads Spotify. Pick a moment that won\u2019t cut off your music." : "This copy was installed by hand, so grab the new build from the release page.");
+    const status = el("div", { class: "slt-upd-status", hidden: true });
+    const progress = el(
+      "div",
+      { class: "slt-upd-progress", hidden: true },
+      el("div", { class: "slt-upd-progress-bar" }, el("div", { class: "slt-upd-progress-fill" })),
+      el("div", { class: "slt-upd-progress-text", text: "Starting\u2026" })
+    );
+    const notes = notesBlock(result.remote.changelog ? formatReleaseNotes(result.remote.changelog) : '<span class="slt-upd-muted">Loading changelog\u2026</span>', false);
     if (!result.remote.changelog) {
-      fetchChangelogForVersion(remoteVersion).then((changelog) => {
+      fetchChangelogForVersion(result.remote.version.text).then((changelog) => {
         result.remote.changelog = changelog;
-        const target = content.querySelector(".slt-upd-notes-content");
-        if (target)
-          target.innerHTML = formatReleaseNotes(changelog);
+        notes.content.innerHTML = formatReleaseNotes(changelog);
       }).catch(() => {
       });
     }
-    content.querySelector('[data-action="later"]')?.addEventListener("click", () => {
-      snooze(key);
-      hideModal();
+    const laterMenu = {
+      id: "later",
+      label: "Not now",
+      kind: "quiet",
+      menu: [
+        { label: "Remind me in 4 hours", onClick: () => {
+          snooze(key, 4 * 60 * 60 * 1e3);
+          card.close();
+        } },
+        { label: "Remind me tomorrow", onClick: () => {
+          snooze(key, 24 * 60 * 60 * 1e3);
+          card.close();
+        } },
+        {
+          label: isHotfix ? "Skip this patch" : "Skip this version",
+          hint: "No reminders until the next release",
+          onClick: () => {
+            storage.set(STORAGE_KEYS.skip, key);
+            setWaiting(null);
+            card.close();
+          }
+        }
+      ]
+    };
+    const ui = {
+      progress: (percent, label) => {
+        status.hidden = true;
+        lead.hidden = true;
+        progress.hidden = false;
+        progress.querySelector(".slt-upd-progress-fill").style.width = `${percent}%`;
+        progress.querySelector(".slt-upd-progress-text").textContent = label;
+        card.setBusy(true);
+      },
+      fail: (message) => {
+        card.setBusy(false);
+        progress.hidden = true;
+        status.hidden = false;
+        status.className = "slt-upd-status slt-upd-status-error";
+        status.textContent = message;
+        card.setTone("error");
+        card.setActions([
+          { label: "Close", kind: "quiet" },
+          { label: "Reload now", kind: "primary", keepOpen: true, onClick: () => window.location.reload() }
+        ]);
+      }
+    };
+    let waitLabel = "After this song";
+    const installNow = (resume2 = false) => {
+      card.setActions([]);
+      installUpdate(result, ui, { resume: resume2 });
+    };
+    const startSongWait = () => {
+      const ring = progressRing();
+      const line = el("div", { class: "slt-upd-status-text" });
+      const sub = el("div", { class: "slt-upd-status-sub" });
+      status.className = "slt-upd-status";
+      status.replaceChildren(ring.node, el("div", { class: "slt-upd-status-copy" }, line, sub));
+      status.hidden = false;
+      lead.hidden = true;
+      cancelSongWait();
+      songWaiter = waitForSongEnd(() => {
+        songWaiter = null;
+        waitToast = null;
+        dismissToast("slt-update-wait");
+        try {
+          Spicetify.Player.pause?.();
+        } catch {
+        }
+        if (!card.closed) {
+          installNow(true);
+          return;
+        }
+        installUpdate(result, backgroundUi(), { resume: true });
+      }, (info) => {
+        const left = Math.max(0, info.duration - info.progress);
+        waitLabel = `After \u201C${info.name}\u201D \xB7 ${formatClock(left)} left`;
+        line.textContent = `Updating when \u201C${info.name}\u201D ends`;
+        sub.textContent = info.playing ? `${formatClock(left)} left` : `Paused \xB7 ${formatClock(left)} left`;
+        ring.set(info.duration ? info.progress / info.duration : 0);
+        waitToast?.update({ description: waitLabel });
+      });
+      card.setActions([
+        { label: "Cancel", kind: "quiet", keepOpen: true, onClick: () => {
+          cancelSongWait();
+          card.close();
+          openUpdateCard(result);
+        } },
+        { label: "Reload now", kind: "ghost", keepOpen: true, onClick: () => installNow(false) }
+      ]);
+      card.root.dataset.waiting = "true";
+    };
+    const baseActions = () => {
+      if (!installable) {
+        return [
+          notes.action,
+          laterMenu,
+          { label: "Open release page", kind: "primary", href: result.remote.releaseUrl, onClick: () => {
+            snooze(key);
+          } }
+        ];
+      }
+      if (canWaitForSong()) {
+        return [
+          notes.action,
+          laterMenu,
+          { label: "Reload now", kind: "ghost", keepOpen: true, onClick: () => installNow(false) },
+          { label: "Update after this song", kind: "primary", keepOpen: true, onClick: startSongWait }
+        ];
+      }
+      return [
+        notes.action,
+        laterMenu,
+        { label: isHotfix ? "Apply and reload" : "Update and reload", kind: "primary", keepOpen: true, onClick: () => installNow(false) }
+      ];
+    };
+    const card = openDock({
+      tone: isHotfix ? "hotfix" : "accent",
+      eyebrow: isHotfix ? "Spicy Lyric Translator \xB7 Patch" : "Spicy Lyric Translator \xB7 Update",
+      title: isHotfix ? `A patch for v${result.current.text}` : `v${result.remote.version.text} is ready`,
+      body: [versionRow(labels.from, labels.to), lead, status, progress, notes.node],
+      actions: baseActions(),
+      origin,
+      onDismiss: () => {
+        if (songWaiter) {
+          waitToast = toast({
+            kind: "update",
+            tone: isHotfix ? "hotfix" : "accent",
+            key: "slt-update-wait",
+            title: "Update queued",
+            description: waitLabel,
+            duration: Infinity,
+            inbox: false,
+            actions: [
+              { label: "Reload now", primary: true, onClick: () => installUpdate(result, backgroundUi(), { resume: false }) },
+              { label: "Cancel", onClick: () => cancelSongWait() }
+            ],
+            onDismiss: () => cancelSongWait()
+          });
+          return;
+        }
+        snooze(key);
+      },
+      onClose: () => {
+        if (activeCardKey === key)
+          activeCardKey = null;
+      }
     });
-    content.querySelector('[data-action="install"]')?.addEventListener("click", () => {
-      installUpdate(result, content);
-    });
-    content.querySelector('[data-action="open"]')?.addEventListener("click", () => {
-      snooze(key);
-      hideModal();
-    });
-    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
+    activeCardKey = key;
   }
-  function showAppliedModal(kind, version, changelog) {
-    const isHotfix = kind === "hotfix";
-    const hashShort = getContentHashShort();
-    const content = buildUpdaterModal({
-      variant: isHotfix ? "hotfix" : "update",
-      icon: isHotfix ? "\u{1F527}" : UPDATE_ICON_HTML,
-      title: isHotfix ? "Hotfix applied" : "Updated successfully",
-      titleBadges: [`v${version}`, ...hashShort ? [hashShort] : []],
-      subtitle: isHotfix ? `The latest v${version} build is now running.` : `Spicy Lyric Translator v${version} is now running.`,
-      changelogHtml: formatReleaseNotes(changelog),
-      buttonsHtml: `
-            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
-            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
-        `,
-      withProgress: false
+  function resumeAfterReload() {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const attempt = () => {
+        try {
+          const player = Spicetify?.Player;
+          if (player?.data?.item) {
+            if (!player.isPlaying?.())
+              player.play?.();
+            resolve(true);
+            return;
+          }
+        } catch {
+        }
+        if (Date.now() - started > 12e3) {
+          resolve(false);
+          return;
+        }
+        window.setTimeout(attempt, 400);
+      };
+      attempt();
     });
-    content.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => hideModal());
-    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
   }
   async function showPostUpdateChangelog() {
     const pending = readPending();
     const lastKnownVersion = storage.get(STORAGE_KEYS.lastVersion);
     const lastKnownHash = storage.get(STORAGE_KEYS.lastHash);
+    const legacyHotfix = storage.get("hotfix-detected") === "true";
     storage.remove(STORAGE_KEYS.pending);
     for (const key of LEGACY_STORAGE_KEYS)
       storage.remove(key);
@@ -9281,25 +10935,33 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const reached = pending.kind === "hotfix" ? versionDelta > 0 || versionDelta === 0 && !!LOADED_HASH && LOADED_HASH !== pending.fromHash : versionDelta >= 0;
       if (!reached) {
         await wait(APPLIED_MODAL_DELAY_MS);
-        notify("The update was downloaded but not applied yet. Restart Spotify to finish updating.", true);
+        toast({
+          kind: "warning",
+          title: "The update is downloaded, not applied yet",
+          description: "Restart Spotify to finish updating.",
+          actions: [{ label: "Reload", primary: true, onClick: () => window.location.reload() }]
+        });
         return;
       }
       applied = {
         kind: versionDelta > 0 ? "update" : pending.kind,
         version: CURRENT_VERSION,
+        from: pending.fromVersion,
         changelog: versionDelta > 0 ? "" : pending.changelog,
-        exactChangelogOnly: false
+        exactChangelogOnly: false,
+        resume: !!pending.resume
       };
     } else if (lastKnownVersion) {
       const last = parseVersion(lastKnownVersion);
       if (last && compareVersions(current, last) > 0) {
-        applied = { kind: "update", version: CURRENT_VERSION, changelog: "", exactChangelogOnly: !IS_LOADER_MODE };
-      } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && lastKnownHash && lastKnownHash !== LOADED_HASH) {
-        applied = { kind: "hotfix", version: CURRENT_VERSION, changelog: "", exactChangelogOnly: false };
+        applied = { kind: "update", version: CURRENT_VERSION, from: last.text, changelog: "", exactChangelogOnly: !IS_LOADER_MODE, resume: false };
+      } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && (lastKnownHash && lastKnownHash !== LOADED_HASH || legacyHotfix)) {
+        applied = { kind: "hotfix", version: CURRENT_VERSION, from: CURRENT_VERSION, changelog: "", exactChangelogOnly: false, resume: false };
       }
     }
     if (!applied)
       return;
+    const resumed = applied.resume ? resumeAfterReload() : Promise.resolve(false);
     let changelog = applied.changelog;
     if (!changelog) {
       changelog = await fetchChangelogForVersion(applied.version, !applied.exactChangelogOnly);
@@ -9307,344 +10969,277 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return;
     }
     await wait(APPLIED_MODAL_DELAY_MS);
-    showAppliedModal(applied.kind, applied.version, changelog);
+    const didResume = await resumed;
+    if (applied.kind === "hotfix") {
+      const hash = getContentHashShort();
+      const version = applied.version;
+      toast({
+        kind: "success",
+        title: `Patched v${version}`,
+        description: `${hash ? `Build ${hash}. ` : ""}${didResume ? "Your music picked up where it left off." : "Everything is up to date."}`,
+        duration: 9e3,
+        inbox: true,
+        actions: [{ label: "What changed", onClick: () => openWhatsNew({ mode: "applied", version, changelog, kind: "hotfix", expanded: true }) }]
+      });
+      return;
+    }
+    openWhatsNew({ mode: "applied", version: applied.version, from: applied.from, changelog, kind: "update", resumed: didResume });
   }
-  async function showCurrentChangelog() {
+  async function showCurrentChangelog(options = {}) {
     const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
-    const hashShort = getContentHashShort();
-    const content = buildUpdaterModal({
-      variant: "update",
-      icon: UPDATE_ICON_HTML,
-      title: "What's new",
-      titleBadges: [`v${CURRENT_VERSION}`, ...hashShort ? [hashShort] : []],
-      subtitle: "Changelog for the version you are running",
-      changelogHtml: formatReleaseNotes(changelog),
-      buttonsHtml: `
-            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
-            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
-        `,
-      withProgress: false
-    });
-    content.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => hideModal());
-    displayModal({ title: "Spicy Lyric Translator", content, isLarge: true });
+    openWhatsNew({ mode: "current", version: CURRENT_VERSION, changelog, kind: "update", expanded: options.expanded });
   }
-  var UPDATE_ICON_HTML = '<img class="slt-upd-hero-emoji" src="https://cdn.discordapp.com/emojis/1526398149407543389.webp?size=96" alt="" draggable="false">';
-  function buildUpdaterModal(options) {
-    const content = document.createElement("div");
-    content.className = `slt-updater-modal slt-upd-${options.variant}`;
-    const badges = (options.titleBadges || []).map((badge, index) => `<span class="slt-upd-badge${index > 0 ? " subtle" : ""}">${escapeHtml(badge)}</span>`).join("");
-    const versionRow = options.versionRow ? `<div class="slt-upd-versions">
-                <span class="slt-upd-version from">${escapeHtml(options.versionRow.from)}</span>
-                <span class="slt-upd-arrow">\u2192</span>
-                <span class="slt-upd-version to">${escapeHtml(options.versionRow.to)}</span>
-            </div>` : "";
-    const progress = options.withProgress ? `<div class="slt-upd-progress">
-                <div class="slt-upd-progress-bar"><div class="slt-upd-progress-fill"></div></div>
-                <div class="slt-upd-progress-text">Starting...</div>
-            </div>` : "";
-    content.innerHTML = `
-        <style>${UPDATER_STYLES}</style>
-        <div class="slt-upd-hero">
-            <div class="slt-upd-hero-icon">${options.icon}</div>
-            <div class="slt-upd-hero-text">
-                <div class="slt-upd-hero-title">${escapeHtml(options.title)}${badges}</div>
-                <div class="slt-upd-hero-subtitle">${escapeHtml(options.subtitle)}</div>
-            </div>
-        </div>
-        ${versionRow}
-        <div class="slt-upd-notes collapsed">
-            <button class="slt-upd-notes-toggle" type="button" aria-expanded="false">
-                <span class="slt-upd-notes-title">Changelog</span>
-                <span class="slt-upd-notes-toggle-label">Show</span>
-                <span class="slt-upd-notes-chevron" aria-hidden="true">\u25BE</span>
-            </button>
-            <div class="slt-upd-notes-content" hidden>${options.changelogHtml}</div>
-        </div>
-        ${progress}
-        <div class="slt-upd-buttons">${options.buttonsHtml}</div>
-    `;
-    const notes = content.querySelector(".slt-upd-notes");
-    const toggle = content.querySelector(".slt-upd-notes-toggle");
-    const notesContent = content.querySelector(".slt-upd-notes-content");
-    const toggleLabel = content.querySelector(".slt-upd-notes-toggle-label");
-    toggle?.addEventListener("click", () => {
-      const expand = notes?.classList.contains("collapsed") ?? false;
-      notes?.classList.toggle("collapsed", !expand);
-      if (notesContent)
-        notesContent.hidden = !expand;
-      toggle.setAttribute("aria-expanded", String(expand));
-      if (toggleLabel)
-        toggleLabel.textContent = expand ? "Hide" : "Show";
+  var settingLinker = null;
+  function registerSettingLinker(linker) {
+    settingLinker = linker;
+  }
+  function extractHighlights(body) {
+    const out = [];
+    for (const raw of (body || "").split("\n")) {
+      const m = raw.replace(/\r$/, "").match(/^[-*+]\s+(.*\S)/);
+      if (!m)
+        continue;
+      let line = m[1];
+      let setting = null;
+      const tag = line.match(/\[setting:([A-Za-z0-9_]+)\]/);
+      if (tag) {
+        line = line.replace(tag[0], "").trim();
+        const found = settingLinker?.byId(tag[1]);
+        setting = found || null;
+      }
+      if (!setting)
+        setting = settingLinker?.match(line.replace(/[*_`~]/g, "")) || null;
+      if (!line)
+        continue;
+      out.push({ html: processInlineMarkdown(escapeHtml(line)), setting });
+      if (out.length >= 3)
+        break;
+    }
+    return out;
+  }
+  function openWhatsNew(options) {
+    ensureUpdaterStyles();
+    const hashShort = getDisplayHash().hash.substring(0, 8);
+    const highlights = extractHighlights(options.changelog);
+    const notes = notesBlock(formatReleaseNotes(options.changelog), !!options.expanded);
+    const meta = el(
+      "div",
+      { class: "slt-upd-meta" },
+      el("span", { class: "slt-upd-chip slt-upd-chip-to", text: `v${options.version}` }),
+      hashShort ? el("span", { class: "slt-upd-chip", text: hashShort, title: getDisplayHash().hash }) : null
+    );
+    const intro = options.mode === "applied" ? text(`${options.from && options.from !== options.version ? `Updated from v${options.from}. ` : ""}${options.resumed ? "Your music picked up where it left off." : "Here are the highlights."}`) : text("The highlights from the version you\u2019re running.");
+    const body = [meta, intro];
+    let dialog = null;
+    if (highlights.length) {
+      const list = el("ol", { class: "slt-upd-hl-list" });
+      highlights.forEach((h, i) => {
+        const item = el(
+          "li",
+          { class: "slt-upd-hl" },
+          el("span", { class: "slt-upd-hl-dot", text: String(i + 1), "aria-hidden": "true" }),
+          el("div", { class: "slt-upd-hl-text", html: h.html })
+        );
+        if (h.setting && settingLinker) {
+          const setting = h.setting;
+          const btn = el("button", { class: "slt-upd-hl-try", type: "button", text: "Try it", title: `Open \u201C${setting.label}\u201D in settings` });
+          btn.addEventListener("click", () => {
+            dialog?.close();
+            settingLinker?.reveal(setting.id);
+          });
+          item.append(btn);
+        }
+        list.append(item);
+      });
+      body.push(list);
+    }
+    body.push(notes.node);
+    dialog = openDialog({
+      eyebrow: options.mode === "applied" ? "Spicy Lyric Translator \xB7 Updated" : "Spicy Lyric Translator",
+      title: options.mode === "applied" ? options.kind === "hotfix" ? `Patched v${options.version}` : `You\u2019re on v${options.version}` : `What\u2019s new in v${options.version}`,
+      tone: options.kind === "hotfix" ? "hotfix" : "accent",
+      size: "md",
+      body,
+      actions: [
+        notes.action,
+        { label: "Release page", kind: "quiet", href: `${RELEASES_URL}/tag/v${encodeURIComponent(options.version)}`, keepOpen: true },
+        { label: "Done", kind: "primary" }
+      ]
     });
-    return content;
+  }
+  function ensureUpdaterStyles() {
+    if (document.getElementById("slt-upd-styles"))
+      return;
+    const style = document.createElement("style");
+    style.id = "slt-upd-styles";
+    style.textContent = UPDATER_STYLES;
+    document.head.appendChild(style);
   }
   var UPDATER_STYLES = `
-    @keyframes slt-upd-in {
-        from { opacity: 0; transform: translateY(8px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes slt-upd-shimmer {
-        0% { background-position: -200% center; }
-        100% { background-position: 200% center; }
-    }
-    @keyframes slt-upd-nudge {
-        0%, 100% { transform: translateX(0); }
-        50% { transform: translateX(4px); }
-    }
-    .slt-updater-modal {
-        --slt-cl-accent: #1ed760;
-        --slt-upd-accent-alt: #1db954;
-        --slt-upd-accent-rgb: 30, 215, 96;
-        padding: 2px;
-        color: var(--spice-text);
-        animation: slt-upd-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-    .slt-updater-modal.slt-upd-hotfix {
-        --slt-cl-accent: #ffb74d;
-        --slt-upd-accent-alt: #ff9800;
-        --slt-upd-accent-rgb: 255, 183, 77;
-    }
-    .slt-upd-hero {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        margin-bottom: 16px;
-        padding: 16px 18px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(var(--slt-upd-accent-rgb), 0.12) 0%, rgba(var(--slt-upd-accent-rgb), 0.03) 100%);
-        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.2);
-    }
-    .slt-upd-hero-icon {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 22px;
-        flex-shrink: 0;
-        box-shadow: 0 4px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-hero-emoji {
-        width: 28px;
-        height: 28px;
-        object-fit: contain;
-    }
-    .slt-upd-hero-text {
-        flex: 1;
-        min-width: 0;
-    }
-    .slt-upd-hero-title {
-        font-size: 16px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-    .slt-upd-hero-subtitle {
-        font-size: 12px;
-        color: var(--spice-subtext);
-        margin-top: 3px;
-    }
-    .slt-upd-badge {
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        color: #000;
-        padding: 3px 10px;
-        border-radius: 8px;
-        font-size: 11px;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-    }
-    .slt-upd-badge.subtle {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-subtext);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        font-size: 10px;
-        font-weight: 600;
-    }
-    .slt-upd-versions {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 12px;
-        padding: 12px 18px;
-        margin-bottom: 16px;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-    }
-    .slt-upd-version {
-        padding: 5px 12px;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-    }
-    .slt-upd-version.from {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-subtext);
-    }
-    .slt-upd-version.to {
-        background: rgba(var(--slt-upd-accent-rgb), 0.15);
-        color: var(--slt-cl-accent);
-        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-arrow {
-        color: var(--spice-subtext);
-        animation: slt-upd-nudge 1.8s ease-in-out infinite;
-    }
-    .slt-upd-notes {
-        margin-bottom: 16px;
-        border-radius: 10px;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-notes-toggle {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        padding: 12px 18px;
-        border: none;
-        background: transparent;
-        color: var(--spice-text);
-        cursor: pointer;
-        text-align: left;
-        transition: background 0.2s ease;
-    }
-    .slt-upd-notes-toggle:hover {
-        background: rgba(255, 255, 255, 0.04);
-    }
-    .slt-upd-notes-toggle:focus-visible {
-        outline: 2px solid var(--slt-cl-accent);
-        outline-offset: -2px;
-    }
-    .slt-upd-notes-title {
-        flex: 1;
-        font-weight: 600;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .slt-upd-notes-toggle-label {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--slt-cl-accent);
-    }
-    .slt-upd-notes-chevron {
-        color: var(--slt-cl-accent);
-        transition: transform 0.2s ease;
-    }
-    .slt-upd-notes.collapsed .slt-upd-notes-chevron {
-        transform: rotate(-90deg);
-    }
-    .slt-upd-notes-content {
-        padding: 0 18px 14px;
-        max-height: 280px;
-        overflow-y: auto;
-        color: var(--spice-subtext);
-        font-size: 13px;
-        line-height: 1.65;
-    }
-    .slt-upd-notes-content[hidden] { display: none; }
-    .slt-upd-notes-content::-webkit-scrollbar { width: 5px; }
-    .slt-upd-notes-content::-webkit-scrollbar-track { background: transparent; }
-    .slt-upd-notes-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
-    .slt-upd-notes-content strong { color: var(--spice-text); }
-    .slt-upd-notes-content del { opacity: 0.5; }
-    .slt-upd-muted {
-        font-style: italic;
-        color: var(--spice-subtext);
-    }
-    .slt-upd-progress {
-        display: none;
-        padding: 16px 18px;
-        margin-bottom: 16px;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-progress-bar {
-        height: 6px;
-        border-radius: 6px;
-        overflow: hidden;
-        margin-bottom: 10px;
-        background: rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-progress-fill {
-        width: 0%;
-        height: 100%;
-        border-radius: 6px;
-        background: linear-gradient(90deg, var(--slt-upd-accent-alt), var(--slt-cl-accent), var(--slt-upd-accent-alt));
-        background-size: 200% 100%;
-        transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-        animation: slt-upd-shimmer 2s linear infinite;
-    }
-    .slt-upd-progress-text {
-        font-size: 12px;
-        font-weight: 500;
-        text-align: center;
-        color: var(--spice-subtext);
-    }
-    .slt-upd-error {
-        color: #e74c3c;
-        font-weight: 500;
-        text-align: center;
-    }
-    .slt-upd-buttons {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-    }
-    .slt-upd-btn {
-        display: inline-flex;
-        align-items: center;
-        padding: 10px 24px;
-        border-radius: 24px;
-        border: none;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
-        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    }
-    .slt-upd-btn.primary {
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        color: #000;
-        box-shadow: 0 2px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-btn.primary:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 20px rgba(var(--slt-upd-accent-rgb), 0.35);
-    }
-    .slt-upd-btn.secondary {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-text);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .slt-upd-btn.secondary:hover {
-        background: rgba(255, 255, 255, 0.1);
-    }
+.slt-upd-versions, .slt-upd-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.slt-upd-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-ink) 5%, transparent);
+    font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--slt-ui-ink-muted);
+    white-space: nowrap;
+}
+.slt-upd-chip-to {
+    color: var(--slt-ui-ink);
+}
+.slt-upd-flow {
+    position: relative;
+    flex: 1 1 24px;
+    min-width: 24px;
+    max-width: 80px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--slt-ui-line);
+    overflow: hidden;
+}
+.slt-upd-flow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--slt-ui-accent), transparent);
+    transform: translateX(-100%);
+    animation: slt-upd-flow 1.9s ease-in-out infinite;
+}
+@keyframes slt-upd-flow { to { transform: translateX(100%); } }
+.slt-upd-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--slt-ui-ink) 5%, transparent);
+    border: 1px solid var(--slt-ui-line);
+}
+.slt-upd-status[hidden], .slt-upd-progress[hidden], .slt-upd-notes[hidden], .slt-ui-text[hidden] { display: none; }
+.slt-upd-status-error {
+    display: block;
+    font-size: 13px;
+    color: var(--slt-ui-ink);
+    border-color: var(--slt-ui-accent-line);
+    background: var(--slt-ui-accent-soft);
+}
+.slt-upd-status-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.slt-upd-status-text { font-weight: 650; font-size: 13.5px; overflow-wrap: anywhere; }
+.slt-upd-status-sub { font-size: 12px; color: var(--slt-ui-ink-faint); font-variant-numeric: tabular-nums; }
+.slt-upd-ring-wrap { display: inline-flex; flex: 0 0 auto; }
+.slt-upd-ring-wrap .slt-ui-ring { width: 22px; height: 22px; }
+.slt-upd-progress { display: flex; flex-direction: column; gap: 8px; }
+.slt-upd-progress-bar {
+    height: 6px;
+    border-radius: 6px;
+    background: var(--slt-ui-line);
+    overflow: hidden;
+}
+.slt-upd-progress-fill {
+    width: 0;
+    height: 100%;
+    border-radius: 6px;
+    background: var(--slt-ui-accent);
+    transition: width 0.45s var(--slt-ui-ease);
+}
+.slt-upd-progress-text { font-size: 12.5px; color: var(--slt-ui-ink-muted); }
+.slt-upd-notes {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-field-deep) 70%, transparent);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-upd-notes { scrollbar-width: thin; scrollbar-color: var(--slt-ui-line) transparent; }
+.slt-upd-notes::-webkit-scrollbar { width: 5px; }
+.slt-upd-notes::-webkit-scrollbar-button { display: none; }
+.slt-upd-notes::-webkit-scrollbar-thumb { background: var(--slt-ui-line); border-radius: 5px; }
+.slt-upd-notes-title {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--slt-ui-ink-faint);
+}
+.slt-upd-notes-content strong { color: var(--slt-ui-ink); }
+.slt-upd-notes-content del { opacity: 0.5; }
+.slt-upd-muted { color: var(--slt-ui-ink-faint); }
+.slt-upd-hl-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.slt-upd-hl {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 0;
+}
+.slt-upd-hl + .slt-upd-hl { border-top: 1px solid var(--slt-ui-line); }
+.slt-upd-hl-dot {
+    color: var(--slt-ui-ink-faint);
+    font-size: 12.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.slt-upd-hl-text { font-size: 13.5px; line-height: 1.45; color: var(--slt-ui-ink); overflow-wrap: anywhere; }
+.slt-upd-hl-text a { color: var(--slt-ui-ink); }
+.slt-upd-hl-try {
+    appearance: none;
+    align-self: center;
+    border: 1px solid var(--slt-ui-line);
+    border-radius: 9px;
+    padding: 5px 10px;
+    background: transparent;
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+.slt-upd-hl-try:hover { background: var(--slt-ui-line); }
+.slt-upd-hl-try:focus-visible { outline: 2px solid var(--slt-ui-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+    .slt-upd-flow::after { animation: none; }
+}
 `;
-  function escapeHtml(text) {
-    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  function escapeHtml(text3) {
+    return String(text3).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
-  function processInlineMarkdown(text) {
+  function processInlineMarkdown(text3) {
     const sanitizeUrl = (url) => {
       const trimmed = url.trim();
       return /^https?:\/\//i.test(trimmed) ? trimmed : "";
     };
-    return text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    return text3.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       const safe = sanitizeUrl(url);
       return safe ? `<img src="${safe}" alt="${alt}" style="max-width: 100%; border-radius: 4px; margin: 4px 0;">` : alt;
     }).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
       const safe = sanitizeUrl(url);
-      return safe ? `<a href="${safe}" style="color: var(--slt-cl-accent, #1db954); text-decoration: none;" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
-    }).replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--slt-cl-accent, #1db954);">$1</code>');
+      return safe ? `<a href="${safe}" style="color: var(--slt-ui-accent); text-decoration: none;" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+    }).replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, "<em>$1</em>").replace(/~~(.*?)~~/g, "<del>$1</del>").replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--slt-ui-accent);">$1</code>');
   }
   function formatReleaseNotes(body) {
     if (!body || body.trim() === "") {
@@ -9670,7 +11265,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const line = rawLine.replace(/\r$/, "");
       if (line.trim().startsWith("```")) {
         if (inCodeBlock) {
-          output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--spice-subtext); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join("\n")}</code></pre>`);
+          output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--slt-ui-ink-muted); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join("\n")}</code></pre>`);
           codeContent = [];
           inCodeBlock = false;
         } else {
@@ -9691,30 +11286,30 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const h3 = line.match(/^###\s+(.*)/);
       if (h3) {
         closeLists();
-        output.push(`<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--spice-text);">${processInlineMarkdown(h3[1])}</div>`);
+        output.push(`<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--slt-ui-ink);">${processInlineMarkdown(h3[1])}</div>`);
         continue;
       }
       const h2 = line.match(/^##\s+(.*)/);
       if (h2) {
         closeLists();
-        output.push(`<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--spice-text);">${processInlineMarkdown(h2[1])}</div>`);
+        output.push(`<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--slt-ui-ink);">${processInlineMarkdown(h2[1])}</div>`);
         continue;
       }
       const h1 = line.match(/^#\s+(.*)/);
       if (h1) {
         closeLists();
-        output.push(`<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--spice-text);">${processInlineMarkdown(h1[1])}</div>`);
+        output.push(`<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--slt-ui-ink);">${processInlineMarkdown(h1[1])}</div>`);
         continue;
       }
       if (line.match(/^(---+|===+|\*\*\*+)\s*$/)) {
         closeLists();
-        output.push('<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">');
+        output.push('<hr style="border: none; border-top: 1px solid var(--slt-ui-line); margin: 12px 0;">');
         continue;
       }
       const bq = line.match(/^>\s?(.*)/);
       if (bq) {
         closeLists();
-        output.push(`<div style="border-left: 3px solid var(--slt-cl-accent, #1db954); padding-left: 12px; margin: 6px 0; color: var(--spice-subtext); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`);
+        output.push(`<div style="border-left: 3px solid var(--slt-ui-accent); padding-left: 12px; margin: 6px 0; color: var(--slt-ui-ink-muted); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`);
         continue;
       }
       const ul = line.match(/^([ \t]*)[-*+]\s+(.*)/);
@@ -9729,7 +11324,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
         const depth = Math.min(Math.floor(ul[1].replace(/\t/g, "  ").length / 2), 5);
         const markers = ["\u2022", "\u25E6", "\u25AA", "\u2023", "\xB7", "\u2022"];
-        output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0;">${markers[depth] || "\u2022"}</span><span>${processInlineMarkdown(ul[2])}</span></li>`);
+        output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-ui-accent); flex-shrink: 0;">${markers[depth] || "\u2022"}</span><span>${processInlineMarkdown(ul[2])}</span></li>`);
         continue;
       }
       const ol = line.match(/^([ \t]*)(\d+)[.)]\s+(.*)/);
@@ -9743,60 +11338,82 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           inOl = true;
         }
         const depth = Math.min(Math.floor(ol[1].replace(/\t/g, "  ").length / 2), 5);
-        output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0; min-width: 16px; font-weight: 600;">${ol[2]}.</span><span>${processInlineMarkdown(ol[3])}</span></li>`);
+        output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-ui-accent); flex-shrink: 0; min-width: 16px; font-weight: 600;">${ol[2]}.</span><span>${processInlineMarkdown(ol[3])}</span></li>`);
         continue;
       }
       closeLists();
-      output.push(`<p style="margin: 4px 0; color: var(--spice-subtext);">${processInlineMarkdown(line)}</p>`);
+      output.push(`<p style="margin: 4px 0; color: var(--slt-ui-ink-muted);">${processInlineMarkdown(line)}</p>`);
     }
     closeLists();
     if (inCodeBlock) {
-      output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--spice-subtext); margin: 8px 0;"><code>${codeContent.join("\n")}</code></pre>`);
+      output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--slt-ui-ink-muted); margin: 8px 0;"><code>${codeContent.join("\n")}</code></pre>`);
     }
     return output.join("");
   }
   var VERSION = CURRENT_VERSION;
   var REPO_URL = RELEASES_URL;
 
-  // src/utils/icons.ts
-  var Icons = {
-    Translate: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2.01h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
-    </svg>`,
-    TranslateOff: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2.01h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
-        <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-    </svg>`,
-    Learning: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
-    </svg>`,
-    LearningOff: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
-        <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-    </svg>`,
-    Settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-    </svg>`,
-    Loading: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="spicy-translate-loading">
-        <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
-    </svg>`,
-    Connection: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-    </svg>`,
-    Users: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-    </svg>`
-  };
+  // src/utils/notify.ts
+  function canRenderToasts() {
+    try {
+      return typeof document !== "undefined" && typeof document.createElement === "function" && !!document.body && typeof document.body.append === "function" && typeof document.head?.appendChild === "function";
+    } catch {
+      return false;
+    }
+  }
+  function allowed(kind) {
+    if (state.notificationLevel === "off")
+      return false;
+    if (state.notificationLevel === "errors")
+      return kind === "error" || kind === "warning";
+    return true;
+  }
+  function fallback(options) {
+    try {
+      const spicetify = globalThis.Spicetify;
+      spicetify?.showNotification?.(options.title, options.kind === "error" || options.kind === "warning");
+    } catch {
+    }
+    return null;
+  }
+  function notify(input, isError = false) {
+    const options = typeof input === "string" ? { title: input, kind: isError ? "error" : "success" } : input;
+    const kind = options.kind || "info";
+    if (!options.force && !allowed(kind))
+      return null;
+    if (!canRenderToasts())
+      return fallback({ ...options, kind });
+    const { force, ...rest } = options;
+    return toast({ ...rest, kind });
+  }
+  function dismissNotification(key) {
+    if (canRenderToasts())
+      dismissToast(key);
+  }
 
   // src/utils/settingsModel.ts
   var SETTINGS_CATEGORIES = [
-    { id: "slt-cat-translation", label: "Translation", sections: ["Translation", "Behaviour"] },
+    {
+      id: "slt-cat-translation",
+      label: "Translation",
+      icon: "\u6587",
+      description: "The language you read in, how translations sit on the lyrics, and when they run.",
+      sections: ["Translation", "Behaviour"]
+    },
     {
       id: "slt-cat-providers",
       label: "Providers",
+      icon: "\u21C4",
+      description: "Which service does the translating, plus its key and model.",
       sections: ["Provider", "Custom API", "LibreTranslate", "DeepL", "OpenAI", "Gemini", "Grok", "Claude"]
     },
-    { id: "slt-cat-interface", label: "Interface", sections: ["Interface"] }
+    {
+      id: "slt-cat-interface",
+      label: "Interface",
+      icon: "\u25D0",
+      description: "Notifications and the badges shown around the lyrics.",
+      sections: ["Interface"]
+    }
   ];
   var API_OPTIONS = [
     { value: "google", text: "Google Translate" },
@@ -10111,13 +11728,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       defaultValue: false
     },
     {
-      id: "show-notifications",
+      id: "notification-level",
       section: "Interface",
-      keywords: "notifications toasts messages popup",
-      label: "Show Notifications",
-      type: "toggle",
-      storageKey: "show-notifications",
-      defaultValue: true
+      keywords: "notifications toasts messages popup alerts errors quiet silent",
+      label: "Notifications",
+      type: "select",
+      storageKey: "notification-level",
+      defaultValue: "all",
+      options: [
+        { value: "all", text: "All" },
+        { value: "errors", text: "Errors and warnings only" },
+        { value: "off", text: "Off" }
+      ],
+      description: "Which pop-up messages to show. Update prompts always appear, and warnings and errors are kept in the notification inbox either way."
     },
     {
       id: "learning-mode",
@@ -10152,6 +11775,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   ];
   function getSettingField(id) {
     return SETTINGS_SCHEMA.find((field) => field.id === id);
+  }
+  function getCategoryForSection(section) {
+    return SETTINGS_CATEGORIES.find((category) => category.sections.includes(section));
   }
   function getSectionsForCategory(category) {
     return category.sections.filter((section) => SETTINGS_SCHEMA.some((field) => field.section === section));
@@ -10255,10 +11881,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
   }
   function notifySettingCorrection(message) {
-    const spicetify = globalThis.Spicetify;
-    if (state.showNotifications && spicetify?.showNotification) {
-      spicetify.showNotification(message);
-    }
+    notify({ kind: "info", title: message, key: "slt-setting-correction" });
   }
   function showLearningCards() {
     state.learningVisible = true;
@@ -10377,8 +12000,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       case "auto-translate":
         state.autoTranslate = Boolean(value);
         break;
-      case "show-notifications":
-        state.showNotifications = Boolean(value);
+      case "notification-level":
+        state.notificationLevel = String(value);
         break;
       case "show-quality-indicator":
         state.showQualityIndicator = Boolean(value);
@@ -10403,8 +12026,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var QUICK_FIELD_IDS = ["overlay-mode", "learning-mode", "show-romanization"];
   var outsideClickHandler = null;
   var keydownHandler = null;
-  function escapeHtml2(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  function escapeHtml2(text3) {
+    return text3.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function closeQuickMenu() {
     const existing = document.getElementById(QUICK_MENU_ID);
@@ -10504,8 +12127,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     `;
   }
   function syncQuickMenuState(menu) {
-    menu.querySelectorAll("[data-slt-qm-field]").forEach((el) => {
-      const item = el;
+    menu.querySelectorAll("[data-slt-qm-field]").forEach((el2) => {
+      const item = el2;
       const id = item.dataset.sltQmField || "";
       const field = getSettingField(id);
       if (!field)
@@ -10558,7 +12181,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             <span class="slt-qm-label">${escapeHtml2(option.text)}</span>
         `;
       item.addEventListener("click", () => {
-        wrapper.querySelectorAll(".slt-qm-item").forEach((el) => el.setAttribute("aria-checked", "false"));
+        wrapper.querySelectorAll(".slt-qm-item").forEach((el2) => el2.setAttribute("aria-checked", "false"));
         item.setAttribute("aria-checked", "true");
         applySettingById(field.id, option.value);
         onChange();
@@ -10681,8 +12304,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var coveredKeys = /* @__PURE__ */ new Set();
   var fillGapsInFlight = false;
   var lastSkippedTranslation = null;
-  function normalizeMatchKey(text) {
-    return normalizeLyricMatchKey(text);
+  function normalizeMatchKey(text3) {
+    return normalizeLyricMatchKey(text3);
   }
   function buildLyricsKey(lines) {
     let hash = 2166136261;
@@ -10733,13 +12356,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (detectedLanguage)
       state.detectedLanguage = detectedLanguage;
   }
-  function buildMatchKeys(text) {
-    const nonLatinOnly = text.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-    const latinOnly = text.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
+  function buildMatchKeys(text3) {
+    const nonLatinOnly = text3.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    const latinOnly = text3.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
     return {
-      norm: normalizeMatchKey(text),
-      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeMatchKey(nonLatinOnly) : "",
-      latinNorm: latinOnly && latinOnly !== text ? normalizeMatchKey(latinOnly) : ""
+      norm: normalizeMatchKey(text3),
+      nonLatinNorm: nonLatinOnly && nonLatinOnly !== text3 ? normalizeMatchKey(nonLatinOnly) : "",
+      latinNorm: latinOnly && latinOnly !== text3 ? normalizeMatchKey(latinOnly) : ""
     };
   }
   function lookupWithKeys(map, keys) {
@@ -10875,10 +12498,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return;
       }
       const observer = new MutationObserver((mutations, obs) => {
-        const el = document.querySelector(selector);
-        if (el) {
+        const el2 = document.querySelector(selector);
+        if (el2) {
           obs.disconnect();
-          resolve(el);
+          resolve(el2);
         }
       });
       observer.observe(document.body, { childList: true, subtree: true });
@@ -11204,7 +12827,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           apiVocalLineData
         };
       }
-      const hasOriginalText = apiVocalTexts.some((text) => text.trim().length > 0);
+      const hasOriginalText = apiVocalTexts.some((text3) => text3.trim().length > 0);
       return {
         canTranslate: hasOriginalText,
         reason: hasOriginalText ? void 0 : "missing-original-lyrics",
@@ -11217,7 +12840,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const useApiLines = Boolean(apiVocalTexts && apiVocalTexts.length > 0);
     const lineTexts = useApiLines ? apiVocalTexts : domLineTexts;
     return {
-      canTranslate: lineTexts.some((text) => text.trim().length > 0),
+      canTranslate: lineTexts.some((text3) => text3.trim().length > 0),
       lineTexts,
       useApiLines,
       apiVocalTexts,
@@ -11285,9 +12908,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (isOffline()) {
       const cacheStats = getCacheStats();
       if (cacheStats.entries === 0) {
-        if (state.showNotifications && Spicetify.showNotification) {
-          Spicetify.showNotification("Offline - translations unavailable", true);
-        }
+        notify({
+          kind: "warning",
+          key: "slt-offline",
+          title: "You're offline",
+          description: "Translations come back once the connection does. Songs you already translated still work.",
+          inbox: false
+        });
         return;
       }
     }
@@ -11330,8 +12957,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             domLyricsKey,
             preApiSkipCheck.detectedLanguage
           );
-          if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
-            Spicetify.showNotification(preApiSkipCheck.reason || "Lyrics already in target language");
+          if (shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
+            notify({ kind: "info", key: "slt-skip", title: preApiSkipCheck.reason || "Lyrics already in target language" });
           }
           return;
         }
@@ -11384,8 +13011,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       });
       if (!sourceSelection.canTranslate) {
         removeTranslations();
-        if (romanizationOn && state.showNotifications && Spicetify.showNotification) {
-          Spicetify.showNotification("Original lyrics unavailable while romanization is enabled", true);
+        if (romanizationOn) {
+          notify({
+            kind: "warning",
+            key: "slt-romanization-source",
+            title: "Original lyrics unavailable",
+            description: "Spicy Lyrics is only showing the romanized line for this song, so there is nothing to translate from.",
+            inbox: false
+          });
         }
         return;
       }
@@ -11453,8 +13086,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             skipCheck.detectedLanguage
           );
           restoreButtonState();
-          if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
-            Spicetify.showNotification(skipCheck.reason || "Lyrics already in target language");
+          if (shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
+            notify({ kind: "info", key: "slt-skip", title: skipCheck.reason || "Lyrics already in target language" });
           }
           return;
         } else {
@@ -11695,16 +13328,21 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       debug(`translate: first render at ${sincePhaseStart()}`);
       scheduleTranslationReapply(currentTrackUri2);
       void fillVisibleGaps();
-      if (state.showNotifications && Spicetify.showNotification) {
-        const notif = buildTranslationNotification(translations, currentTrackUri2, state.targetLanguage);
-        if (notif)
-          Spicetify.showNotification(notif);
-      }
+      dismissNotification("slt-translate-failed");
+      const notif = buildTranslationNotification(translations, currentTrackUri2, state.targetLanguage);
+      if (notif)
+        notify({ kind: "success", key: "slt-translated", title: notif });
     } catch (err) {
       error("Translation failed:", err);
-      if (state.showNotifications && Spicetify.showNotification) {
-        Spicetify.showNotification("Translation failed. Please try again.", true);
-      }
+      notify({
+        kind: "error",
+        key: "slt-translate-failed",
+        title: "Couldn't translate this song",
+        description: err instanceof Error && err.message ? err.message : "The translation service did not answer.",
+        actions: [{ label: "Try again", primary: true, onClick: () => {
+          forceRetranslate();
+        } }]
+      });
       setButtonErrorState(true);
       setTimeout(() => setButtonErrorState(false), 3e3);
     } finally {
@@ -11714,8 +13352,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }
     }
   }
-  function normalizeForComparison(text) {
-    return (text || "").toLowerCase().replace(/[\s\p{P}\u200B-\u200D\u2060\uFEFF]+/gu, "").trim();
+  function normalizeForComparison(text3) {
+    return (text3 || "").toLowerCase().replace(/[\s\p{P}\u200B-\u200D\u2060\uFEFF]+/gu, "").trim();
   }
   function formatNotificationDuration(ms) {
     if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0)
@@ -11818,8 +13456,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       parts.push(tokens);
     return parts.join(" \xB7 ");
   }
-  function looseLatinSkeleton(text) {
-    return (text || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  function looseLatinSkeleton(text3) {
+    return (text3 || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   }
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
@@ -11897,16 +13535,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const missing = [];
     const missingKeys = /* @__PURE__ */ new Set();
     lines.forEach((line) => {
-      const text = extractLineText2(line);
-      if (!text || !text.trim())
+      const text3 = extractLineText2(line);
+      if (!text3 || !text3.trim())
         return;
-      if (/^[♪♫•\-–—\s]+$/.test(text.trim()))
+      if (/^[♪♫•\-–—\s]+$/.test(text3.trim()))
         return;
-      const key = normalizeMatchKey(text);
+      const key = normalizeMatchKey(text3);
       if (!key || coveredKeys.has(key) || missingKeys.has(key))
         return;
       missingKeys.add(key);
-      missing.push(text);
+      missing.push(text3);
     });
     if (missing.length === 0)
       return;
@@ -11977,29 +13615,29 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (pip)
       docs.push(pip.document);
     docs.forEach((doc) => {
-      doc.querySelectorAll("[data-slt-original-html]").forEach((el) => {
-        const original = el.dataset.sltOriginalHtml;
+      doc.querySelectorAll("[data-slt-original-html]").forEach((el2) => {
+        const original = el2.dataset.sltOriginalHtml;
         if (original !== void 0) {
-          el.innerHTML = original;
-          delete el.dataset.sltOriginalHtml;
+          el2.innerHTML = original;
+          delete el2.dataset.sltOriginalHtml;
         }
       });
-      doc.querySelectorAll("[data-slt-original-text]").forEach((el) => {
-        const original = el.dataset.sltOriginalText;
+      doc.querySelectorAll("[data-slt-original-text]").forEach((el2) => {
+        const original = el2.dataset.sltOriginalText;
         if (original !== void 0) {
-          el.textContent = original;
-          delete el.dataset.sltOriginalText;
+          el2.textContent = original;
+          delete el2.dataset.sltOriginalText;
         }
       });
-      doc.querySelectorAll("[data-slt-replaced-with]").forEach((el) => {
-        delete el.dataset.sltReplacedWith;
+      doc.querySelectorAll("[data-slt-replaced-with]").forEach((el2) => {
+        delete el2.dataset.sltReplacedWith;
       });
-      doc.querySelectorAll(".slt-replace-line").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-replace-hidden").forEach((el) => el.classList.remove("slt-replace-hidden"));
-      doc.querySelectorAll(".spicy-translation-container").forEach((el) => el.remove());
-      doc.querySelectorAll(".slt-interleaved-translation").forEach((el) => el.remove());
-      doc.querySelectorAll(".spicy-hidden-original").forEach((el) => el.classList.remove("spicy-hidden-original"));
-      doc.querySelectorAll(".spicy-translated").forEach((el) => el.classList.remove("spicy-translated"));
+      doc.querySelectorAll(".slt-replace-line").forEach((el2) => el2.remove());
+      doc.querySelectorAll(".slt-replace-hidden").forEach((el2) => el2.classList.remove("slt-replace-hidden"));
+      doc.querySelectorAll(".spicy-translation-container").forEach((el2) => el2.remove());
+      doc.querySelectorAll(".slt-interleaved-translation").forEach((el2) => el2.remove());
+      doc.querySelectorAll(".spicy-hidden-original").forEach((el2) => el2.classList.remove("spicy-hidden-original"));
+      doc.querySelectorAll(".spicy-translated").forEach((el2) => el2.classList.remove("spicy-translated"));
       doc.querySelectorAll(".spicy-original-wrapper").forEach((wrapper) => {
         const parent = wrapper.parentElement;
         if (parent) {
@@ -12027,8 +13665,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const hasLyricLineNode = (node) => {
         if (node.nodeType !== Node.ELEMENT_NODE)
           return false;
-        const el = node;
-        return el.classList?.contains("line") || Boolean(el.querySelector?.(".line"));
+        const el2 = node;
+        return el2.classList?.contains("line") || Boolean(el2.querySelector?.(".line"));
       };
       lyricsObserver = new MutationObserver((mutations) => {
         if (!state.isEnabled || state.isTranslating)
@@ -12271,6 +13909,25 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
   }
 
+  // src/utils/modal.ts
+  var legacy = null;
+  function hideModal() {
+    topSurface()?.close();
+  }
+  function displayModal(options) {
+    const content = typeof options.content === "string" ? Object.assign(document.createElement("div"), { innerHTML: options.content }) : options.content;
+    if (legacy && !legacy.closed && topSurface() === legacy)
+      legacy.close({ silent: true });
+    legacy = openDialog({
+      title: options.title,
+      content,
+      size: options.size || (options.isLarge ? "lg" : "md"),
+      className: "slt-legacy-dialog",
+      onClose: options.onClose || void 0
+    });
+    return legacy;
+  }
+
   // src/utils/connectivity.ts
   var API_BASE = "https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php";
   var CLIENT_ID_KEY = "client-id";
@@ -12352,9 +14009,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     return `${Math.round(count / 1e6 * 10) / 10}M`;
   }
-  function setLabel(button, text) {
-    button.setAttribute("aria-label", text);
-    button.setAttribute("title", text);
+  function setLabel(button, text3) {
+    button.setAttribute("aria-label", text3);
+    button.setAttribute("title", text3);
   }
   function createIndicatorElement() {
     const container = document.createElement("div");
@@ -12393,12 +14050,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     switch (indicatorState.state) {
       case "connected": {
         dot.classList.add("slt-ci-connected");
-        const latencyClass = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : "";
+        const latencyClass2 = indicatorState.latencyMs !== null ? getLatencyClass(indicatorState.latencyMs) : "";
         if (indicatorState.latencyMs !== null) {
-          dot.classList.add(latencyClass);
+          dot.classList.add(latencyClass2);
           if (pingEl) {
             pingEl.textContent = `${indicatorState.latencyMs}ms`;
-            pingEl.className = `slt-ci-ping ${latencyClass}`;
+            pingEl.className = `slt-ci-ping ${latencyClass2}`;
           }
         }
         if (totalCountEl)
@@ -12613,10 +14270,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return;
       }
       const observer = new MutationObserver((mutations, obs) => {
-        const el = document.querySelector(selector);
-        if (el) {
+        const el2 = document.querySelector(selector);
+        if (el2) {
           obs.disconnect();
-          resolve(el);
+          resolve(el2);
         }
       });
       observer.observe(document.body, { childList: true, subtree: true });
@@ -12700,18 +14357,1815 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
   }
 
+  // src/utils/settingsShell.ts
+  var TAB_META = {
+    settings: { label: "Settings", description: "How and when your lyrics get translated." },
+    cache: { label: "Cache", description: "Translations and lyrics saved on this device." },
+    about: { label: "About", description: "Version, updates, connection and shortcuts." }
+  };
+  var SEARCH_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  var EYE_SVG = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>';
+  var BELL_SVG = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M4 11V7a4 4 0 118 0v4l1.2 1.5H2.8zM6.5 13.5a1.6 1.6 0 003 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  var DIFF_SVG = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M5 2.5v7M1.5 6h7M9 11.5h5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  var RESET_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4"></path><path d="M2 2.5V6h3.5"></path></svg>';
+  var REVEAL_SVG = EYE_SVG;
+  var liveContainer = null;
+  var activeTabId = "settings";
+  var activeCategoryId = SETTINGS_CATEGORIES[0].id;
+  var goToLive = null;
+  var rerenderLive = null;
+  var syncChrome = [];
+  var fieldHandles = [];
+  var teardownLive = null;
+  function refreshChrome() {
+    syncChrome.forEach((fn) => fn());
+  }
+  function languageName(code) {
+    return SUPPORTED_LANGUAGES.find((l) => l.code === code)?.name || code.toUpperCase();
+  }
+  function providerName(api) {
+    return API_OPTIONS.find((o) => o.value === api)?.text || api;
+  }
+  function whereLabel(field) {
+    const category = getCategoryForSection(field.section);
+    if (!category || category.label === field.section)
+      return field.section;
+    return `${category.label} \xB7 ${field.section}`;
+  }
+  function describeValue(field, value) {
+    if (field.type === "toggle")
+      return value ? "On" : "Off";
+    if (field.type === "select") {
+      const option = (field.options || []).find((o) => o.value === String(value));
+      return option ? option.text : String(value || "\u2014");
+    }
+    if (field.secret)
+      return value ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "Not set";
+    const str = String(value ?? "");
+    return str ? str.length > 32 ? `${str.slice(0, 31)}\u2026` : str : "\u2014";
+  }
+  function snapshotSettings(fields = SETTINGS_SCHEMA) {
+    const saved = fields.map((field) => ({ field, value: readSettingValue(field) }));
+    return () => {
+      const changes = saved.filter(({ field, value }) => readSettingValue(field) !== value);
+      if (changes.length)
+        applySettingsBatch(changes);
+      refreshAll();
+    };
+  }
+  function offerUndo(title, description, restore) {
+    toast({
+      kind: "success",
+      key: "slt-undo",
+      title,
+      description,
+      duration: 8e3,
+      undo: () => {
+        restore();
+        toast({ kind: "info", key: "slt-undo", title: "Undone", description: "Everything is back the way it was." });
+      }
+    });
+  }
+  function changeWithUndo(field, value, title, description) {
+    const restore = snapshotSettings([field]);
+    applySettingsBatch([{ field, value }]);
+    refreshAll();
+    offerUndo(title, description, restore);
+  }
+  function refreshAll() {
+    if (!liveContainer)
+      return;
+    fieldHandles.forEach((handle) => handle.sync());
+    applyFilter();
+    refreshChrome();
+  }
+  function buildField(field) {
+    const id = `slt-${field.id}`;
+    const row = el("div", { class: `slt-m-field slt-m-field-${field.type}`, "data-slt-setting-field": field.id });
+    const label = el("label", { class: "slt-m-field-label", for: id, text: field.label });
+    if (field.effects?.includes("retranslate")) {
+      label.append(el("span", { class: "slt-m-badge", text: "Retranslates", title: "Changing this translates the current song again" }));
+    }
+    const labelBox = el(
+      "div",
+      { class: "slt-m-field-labelbox" },
+      label,
+      field.description ? el("div", { class: "slt-m-field-hint", text: field.description }) : null
+    );
+    const control = el("div", { class: "slt-m-field-control" });
+    let input;
+    if (field.type === "toggle") {
+      input = el("input", { type: "checkbox", id });
+      control.append(el("label", { class: "slt-m-toggle" }, input, el("span", { class: "slt-m-toggle-slider" })));
+    } else if (field.type === "select") {
+      const select = el("select", { class: "slt-m-select", id });
+      (field.options || []).forEach((option) => select.append(el("option", { value: option.value, text: option.text })));
+      input = select;
+      control.append(select);
+    } else {
+      input = el("input", {
+        class: "slt-m-text",
+        id,
+        type: field.type === "password" ? "password" : "text",
+        placeholder: field.placeholder || "",
+        autocomplete: "off",
+        spellcheck: "false",
+        "data-form-type": "other"
+      });
+      control.append(input);
+      if (field.type === "password") {
+        const reveal = el("button", { class: "slt-m-reveal", type: "button", title: "Show or hide", "aria-label": `Show ${field.label}`, html: REVEAL_SVG });
+        reveal.addEventListener("click", () => {
+          const text3 = input;
+          text3.type = text3.type === "password" ? "text" : "password";
+          reveal.classList.toggle("on", text3.type === "text");
+        });
+        control.append(reveal);
+      }
+    }
+    const reset = el("button", { class: "slt-m-field-reset", type: "button", title: "Reset to default", "aria-label": `Reset ${field.label} to default`, html: RESET_SVG });
+    control.append(reset);
+    row.append(labelBox, control);
+    const sync = () => {
+      const value = readSettingValue(field);
+      if (field.type === "toggle") {
+        input.checked = value === true;
+      } else if (document.activeElement !== input || field.type === "select") {
+        input.value = String(value);
+      }
+      reset.classList.toggle("slt-m-field-reset-on", !isSettingAtDefault(field));
+    };
+    input.addEventListener("change", () => {
+      const value = field.type === "toggle" ? input.checked : input.value;
+      applySettingsBatch([{ field, value }]);
+      refreshAll();
+    });
+    reset.addEventListener("click", () => {
+      changeWithUndo(field, field.defaultValue, `Reset \u201C${field.label}\u201D`, `Back to ${describeValue(field, field.defaultValue)}.`);
+    });
+    sync();
+    return { field, row, sync };
+  }
+  function applyFilter() {
+    if (!liveContainer)
+      return;
+    const searchEl = liveContainer.querySelector(".slt-m-cz-search");
+    const q = (searchEl?.value || "").trim().toLowerCase();
+    const searching = q.length > 0;
+    const api = getCurrentApiPreference();
+    let hits = 0;
+    fieldHandles.forEach(({ field, row }) => {
+      const show = isSettingFieldVisible(field, api) && matchesSettingQuery(field, q);
+      row.style.display = show ? "" : "none";
+      if (show && searching)
+        hits++;
+    });
+    liveContainer.querySelectorAll(".slt-m-cz-sections .slt-m-section").forEach((section) => {
+      const any = Array.from(section.querySelectorAll(".slt-m-field")).some((f) => f.style.display !== "none");
+      section.style.display = any ? "" : "none";
+    });
+    liveContainer.querySelectorAll(".slt-m-cz-category").forEach((category) => {
+      const any = Array.from(category.querySelectorAll(".slt-m-section")).some((s) => s.style.display !== "none");
+      category.style.display = (searching ? any : category.id === activeCategoryId && any) ? "" : "none";
+    });
+    liveContainer.classList.toggle("slt-m-searching", searching);
+    const status = liveContainer.querySelector(".slt-m-cz-status");
+    if (status) {
+      status.style.display = searching ? "" : "none";
+      status.textContent = hits === 0 ? `No settings match \u201C${q}\u201D.` : `${hits} setting${hits === 1 ? "" : "s"} match \u201C${q}\u201D.`;
+      status.classList.toggle("slt-m-cz-status-empty", hits === 0);
+    }
+    const clear = liveContainer.querySelector(".slt-m-cz-clear");
+    if (clear)
+      clear.style.display = searching ? "" : "none";
+  }
+  function buildSettingsTab() {
+    const tab = el("div", { class: "slt-m-tab-content slt-m-cz" });
+    const search = el("input", {
+      type: "text",
+      class: "slt-m-cz-search",
+      placeholder: "Filter settings\u2026",
+      spellcheck: "false",
+      "aria-label": "Filter settings",
+      "data-slt-esc-local": true
+    });
+    const clear = el("button", { type: "button", class: "slt-m-cz-clear", text: "Clear", "aria-label": "Clear filter" });
+    clear.style.display = "none";
+    search.addEventListener("input", () => {
+      applyFilter();
+      refreshChrome();
+    });
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && search.value) {
+        e.stopPropagation();
+        search.value = "";
+        applyFilter();
+        refreshChrome();
+      }
+    });
+    clear.addEventListener("click", () => {
+      search.value = "";
+      applyFilter();
+      refreshChrome();
+      search.focus();
+    });
+    const toolbar = el(
+      "div",
+      { class: "slt-m-cz-toolbar" },
+      el("span", { class: "slt-m-cz-search-icon", "aria-hidden": "true", html: SEARCH_SVG }),
+      search,
+      clear
+    );
+    const status = el("div", { class: "slt-m-cz-status", role: "status" });
+    status.style.display = "none";
+    const sections = el("div", { class: "slt-m-cz-sections" });
+    fieldHandles = [];
+    SETTINGS_CATEGORIES.forEach((category) => {
+      const categoryEl = el(
+        "div",
+        { class: "slt-m-cz-category", id: category.id },
+        el(
+          "div",
+          { class: "slt-m-cz-cat-head" },
+          el("div", { class: "slt-m-cz-cat-title", text: category.label }),
+          el("div", { class: "slt-m-cz-cat-desc", text: category.description })
+        )
+      );
+      getSectionsForCategory(category).forEach((sectionName) => {
+        const section = el(
+          "div",
+          { class: "slt-m-section", "data-section": sectionName },
+          el("div", { class: "slt-m-section-title", text: sectionName })
+        );
+        SETTINGS_SCHEMA.filter((field) => field.section === sectionName).forEach((field) => {
+          const handle = buildField(field);
+          fieldHandles.push(handle);
+          section.append(handle.row);
+        });
+        categoryEl.append(section);
+      });
+      sections.append(categoryEl);
+    });
+    tab.append(toolbar, status, sections);
+    return tab;
+  }
+  function formatBytes(bytes) {
+    if (bytes < 1024)
+      return `${bytes} B`;
+    if (bytes < 1024 * 1024)
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  function relativeTime(at) {
+    const s = Math.max(0, Math.round((Date.now() - at) / 1e3));
+    if (s < 60)
+      return "just now";
+    const m = Math.round(s / 60);
+    if (m < 60)
+      return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24)
+      return `${h} h ago`;
+    const d = Math.round(h / 24);
+    return `${d} day${d === 1 ? "" : "s"} ago`;
+  }
+  function armedButton(label, armedLabel, run) {
+    const btn = el("button", { class: "slt-m-btn slt-m-btn-danger", type: "button", text: label });
+    let timer = null;
+    const disarm = () => {
+      if (timer !== null)
+        window.clearTimeout(timer);
+      timer = null;
+      btn.classList.remove("slt-m-btn-armed");
+      btn.textContent = label;
+    };
+    btn.addEventListener("click", async () => {
+      if (!btn.classList.contains("slt-m-btn-armed")) {
+        btn.classList.add("slt-m-btn-armed");
+        btn.textContent = armedLabel;
+        timer = window.setTimeout(disarm, 3500);
+        return;
+      }
+      disarm();
+      btn.disabled = true;
+      try {
+        await run();
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    btn.addEventListener("blur", disarm);
+    return btn;
+  }
+  function stat(label, value) {
+    return el(
+      "div",
+      { class: "slt-m-stat" },
+      el("div", { class: "slt-m-stat-value", text: value }),
+      el("div", { class: "slt-m-stat-label", text: label })
+    );
+  }
+  function buildCacheTab() {
+    const tab = el("div", { class: "slt-m-tab-content" });
+    const stats = getTrackCacheStats();
+    const usage = storage.getStats();
+    const viewTranslations = el("button", { class: "slt-m-btn", type: "button", text: "Browse translations" });
+    viewTranslations.addEventListener("click", () => openCacheViewer());
+    const translations = el(
+      "div",
+      { class: "slt-m-section" },
+      el("div", { class: "slt-m-section-title", text: "Translations" }),
+      el("div", { class: "slt-m-about-text", text: "Songs you\u2019ve translated are saved here, so they load instantly and work offline." }),
+      el(
+        "div",
+        { class: "slt-m-stats" },
+        stat("Songs", stats.trackCount.toLocaleString()),
+        stat("Lines", stats.totalLines.toLocaleString()),
+        stat("Size", formatBytes(stats.sizeBytes)),
+        stat("Oldest", stats.oldestTimestamp ? relativeTime(stats.oldestTimestamp) : "\u2014")
+      ),
+      el(
+        "div",
+        { class: "slt-m-about-actions" },
+        viewTranslations,
+        armedButton("Delete all translations", "Click again to delete", () => {
+          clearAllCachedTranslations();
+          rerenderLive?.();
+        })
+      )
+    );
+    const viewLyrics = el("button", { class: "slt-m-btn", type: "button", text: "Browse lyrics" });
+    viewLyrics.addEventListener("click", () => {
+      openSpicyLyricsCacheViewer();
+    });
+    const lyrics = el(
+      "div",
+      { class: "slt-m-section" },
+      el("div", { class: "slt-m-section-title", text: "Spicy Lyrics lyrics" }),
+      el("div", { class: "slt-m-about-text", text: "Lyrics Spicy Lyrics downloaded. Clearing makes it fetch fresh copies, which can fix out-of-sync or wrong lyrics." }),
+      el(
+        "div",
+        { class: "slt-m-about-actions" },
+        viewLyrics,
+        armedButton("Clear lyrics cache", "Click again to clear", async () => {
+          await clearSpicyLyricsCachedLyrics();
+          rerenderLive?.();
+        })
+      )
+    );
+    const fill2 = el("i");
+    fill2.style.width = `${Math.min(100, Math.max(1, usage.percentUsed))}%`;
+    const storageSection = el(
+      "div",
+      { class: "slt-m-section" },
+      el("div", { class: "slt-m-section-title", text: "Storage" }),
+      el("div", { class: "slt-m-meter", role: "meter", "aria-valuenow": String(usage.percentUsed), "aria-valuemin": "0", "aria-valuemax": "100" }, fill2),
+      el("div", { class: "slt-m-about-text", text: `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.maxBytes)} used (${usage.percentUsed}%). The oldest translations are cleared automatically when it fills up.` })
+    );
+    tab.append(translations, lyrics, storageSection);
+    return tab;
+  }
+  function connectionLabel(value) {
+    switch (value) {
+      case "connected":
+        return "Connected";
+      case "connecting":
+        return "Connecting\u2026";
+      case "reconnecting":
+        return "Reconnecting\u2026";
+      case "error":
+        return "Connection error";
+      default:
+        return "Disconnected";
+    }
+  }
+  function latencyClass(latencyMs) {
+    if (latencyMs === null)
+      return "";
+    if (latencyMs <= 150)
+      return "great";
+    if (latencyMs <= 300)
+      return "ok";
+    if (latencyMs <= 500)
+      return "bad";
+    return "horrible";
+  }
+  function buildConnectionCard() {
+    const dot = el("span", { class: "slt-m-conn-dot" });
+    const stateEl = el("span", { class: "slt-m-conn-state" });
+    const ping = el("span", { class: "slt-m-stat-value" });
+    const users = el("span", { class: "slt-m-stat-value" });
+    const card = el(
+      "div",
+      { class: "slt-m-section" },
+      el(
+        "div",
+        { class: "slt-m-conn-head" },
+        el("div", { class: "slt-m-section-title", text: "Connection" }),
+        el("span", { class: "slt-m-conn-status" }, dot, stateEl)
+      ),
+      el(
+        "div",
+        { class: "slt-m-stats" },
+        el("div", { class: "slt-m-stat" }, ping, el("div", { class: "slt-m-stat-label", text: "Ping" })),
+        el("div", { class: "slt-m-stat" }, users, el("div", { class: "slt-m-stat-label", text: "Users installed" }))
+      )
+    );
+    const update = () => {
+      const conn = getConnectionState();
+      const latency = conn.state === "connected" ? latencyClass(conn.latencyMs) : "";
+      dot.className = `slt-m-conn-dot slt-m-conn-${conn.state}${latency ? ` slt-m-lat-${latency}` : ""}`;
+      stateEl.textContent = connectionLabel(conn.state);
+      ping.textContent = conn.latencyMs !== null ? `${conn.latencyMs} ms` : "\u2014";
+      ping.className = `slt-m-stat-value${latency ? ` slt-m-lat-${latency}` : ""}`;
+      users.textContent = conn.totalUsers > 0 ? conn.totalUsers.toLocaleString() : "\u2014";
+    };
+    update();
+    const interval = window.setInterval(() => {
+      if (!card.isConnected) {
+        window.clearInterval(interval);
+        return;
+      }
+      update();
+    }, 2e3);
+    return card;
+  }
+  function buildAboutTab() {
+    const tab = el("div", { class: "slt-m-tab-content" });
+    const { hash, source } = getDisplayHash();
+    const shortHash = hash ? hash.substring(0, 8) : "";
+    const hashTitle = source === "delivered" ? `SHA-256 of the loaded script \u2014 ${hash}` : `Build hash \u2014 ${hash}`;
+    const hero = el(
+      "div",
+      { class: "slt-m-section" },
+      el(
+        "div",
+        { class: "slt-m-about-hero" },
+        el("div", { class: "slt-m-about-title", text: "Spicy Lyric Translator" }),
+        el("div", { class: "slt-m-about-version", text: `v${VERSION}` }),
+        shortHash ? el("div", { class: "slt-m-about-hash", text: shortHash, title: hashTitle }) : null
+      ),
+      el("div", { class: "slt-m-about-text", text: "Translates Spicy Lyrics as the song plays, with romanization, a word-by-word learning mode, and caching so songs you\u2019ve already heard load instantly." })
+    );
+    const check = el("button", { class: "slt-m-btn slt-m-btn-primary", type: "button", text: "Check for updates" });
+    check.addEventListener("click", () => {
+      runManualUpdateCheck(check);
+    });
+    const changelog = el("button", { class: "slt-m-btn", type: "button", text: "What\u2019s new" });
+    changelog.addEventListener("click", async () => {
+      if (changelog.disabled)
+        return;
+      changelog.disabled = true;
+      changelog.textContent = "Loading\u2026";
+      try {
+        await showCurrentChangelog({ expanded: true });
+      } catch {
+        toast({ kind: "error", title: "Couldn't load the changelog" });
+      } finally {
+        changelog.disabled = false;
+        changelog.textContent = "What\u2019s new";
+      }
+    });
+    const updates = el(
+      "div",
+      { class: "slt-m-section" },
+      el("div", { class: "slt-m-section-title", text: "Updates" }),
+      el("div", { class: "slt-m-about-actions" }, check, changelog)
+    );
+    const shortcut = (keys, label) => el(
+      "div",
+      { class: "slt-m-shortcut" },
+      el("span", { class: "slt-m-shortcut-keys" }, ...keys.map((k) => el("kbd", { text: k }))),
+      el("span", { text: label })
+    );
+    const shortcuts = el(
+      "div",
+      { class: "slt-m-section" },
+      el("div", { class: "slt-m-section-title", text: "Shortcuts" }),
+      shortcut(["Alt", "T"], "Turn translation on or off"),
+      shortcut(["Ctrl", "K"], "Search settings, languages and actions"),
+      shortcut(["Hold P"], "Peek at the lyrics behind this window"),
+      shortcut(["Esc"], "Close the top window")
+    );
+    const links = el(
+      "div",
+      { class: "slt-m-section" },
+      el(
+        "div",
+        { class: "slt-m-about-links" },
+        el("a", { href: REPO_URL.replace(/\/releases$/, ""), target: "_blank", rel: "noopener noreferrer", text: "GitHub" }),
+        el("a", { href: REPO_URL, target: "_blank", rel: "noopener noreferrer", text: "Releases" })
+      )
+    );
+    tab.append(hero, updates, buildConnectionCard(), shortcuts, links);
+    return tab;
+  }
+  function summaryParts() {
+    const parts = [`${providerName(getCurrentApiPreference())} \u2192 ${languageName(storage.get("target-language") || "en")}`];
+    if (state.showRomanization)
+      parts.push("Romanization");
+    if (state.learningMode)
+      parts.push("Learning");
+    if (state.autoTranslate)
+      parts.push("Auto");
+    return parts;
+  }
+  function buildMasterBar() {
+    const input = el("input", { type: "checkbox", "aria-label": "Turn translation on or off" });
+    const title = el("div", { class: "slt-m-enabled-title" });
+    const sub = el("div", { class: "slt-m-enabled-sub" });
+    const bar = el(
+      "div",
+      { class: "slt-m-enabled-bar" },
+      el("div", { class: "slt-m-enabled-text" }, title, sub),
+      el("label", { class: "slt-m-toggle", title: "Alt+T" }, input, el("span", { class: "slt-m-toggle-slider" }))
+    );
+    const sync = () => {
+      input.checked = state.isEnabled;
+      bar.classList.toggle("slt-m-enabled-off", !state.isEnabled);
+      title.textContent = state.isEnabled ? "Translation on" : "Translation off";
+      const parts = summaryParts();
+      sub.textContent = state.isEnabled ? parts[0] : "Lyrics stay in their original language";
+      sub.title = parts.join(" \xB7 ");
+    };
+    input.addEventListener("change", async () => {
+      if (input.checked !== state.isEnabled)
+        await handleTranslateToggle();
+      sync();
+    });
+    syncChrome.push(sync);
+    sync();
+    return bar;
+  }
+  function changedFields() {
+    return SETTINGS_SCHEMA.filter((field) => !field.secret && !isSettingAtDefault(field));
+  }
+  function openReviewChanges() {
+    const list = el("div", { class: "slt-m-rv-list" });
+    const summary = el("p", { class: "slt-ui-text" });
+    let dialog = null;
+    const render = () => {
+      const fields = changedFields();
+      list.innerHTML = "";
+      summary.textContent = fields.length ? `${fields.length} setting${fields.length === 1 ? " differs" : "s differ"} from the defaults. API keys are left out.` : "Everything is on its default. API keys are left out.";
+      fields.forEach((field) => {
+        const row = el(
+          "div",
+          { class: "slt-m-rv-row" },
+          el(
+            "div",
+            { class: "slt-m-rv-head" },
+            el("button", { class: "slt-m-rv-label", type: "button", text: field.label, title: "Show this setting" }),
+            el("span", { class: "slt-m-rv-where", text: whereLabel(field) })
+          ),
+          el(
+            "div",
+            { class: "slt-m-rv-diff" },
+            el("span", { class: "slt-m-rv-value", text: describeValue(field, field.defaultValue) }),
+            el("span", { class: "slt-m-rv-arrow", "aria-hidden": "true" }),
+            el("span", { class: "slt-m-rv-value", text: describeValue(field, readSettingValue(field)) })
+          ),
+          el("button", { class: "slt-m-rv-revert", type: "button", text: "Revert" })
+        );
+        row.querySelector(".slt-m-rv-label")?.addEventListener("click", () => {
+          dialog?.close();
+          revealSetting(field.id);
+        });
+        row.querySelector(".slt-m-rv-revert")?.addEventListener("click", () => {
+          changeWithUndo(field, field.defaultValue, `Reverted \u201C${field.label}\u201D`);
+          render();
+        });
+        list.append(row);
+      });
+      list.hidden = fields.length === 0;
+      const resetAll = dialog?.footer.querySelector('[data-action="reset-all"]');
+      if (resetAll)
+        resetAll.disabled = fields.length === 0;
+    };
+    dialog = openDialog({
+      eyebrow: "Spicy Lyric Translator \xB7 Review",
+      title: "Your changes",
+      size: "lg",
+      body: [summary, list],
+      actions: [
+        {
+          id: "reset-all",
+          label: "Reset all to defaults",
+          kind: "danger",
+          keepOpen: true,
+          onClick: () => {
+            const fields = changedFields();
+            const restore = snapshotSettings(fields);
+            applySettingsBatch(fields.map((field) => ({ field, value: field.defaultValue })));
+            refreshAll();
+            offerUndo(`Reset ${fields.length} setting${fields.length === 1 ? "" : "s"}`, "Your API keys were kept.", restore);
+            render();
+          }
+        },
+        { label: "Done", kind: "primary" }
+      ]
+    });
+    render();
+  }
+  function paletteItems(close) {
+    const items = [];
+    SETTINGS_CATEGORIES.forEach((category) => {
+      items.push({ group: "Go to", label: `Settings \u203A ${category.label}`, hint: category.description, run: () => {
+        close();
+        goToLive?.("settings", category.id);
+      } });
+    });
+    ["cache", "about"].forEach((tab) => {
+      items.push({ group: "Go to", label: TAB_META[tab].label, hint: TAB_META[tab].description, run: () => {
+        close();
+        goToLive?.(tab);
+      } });
+    });
+    SETTINGS_SCHEMA.forEach((field) => {
+      items.push({
+        group: "Settings",
+        label: field.label,
+        hint: whereLabel(field),
+        keywords: `${field.section} ${field.description || ""} ${field.keywords || ""}`,
+        run: () => {
+          close();
+          revealSetting(field.id);
+        }
+      });
+    });
+    const target = getSettingField("target-language");
+    if (target) {
+      SUPPORTED_LANGUAGES.forEach((language) => {
+        items.push({
+          group: "Languages",
+          label: `Translate to ${language.name}`,
+          hint: language.code.toUpperCase(),
+          keywords: `language target ${language.code}`,
+          run: () => {
+            close();
+            changeWithUndo(target, language.code, `Translating to ${language.name}`);
+          }
+        });
+      });
+    }
+    const provider = getSettingField("preferred-api");
+    if (provider) {
+      API_OPTIONS.forEach((option) => {
+        items.push({
+          group: "Providers",
+          label: `Use ${option.text}`,
+          keywords: `provider api service engine ${option.value}`,
+          run: () => {
+            close();
+            changeWithUndo(provider, option.value, `Switched to ${option.text}`, "Add its key under Providers if it needs one.");
+          }
+        });
+      });
+    }
+    items.push(
+      {
+        group: "Actions",
+        label: state.isEnabled ? "Turn translation off" : "Turn translation on",
+        keywords: "enable disable toggle alt t",
+        run: async () => {
+          close();
+          await handleTranslateToggle();
+          refreshChrome();
+        }
+      },
+      { group: "Actions", label: "Translate this song again", keywords: "retranslate refresh redo", run: () => {
+        close();
+        forceRetranslate();
+      } },
+      { group: "Actions", label: "Review changes", hint: "Everything that differs from the defaults", run: () => {
+        close();
+        openReviewChanges();
+      } },
+      { group: "Actions", label: "Browse cached translations", keywords: "cache history", run: () => {
+        close();
+        openCacheViewer();
+      } },
+      { group: "Actions", label: "Check for updates", keywords: "version update", run: () => {
+        close();
+        runManualUpdateCheck(null);
+      } },
+      { group: "Actions", label: "What\u2019s new", keywords: "changelog release notes", run: () => {
+        close();
+        showCurrentChangelog({ expanded: true }).catch(() => toast({ kind: "error", title: "Couldn't load the changelog" }));
+      } },
+      { group: "Actions", label: "Notifications", keywords: "inbox bell history", run: () => {
+        close();
+        openInbox();
+      } }
+    );
+    return items;
+  }
+  function scoreItem(item, q) {
+    const label = item.label.toLowerCase();
+    if (label.startsWith(q))
+      return 100 - label.length * 0.1;
+    const words = label.split(/[\s›·“”()]+/);
+    if (words.some((w) => w.startsWith(q)))
+      return 70 - label.length * 0.1;
+    if (label.includes(q))
+      return 50;
+    if (`${item.hint || ""} ${item.keywords || ""}`.toLowerCase().includes(q))
+      return 20;
+    return -1;
+  }
+  var GROUP_LIMITS = { Settings: 7, Languages: 5, "Go to": 4, Providers: 4, Actions: 4 };
+  function openPalette() {
+    if (document.querySelector(".slt-m-pal"))
+      return;
+    let dialog = null;
+    const close = () => dialog?.close();
+    const all = paletteItems(close);
+    const input = el("input", {
+      class: "slt-m-pal-input",
+      type: "text",
+      placeholder: "Search settings, languages and actions\u2026",
+      spellcheck: "false",
+      "aria-label": "Search Spicy Lyric Translator",
+      "data-slt-autofocus": true,
+      "data-slt-esc-local": true
+    });
+    const results = el("div", { class: "slt-m-pal-results", role: "listbox" });
+    const foot = el(
+      "div",
+      { class: "slt-m-pal-foot" },
+      el("span", { html: "<kbd>\u2191</kbd><kbd>\u2193</kbd> move" }),
+      el("span", { html: "<kbd>Enter</kbd> open" }),
+      el("span", { html: "<kbd>Esc</kbd> close" })
+    );
+    const box = el(
+      "div",
+      { class: "slt-m-pal" },
+      el("div", { class: "slt-m-pal-bar" }, el("span", { class: "slt-m-pal-icon", html: SEARCH_SVG }), input),
+      results,
+      foot
+    );
+    let shown = [];
+    let active = 0;
+    const paint = () => {
+      results.innerHTML = "";
+      let lastGroup = "";
+      shown.forEach((item, i) => {
+        if (item.group !== lastGroup) {
+          lastGroup = item.group;
+          results.append(el("div", { class: "slt-m-pal-group", text: item.group }));
+        }
+        const row = el(
+          "button",
+          { class: `slt-m-pal-item${i === active ? " active" : ""}`, type: "button", role: "option", "aria-selected": String(i === active) },
+          el("span", { class: "slt-m-pal-label", text: item.label }),
+          item.hint ? el("span", { class: "slt-m-pal-hint", text: item.hint }) : null
+        );
+        row.addEventListener("mousemove", () => {
+          if (active === i)
+            return;
+          active = i;
+          results.querySelectorAll(".slt-m-pal-item").forEach((n, j) => n.classList.toggle("active", j === i));
+        });
+        row.addEventListener("click", () => item.run());
+        results.append(row);
+      });
+      if (!shown.length)
+        results.append(el("div", { class: "slt-m-pal-empty", text: input.value.trim() ? "Nothing matches that." : "Start typing to search." }));
+      results.querySelector(".slt-m-pal-item.active")?.scrollIntoView({ block: "nearest" });
+    };
+    const compute = () => {
+      const q = input.value.trim().toLowerCase();
+      if (!q) {
+        shown = all.filter((i) => i.group === "Go to" || i.group === "Actions").slice(0, 11);
+      } else {
+        const scored = all.map((item) => ({ item, score: scoreItem(item, q) })).filter((x) => x.score >= 0).sort((a, b) => b.score - a.score);
+        const byGroup = /* @__PURE__ */ new Map();
+        scored.forEach(({ item }) => {
+          const list = byGroup.get(item.group) || [];
+          if (list.length < (GROUP_LIMITS[item.group] || 4))
+            list.push(item);
+          byGroup.set(item.group, list);
+        });
+        shown = ["Settings", "Languages", "Go to", "Providers", "Actions"].flatMap((g) => byGroup.get(g) || []);
+      }
+      active = Math.min(active, Math.max(0, shown.length - 1));
+      paint();
+    };
+    input.addEventListener("input", () => {
+      active = 0;
+      compute();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        active = Math.min(shown.length - 1, active + 1);
+        paint();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        active = Math.max(0, active - 1);
+        paint();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        shown[active]?.run();
+      } else if (e.key === "Escape" && input.value) {
+        e.preventDefault();
+        input.value = "";
+        compute();
+      }
+    });
+    dialog = openDialog({ title: "Search", bare: true, size: "md", placement: "top", className: "slt-m-pal-dialog", content: box });
+    compute();
+    input.focus();
+  }
+  var INBOX_TONE = {
+    info: "accent",
+    success: "success",
+    warning: "hotfix",
+    error: "error",
+    update: "accent"
+  };
+  function openInbox() {
+    const list = el("div", { class: "slt-m-inbox" });
+    let dialog = null;
+    const render = (items) => {
+      list.innerHTML = "";
+      if (!items.length) {
+        list.append(el(
+          "div",
+          { class: "slt-m-inbox-empty" },
+          el("div", { class: "slt-m-inbox-empty-title", text: "All caught up" }),
+          el("div", { class: "slt-m-inbox-empty-sub", text: "Updates, warnings and errors land here so you never miss one." })
+        ));
+        return;
+      }
+      items.forEach((entry) => {
+        const dot = el("span", { class: "slt-m-inbox-dot", "aria-hidden": "true" });
+        paintTone(dot, INBOX_TONE[entry.kind] || "accent");
+        const row = el(
+          "div",
+          { class: `slt-m-inbox-row${entry.read ? "" : " unread"}` },
+          dot,
+          el(
+            "div",
+            { class: "slt-m-inbox-text" },
+            el("div", { class: "slt-m-inbox-title", text: entry.title }),
+            entry.description ? el("div", { class: "slt-m-inbox-desc", text: entry.description }) : null,
+            el("div", { class: "slt-m-inbox-time", text: relativeTime(entry.at) })
+          )
+        );
+        if (entry.actionId) {
+          const actionId = entry.actionId;
+          const btn = el("button", { class: "slt-m-inbox-btn", type: "button", text: entry.actionLabel || "Open" });
+          btn.addEventListener("click", () => {
+            dialog?.close();
+            runInboxAction(actionId);
+          });
+          row.append(btn);
+        }
+        list.append(row);
+      });
+    };
+    render(getInbox());
+    dialog = openDialog({
+      title: "Notifications",
+      size: "md",
+      className: "slt-m-inbox-dialog",
+      content: list,
+      actions: [
+        { label: "Clear all", kind: "quiet", keepOpen: true, onClick: () => {
+          clearInbox();
+          render([]);
+        } },
+        { label: "Done", kind: "primary" }
+      ]
+    });
+    markInboxRead();
+  }
+  function iconButton(className, label, svg) {
+    return el("button", { class: `slt-m-icon-btn ${className}`, type: "button", "aria-label": label, title: label, html: svg });
+  }
+  function bindShortcuts(peekButton, overlayOf) {
+    const on = () => overlayOf()?.classList.add("slt-ui-peek");
+    const off = () => overlayOf()?.classList.remove("slt-ui-peek");
+    peekButton.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      on();
+    });
+    peekButton.addEventListener("pointerup", off);
+    peekButton.addEventListener("pointerleave", off);
+    peekButton.addEventListener("blur", off);
+    peekButton.addEventListener("keydown", (e) => {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        on();
+      }
+    });
+    peekButton.addEventListener("keyup", off);
+    const editable = (t) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+    const settingsOnTop = () => {
+      const surfaces = openSurfaces();
+      const top = surfaces[surfaces.length - 1];
+      return !!top && !!liveContainer && top.root.contains(liveContainer);
+    };
+    const onKeyDown = (e) => {
+      if (!liveContainer?.isConnected)
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        if (!settingsOnTop())
+          return;
+        e.preventDefault();
+        e.stopPropagation();
+        openPalette();
+        return;
+      }
+      if (e.key.toLowerCase() === "p" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && !editable(e.target) && settingsOnTop()) {
+        on();
+      }
+    };
+    const onKeyUp = (e) => {
+      if (e.key.toLowerCase() === "p")
+        off();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", off);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", off);
+    };
+  }
+  function settingById(id) {
+    const field = getSettingField(id);
+    return field ? { id: field.id, label: field.label } : null;
+  }
+  function matchSettingInText(input) {
+    const haystack = ` ${input.toLowerCase().replace(/[^a-z0-9 ]+/g, " ")} `;
+    let best = null;
+    SETTINGS_SCHEMA.forEach((field) => {
+      const label = field.label.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+      if (label.length < 7 || !label.includes(" "))
+        return;
+      if (!haystack.includes(` ${label} `))
+        return;
+      if (!best || label.length > best.label.length)
+        best = field;
+    });
+    const found = best;
+    return found ? { id: found.id, label: found.label } : null;
+  }
+  function isSettingsOpen() {
+    return !!liveContainer && liveContainer.isConnected;
+  }
+  function goToSettings(tab, category) {
+    goToLive?.(tab, category);
+  }
+  function revealSetting(id) {
+    if (!liveContainer || !goToLive)
+      return;
+    const field = getSettingField(id);
+    if (!field)
+      return;
+    goToLive("settings", getCategoryForSection(field.section)?.id);
+    const row = liveContainer.querySelector(`.slt-m-field[data-slt-setting-field="${id}"]`);
+    if (!row)
+      return;
+    if (row.style.display === "none") {
+      toast({ kind: "info", key: "slt-reveal", title: `\u201C${field.label}\u201D is hidden right now`, description: "It only applies to a different provider or language." });
+      return;
+    }
+    row.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    row.classList.remove("slt-m-spot");
+    void row.offsetWidth;
+    row.classList.add("slt-m-spot");
+    window.setTimeout(() => row.classList.remove("slt-m-spot"), 2400);
+    row.querySelector("input, select")?.focus({ preventScroll: true });
+  }
+  function destroySettingsShell() {
+    teardownLive?.();
+    teardownLive = null;
+    liveContainer = null;
+    goToLive = null;
+    rerenderLive = null;
+    fieldHandles = [];
+    syncChrome = [];
+  }
+  function createSettingsShell(options = {}) {
+    ensureShellStyles();
+    teardownLive?.();
+    const container = el("div", { class: "slt-modal-root" });
+    liveContainer = container;
+    syncChrome = [];
+    if (options.tab)
+      activeTabId = options.tab;
+    if (options.category)
+      activeCategoryId = options.category;
+    const renderers = {
+      settings: buildSettingsTab,
+      cache: buildCacheTab,
+      about: buildAboutTab
+    };
+    const tabContent = el("div", { class: "slt-m-tab-host" });
+    const crumbTitle = el("div", { class: "slt-m-crumb-title" });
+    const crumbSub = el("div", { class: "slt-m-crumb-sub" });
+    function rerender() {
+      if (activeTabId !== "settings")
+        fieldHandles = [];
+      tabContent.innerHTML = "";
+      tabContent.appendChild(renderers[activeTabId]());
+      applyFilter();
+      refreshChrome();
+    }
+    rerenderLive = rerender;
+    function goTo(tab, category) {
+      const sameTab = tab === activeTabId;
+      activeTabId = tab;
+      if (category)
+        activeCategoryId = category;
+      if (!sameTab || tab !== "settings") {
+        rerender();
+      } else {
+        const search = container.querySelector(".slt-m-cz-search");
+        if (search)
+          search.value = "";
+        applyFilter();
+        refreshChrome();
+      }
+      tabContent.scrollTop = 0;
+      if (!prefersReducedMotion()) {
+        tabContent.firstElementChild?.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 260, easing: "cubic-bezier(0.2, 0.9, 0.1, 1)" });
+      }
+    }
+    goToLive = goTo;
+    const side = el("aside", { class: "slt-m-side" });
+    side.append(
+      el(
+        "div",
+        { class: "slt-m-brand" },
+        el("span", { class: "slt-m-brand-mark", html: Icons.Translate }),
+        el(
+          "div",
+          { class: "slt-m-brand-text" },
+          el("div", { class: "slt-m-brand-name", text: "Spicy Lyric Translator" }),
+          el("div", { class: "slt-m-brand-ver", text: `v${VERSION}` })
+        )
+      ),
+      buildMasterBar()
+    );
+    const nav = el("nav", { class: "slt-m-side-nav", "aria-label": "Settings sections" });
+    nav.append(el("div", { class: "slt-m-side-label", text: "Settings" }));
+    const catNav = el("div", { class: "slt-m-cz-nav", role: "tablist" });
+    SETTINGS_CATEGORIES.forEach((category) => {
+      const btn = el(
+        "button",
+        { class: "slt-m-side-item", type: "button", role: "tab", "data-target": category.id },
+        el("span", { class: "slt-m-cz-nav-icon", "aria-hidden": "true", text: category.icon }),
+        el("span", { class: "slt-m-side-item-label", text: category.label })
+      );
+      btn.addEventListener("click", () => goTo("settings", category.id));
+      catNav.append(btn);
+    });
+    nav.append(catNav, el("div", { class: "slt-m-side-label", text: "Library" }));
+    const tabButtons = /* @__PURE__ */ new Map();
+    [["cache", "\u25A4"], ["about", "i"]].forEach(([tab, icon]) => {
+      const btn = el(
+        "button",
+        { class: "slt-m-side-item", type: "button", "data-tab": tab },
+        el("span", { class: "slt-m-cz-nav-icon", "aria-hidden": "true", text: icon }),
+        el("span", { class: "slt-m-side-item-label", text: TAB_META[tab].label })
+      );
+      btn.addEventListener("click", () => goTo(tab));
+      tabButtons.set(tab, btn);
+      nav.append(btn);
+    });
+    side.append(nav);
+    const searchHint = el(
+      "button",
+      { class: "slt-m-side-search", type: "button" },
+      el("span", { class: "slt-m-side-search-icon", html: SEARCH_SVG }),
+      el("span", { class: "slt-m-side-search-label", text: "Search everything" }),
+      el("kbd", { text: "Ctrl K" })
+    );
+    searchHint.addEventListener("click", openPalette);
+    side.append(searchHint);
+    const updateChip = el("button", { class: "slt-m-update-chip", type: "button" });
+    updateChip.addEventListener("click", () => openWaitingUpdate(updateChip.getBoundingClientRect()));
+    const reviewBtn = el(
+      "button",
+      { class: "slt-m-review-btn", type: "button", title: "Review everything you changed" },
+      el("span", { class: "slt-m-review-icon", html: DIFF_SVG }),
+      el("span", { class: "slt-m-review-label" })
+    );
+    reviewBtn.addEventListener("click", openReviewChanges);
+    const peekBtn = iconButton("slt-m-peek", "Hold to peek at the lyrics (or hold P)", EYE_SVG);
+    const bellBtn = iconButton("slt-m-bell", "Notifications", BELL_SVG);
+    const closeBtn = iconButton("slt-m-close", "Close", CLOSE_SVG);
+    closeBtn.addEventListener("click", () => {
+      openSurfaces().find((s) => s.root.contains(container))?.close();
+    });
+    const main = el(
+      "div",
+      { class: "slt-m-main" },
+      el(
+        "header",
+        { class: "slt-m-topbar" },
+        el("div", { class: "slt-m-crumb" }, crumbTitle, crumbSub),
+        el("div", { class: "slt-m-tools" }, updateChip, reviewBtn, peekBtn, bellBtn, closeBtn)
+      ),
+      tabContent
+    );
+    container.append(side, main);
+    const syncBell = () => {
+      const unread = unreadCount();
+      bellBtn.classList.toggle("slt-m-has-unread", unread > 0);
+      bellBtn.title = unread ? `Notifications (${unread} new)` : "Notifications";
+    };
+    bellBtn.addEventListener("click", () => {
+      openInbox();
+      syncBell();
+    });
+    const syncShell = () => {
+      const searching = !!container.querySelector(".slt-m-cz-search")?.value.trim();
+      catNav.querySelectorAll(".slt-m-side-item").forEach((btn) => {
+        const on = activeTabId === "settings" && !searching && btn.dataset.target === activeCategoryId;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", String(on));
+      });
+      catNav.classList.toggle("slt-m-cz-nav-muted", activeTabId === "settings" && searching);
+      tabButtons.forEach((btn, tab) => btn.classList.toggle("active", tab === activeTabId));
+      const category = SETTINGS_CATEGORIES.find((c) => c.id === activeCategoryId);
+      const onSettings = activeTabId === "settings" && !!category;
+      crumbTitle.textContent = onSettings ? category.label : TAB_META[activeTabId].label;
+      crumbSub.textContent = onSettings ? category.description : TAB_META[activeTabId].description;
+      container.dataset.tab = activeTabId;
+      const changed = changedFields().length;
+      reviewBtn.classList.toggle("slt-m-has-changes", changed > 0);
+      reviewBtn.querySelector(".slt-m-review-label").textContent = changed ? `${changed} change${changed === 1 ? "" : "s"}` : "No changes";
+      const waiting = hasWaitingUpdate();
+      updateChip.hidden = !waiting;
+      if (waiting)
+        updateChip.textContent = waiting.kind === "hotfix" ? "Patch ready" : `v${waiting.version} ready`;
+      syncBell();
+    };
+    syncChrome.push(syncShell);
+    rerender();
+    syncModelLists();
+    const stopShortcuts = bindShortcuts(peekBtn, () => container.closest(".slt-ui-overlay"));
+    const stopInbox = onInboxChange(syncBell);
+    const waitObserver = new MutationObserver(syncShell);
+    waitObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    const onFocus = () => refreshChrome();
+    window.addEventListener("focus", onFocus);
+    teardownLive = () => {
+      stopShortcuts();
+      stopInbox();
+      waitObserver.disconnect();
+      window.removeEventListener("focus", onFocus);
+    };
+    return container;
+  }
+  function ensureShellStyles() {
+    if (document.getElementById("slt-shell-styles"))
+      return;
+    const style = document.createElement("style");
+    style.id = "slt-shell-styles";
+    style.textContent = SHELL_STYLES;
+    document.head.appendChild(style);
+  }
+  var SHELL_STYLES = `
+.slt-modal-root {
+    --slt-m-accent: var(--slt-ui-accent, #1db954);
+    --slt-m-accent-soft: var(--slt-ui-accent-soft, rgba(29, 185, 84, 0.12));
+    --slt-m-accent-ink: var(--slt-ui-accent-ink, #000);
+    --slt-m-bg-elev: color-mix(in oklab, var(--slt-ui-ink, #fff) 4%, transparent);
+    --slt-m-border: var(--slt-ui-line, rgba(255, 255, 255, 0.08));
+    --slt-m-text: var(--slt-ui-ink, #fff);
+    --slt-m-text-dim: var(--slt-ui-ink-muted, #b3b3b3);
+    --slt-m-text-faint: var(--slt-ui-ink-faint, #8a8a8a);
+    --slt-m-radius: 12px;
+    --slt-m-radius-sm: 9px;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    color: var(--slt-m-text);
+    font-size: 13px;
+    line-height: 1.4;
+}
+.slt-modal-root *, .slt-modal-root *::before, .slt-modal-root *::after { box-sizing: border-box; }
+.slt-ui-panel.slt-settings-dialog { height: min(86vh, 820px); }
+.slt-settings-dialog .slt-ui-body { overflow: hidden; height: 100%; }
+
+.slt-modal-root .slt-m-side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    padding: 22px 14px 14px;
+    border-right: 1px solid var(--slt-m-border);
+    background: rgba(0, 0, 0, 0.12);
+    overflow-y: auto;
+}
+.slt-modal-root .slt-m-brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.slt-modal-root .slt-m-brand-mark { display: inline-flex; color: var(--slt-m-text); }
+.slt-modal-root .slt-m-brand-mark svg { width: 20px; height: 20px; }
+.slt-modal-root .slt-m-brand-name { font-weight: 700; font-size: 13.5px; line-height: 1.2; }
+.slt-modal-root .slt-m-brand-ver { font-size: 11px; color: var(--slt-m-text-dim); }
+.slt-modal-root .slt-m-side-nav { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }
+.slt-modal-root .slt-m-side-label {
+    padding: 12px 10px 6px;
+    font-size: 10.5px;
+    font-weight: 750;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--slt-m-text-faint);
+}
+.slt-modal-root .slt-m-cz-nav { display: flex; flex-direction: column; gap: 2px; transition: opacity 0.2s ease; }
+.slt-modal-root .slt-m-cz-nav.slt-m-cz-nav-muted { opacity: 0.4; }
+.slt-modal-root .slt-m-side-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--slt-m-text-dim);
+    padding: 8px 10px;
+    border-radius: 10px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slt-modal-root .slt-m-side-item:hover { background: var(--slt-m-bg-elev); color: var(--slt-m-text); }
+.slt-modal-root .slt-m-side-item.active { background: var(--slt-m-accent-soft); color: var(--slt-m-text); }
+.slt-modal-root .slt-m-side-item.active::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--slt-m-accent);
+}
+.slt-modal-root .slt-m-cz-nav-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 7px;
+    background: var(--slt-m-bg-elev);
+    font-size: 11px;
+    line-height: 1;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+.slt-modal-root .slt-m-side-item.active .slt-m-cz-nav-icon { background: var(--slt-m-accent); color: var(--slt-m-accent-ink); }
+.slt-modal-root .slt-m-side-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 11px;
+    border: 1px solid var(--slt-m-border);
+    background: var(--slt-m-bg-elev);
+    color: var(--slt-m-text-dim);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.18s ease, color 0.18s ease;
+}
+.slt-modal-root .slt-m-side-search:hover { border-color: var(--slt-ui-accent-line, var(--slt-m-accent)); color: var(--slt-m-text); }
+.slt-modal-root .slt-m-side-search-icon { display: inline-flex; }
+.slt-modal-root .slt-m-side-search-label { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slt-modal-root:not(.slt-m-searching) .slt-m-cz-cat-head { display: none; }
+.slt-modal-root kbd, .slt-m-pal kbd {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--slt-ui-line, rgba(255,255,255,0.12));
+    background: color-mix(in oklab, var(--slt-ui-ink, #fff) 6%, transparent);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--slt-ui-ink-muted, #b3b3b3);
+}
+
+.slt-modal-root .slt-m-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.slt-modal-root .slt-m-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 18px 14px 26px;
+    border-bottom: 1px solid var(--slt-m-border);
+}
+.slt-modal-root .slt-m-crumb { min-width: 0; }
+.slt-modal-root .slt-m-crumb-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.slt-modal-root .slt-m-crumb-sub {
+    margin-top: 2px;
+    font-size: 12.5px;
+    color: var(--slt-m-text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.slt-modal-root .slt-m-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.slt-modal-root .slt-m-icon-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--slt-m-text-dim);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.slt-modal-root .slt-m-icon-btn:hover { background: var(--slt-m-bg-elev); color: var(--slt-m-text); }
+.slt-modal-root .slt-m-peek:active { background: var(--slt-m-accent-soft); color: var(--slt-m-text); border-color: var(--slt-ui-accent-line, var(--slt-m-accent)); }
+.slt-modal-root .slt-m-bell.slt-m-has-unread::after {
+    content: '';
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--slt-m-accent);
+    box-shadow: 0 0 0 2px var(--slt-ui-field, #111);
+}
+.slt-modal-root .slt-m-review-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid var(--slt-m-border);
+    background: transparent;
+    color: var(--slt-m-text-dim);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.slt-modal-root .slt-m-review-btn:hover { background: var(--slt-m-bg-elev); color: var(--slt-m-text); }
+.slt-modal-root .slt-m-review-btn.slt-m-has-changes { color: var(--slt-m-text); }
+.slt-modal-root .slt-m-review-icon { display: inline-flex; }
+.slt-modal-root .slt-m-update-chip {
+    height: 34px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--slt-m-accent);
+    color: var(--slt-m-accent-ink);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 750;
+    cursor: pointer;
+}
+.slt-modal-root .slt-m-update-chip[hidden] { display: none; }
+.slt-modal-root .slt-m-icon-btn:focus-visible,
+.slt-modal-root .slt-m-review-btn:focus-visible,
+.slt-modal-root .slt-m-update-chip:focus-visible,
+.slt-modal-root .slt-m-side-item:focus-visible,
+.slt-modal-root .slt-m-side-search:focus-visible,
+.slt-modal-root .slt-m-btn:focus-visible,
+.slt-modal-root .slt-m-field-reset:focus-visible,
+.slt-modal-root .slt-m-reveal:focus-visible {
+    outline: 2px solid var(--slt-m-accent);
+    outline-offset: 2px;
+}
+
+.slt-modal-root .slt-m-enabled-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--slt-m-bg-elev);
+    border: 1px solid var(--slt-m-border);
+    border-radius: var(--slt-m-radius);
+}
+.slt-modal-root .slt-m-enabled-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.slt-modal-root .slt-m-enabled-title { font-weight: 750; font-size: 12.5px; }
+.slt-modal-root .slt-m-enabled-sub {
+    font-size: 11px;
+    color: var(--slt-m-text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slt-modal-root .slt-m-toggle { position: relative; width: 38px; height: 22px; flex-shrink: 0; display: inline-block; }
+.slt-modal-root .slt-m-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.slt-modal-root .slt-m-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 22px;
+    cursor: pointer;
+    transition: background 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slt-modal-root .slt-m-toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background 0.22s ease;
+}
+.slt-modal-root .slt-m-toggle input:checked + .slt-m-toggle-slider { background: var(--slt-m-accent); }
+.slt-modal-root .slt-m-toggle input:checked + .slt-m-toggle-slider::before { transform: translateX(16px); background: var(--slt-ui-knob, #fff); }
+.slt-modal-root .slt-m-toggle input:focus-visible + .slt-m-toggle-slider { outline: 2px solid var(--slt-m-accent); outline-offset: 2px; }
+
+.slt-modal-root .slt-m-tab-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+    padding: 18px 20px 26px 26px;
+}
+.slt-modal-root .slt-m-tab-host::-webkit-scrollbar { width: 8px; }
+.slt-modal-root .slt-m-tab-host::-webkit-scrollbar-thumb { background: var(--slt-m-border); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.slt-modal-root .slt-m-tab-content { display: flex; flex-direction: column; gap: 12px; animation: slt-m-tab-in 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+.slt-modal-root .slt-m-cz { gap: 0; }
+.slt-modal-root .slt-m-cz-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    margin-bottom: 14px;
+    border: 1px solid var(--slt-m-border);
+    border-radius: var(--slt-m-radius);
+    background: rgba(255, 255, 255, 0.03);
+    transition: border-color 0.2s ease;
+}
+.slt-modal-root .slt-m-cz-toolbar:focus-within { border-color: var(--slt-m-accent); }
+.slt-modal-root .slt-m-cz-search-icon { display: flex; align-items: center; color: var(--slt-m-text-dim); flex-shrink: 0; line-height: 0; }
+.slt-modal-root .slt-m-cz-search {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    color: var(--slt-m-text);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+}
+.slt-modal-root .slt-m-cz-search::placeholder { color: var(--slt-m-text-faint); }
+.slt-modal-root .slt-m-cz-clear {
+    background: transparent;
+    border: none;
+    color: var(--slt-m-text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.slt-modal-root .slt-m-cz-clear:hover { color: var(--slt-m-text); background: rgba(255, 255, 255, 0.08); }
+.slt-modal-root .slt-m-cz-status { font-size: 12px; color: var(--slt-m-text-dim); padding: 0 2px 10px; }
+.slt-modal-root .slt-m-cz-status-empty { color: var(--slt-m-text); }
+.slt-modal-root .slt-m-cz-sections { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.slt-modal-root .slt-m-cz-category { display: flex; flex-direction: column; gap: 10px; animation: slt-m-tab-in 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+.slt-modal-root .slt-m-cz-cat-head { padding-bottom: 9px; border-bottom: 1px solid var(--slt-m-border); }
+.slt-modal-root .slt-m-cz-cat-title { font-size: 15px; font-weight: 800; color: var(--slt-m-text); }
+.slt-modal-root .slt-m-cz-cat-desc { font-size: 12px; line-height: 1.45; color: var(--slt-m-text-dim); margin-top: 3px; }
+
+.slt-modal-root .slt-m-section {
+    background: var(--slt-m-bg-elev);
+    border: 1px solid var(--slt-m-border);
+    border-radius: var(--slt-m-radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    transition: border-color 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slt-modal-root .slt-m-section:hover { border-color: rgba(255, 255, 255, 0.16); }
+.slt-modal-root .slt-m-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--slt-m-text-dim);
+    margin-bottom: 2px;
+}
+.slt-modal-root .slt-m-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 300px);
+    align-items: center;
+    gap: 14px;
+    min-height: 40px;
+    padding: 7px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.slt-modal-root .slt-m-section-title + .slt-m-field { border-top: none; padding-top: 2px; }
+.slt-modal-root .slt-m-field-toggle { grid-template-columns: minmax(0, 1fr) max-content; }
+.slt-modal-root .slt-m-field-labelbox { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.slt-modal-root .slt-m-field-label { min-width: 0; font-size: 13px; color: var(--slt-m-text); line-height: 1.3; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.slt-modal-root .slt-m-field-hint { font-size: 11.5px; line-height: 1.45; color: var(--slt-m-text-dim); max-width: 52ch; }
+.slt-modal-root .slt-m-badge {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--slt-m-accent-soft);
+    color: var(--slt-m-text);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.slt-modal-root .slt-m-field-control { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 0; width: 100%; }
+.slt-modal-root .slt-m-field-reset,
+.slt-modal-root .slt-m-reveal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--slt-m-text-dim);
+    cursor: pointer;
+    transition: opacity 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.slt-modal-root .slt-m-field-reset { visibility: hidden; opacity: 0; }
+.slt-modal-root .slt-m-field-reset-on { visibility: visible; opacity: 0.45; }
+.slt-modal-root .slt-m-field-reset-on:hover,
+.slt-modal-root .slt-m-field-reset-on:focus-visible,
+.slt-modal-root .slt-m-reveal:hover,
+.slt-modal-root .slt-m-reveal.on { opacity: 1; color: var(--slt-m-text); background: rgba(255, 255, 255, 0.1); }
+.slt-modal-root .slt-m-reveal svg { width: 14px; height: 14px; }
+.slt-modal-root .slt-m-select,
+.slt-modal-root .slt-m-text {
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--slt-m-border);
+    color: var(--slt-m-text);
+    padding: 7px 10px;
+    border-radius: var(--slt-m-radius-sm);
+    font: inherit;
+    font-size: 13px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 34px;
+    outline: none;
+    text-overflow: ellipsis;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.slt-modal-root .slt-m-select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 30px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+.slt-modal-root .slt-m-select option { background-color: #1c1c1f; color: #fff; }
+.slt-modal-root .slt-m-select:focus,
+.slt-modal-root .slt-m-text:focus { border-color: var(--slt-m-accent); background-color: rgba(0, 0, 0, 0.45); }
+.slt-modal-root .slt-m-text::placeholder { color: var(--slt-m-text-faint); }
+.slt-modal-root .slt-m-field.slt-m-spot { border-radius: 10px; animation: slt-m-spot 2.2s cubic-bezier(0.2, 0.9, 0.1, 1); }
+@keyframes slt-m-spot {
+    0% { box-shadow: 0 0 0 0 var(--slt-m-accent); background: var(--slt-m-accent-soft); }
+    20% { box-shadow: 0 0 0 3px var(--slt-ui-accent-line, var(--slt-m-accent)); background: var(--slt-m-accent-soft); }
+    100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+
+.slt-modal-root .slt-m-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--slt-m-border);
+    color: var(--slt-m-text);
+    padding: 7px 12px;
+    border-radius: var(--slt-m-radius-sm);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+    min-height: 34px;
+    transition: background 0.2s ease, transform 0.16s ease, opacity 0.2s ease, border-color 0.2s ease;
+}
+.slt-modal-root .slt-m-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.slt-modal-root .slt-m-btn:active:not(:disabled) { transform: scale(0.98); }
+.slt-modal-root .slt-m-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.slt-modal-root .slt-m-btn-primary { background: var(--slt-m-accent); color: var(--slt-m-accent-ink); border-color: var(--slt-m-accent); }
+.slt-modal-root .slt-m-btn-primary:hover:not(:disabled) { background: var(--slt-ui-accent-hover, var(--slt-m-accent)); }
+.slt-modal-root .slt-m-btn-danger { background: rgba(231, 76, 60, 0.12); border-color: rgba(231, 76, 60, 0.4); color: #f08272; }
+.slt-modal-root .slt-m-btn-danger:hover:not(:disabled) { background: rgba(231, 76, 60, 0.22); }
+.slt-modal-root .slt-m-btn-armed { background: rgba(231, 76, 60, 0.85); border-color: transparent; color: #fff; }
+.slt-modal-root .slt-m-btn-armed:hover:not(:disabled) { background: rgba(231, 76, 60, 0.95); }
+
+.slt-modal-root .slt-m-about-hero { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.slt-modal-root .slt-m-about-title { font-size: 18px; font-weight: 800; }
+.slt-modal-root .slt-m-about-version {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--slt-m-text);
+    background: var(--slt-m-accent-soft);
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+.slt-modal-root .slt-m-about-hash {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 11px;
+    color: var(--slt-m-text-dim);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--slt-m-border);
+    padding: 2px 7px;
+    border-radius: 6px;
+    user-select: all;
+}
+.slt-modal-root .slt-m-about-text { font-size: 12.5px; color: var(--slt-m-text-dim); line-height: 1.5; }
+.slt-modal-root .slt-m-about-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.slt-modal-root .slt-m-about-links { display: flex; gap: 14px; flex-wrap: wrap; }
+.slt-modal-root .slt-m-about-links a { color: var(--slt-m-text); text-decoration: underline; text-decoration-color: var(--slt-ui-accent-line, var(--slt-m-border)); text-underline-offset: 3px; font-size: 13px; font-weight: 600; }
+.slt-modal-root .slt-m-about-links a:hover { text-decoration-color: var(--slt-m-accent); }
+.slt-modal-root .slt-m-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 4px; }
+.slt-modal-root .slt-m-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--slt-m-radius-sm); background: rgba(0, 0, 0, 0.2); }
+.slt-modal-root .slt-m-stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--slt-m-text); }
+.slt-modal-root .slt-m-stat-label { font-size: 11px; color: var(--slt-m-text-faint); }
+.slt-modal-root .slt-m-meter { height: 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin: 4px 0 2px; }
+.slt-modal-root .slt-m-meter i { display: block; height: 100%; border-radius: 6px; background: var(--slt-m-accent); }
+.slt-modal-root .slt-m-conn-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.slt-modal-root .slt-m-conn-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--slt-m-text-dim); }
+.slt-modal-root .slt-m-conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--slt-m-text-faint); }
+.slt-modal-root .slt-m-conn-connecting, .slt-modal-root .slt-m-conn-reconnecting { background: #ffd35c; }
+.slt-modal-root .slt-m-conn-error { background: #f1556c; }
+.slt-modal-root .slt-m-conn-connected, .slt-modal-root .slt-m-conn-dot.slt-m-lat-great { background: #1ed760; }
+.slt-modal-root .slt-m-conn-dot.slt-m-lat-ok { background: #ffd35c; }
+.slt-modal-root .slt-m-conn-dot.slt-m-lat-bad { background: #ff9f45; }
+.slt-modal-root .slt-m-conn-dot.slt-m-lat-horrible { background: #f1556c; }
+.slt-modal-root .slt-m-stat-value.slt-m-lat-great { color: #1ed760; }
+.slt-modal-root .slt-m-stat-value.slt-m-lat-ok { color: #ffd35c; }
+.slt-modal-root .slt-m-stat-value.slt-m-lat-bad { color: #ff9f45; }
+.slt-modal-root .slt-m-stat-value.slt-m-lat-horrible { color: #f1556c; }
+.slt-modal-root .slt-m-shortcut { display: flex; align-items: center; gap: 12px; padding: 6px 0; font-size: 12.5px; color: var(--slt-m-text-dim); }
+.slt-modal-root .slt-m-shortcut + .slt-m-shortcut { border-top: 1px solid rgba(255, 255, 255, 0.04); }
+.slt-modal-root .slt-m-shortcut-keys { display: inline-flex; gap: 4px; min-width: 92px; }
+
+.slt-m-rv-list { display: flex; flex-direction: column; gap: 6px; }
+.slt-m-rv-list[hidden] { display: none; }
+.slt-m-rv-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-ink) 3%, transparent);
+}
+.slt-m-rv-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.slt-m-rv-label { padding: 0; border: 0; background: none; color: var(--slt-ui-ink); font: inherit; font-size: 13.5px; font-weight: 650; text-align: left; cursor: pointer; }
+.slt-m-rv-label:hover { text-decoration: underline; text-decoration-color: var(--slt-ui-accent-line); text-underline-offset: 3px; }
+.slt-m-rv-where { font-size: 11.5px; color: var(--slt-ui-ink-faint); }
+.slt-m-rv-diff { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.slt-m-rv-value { min-width: 0; font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace; font-size: 12px; color: var(--slt-ui-ink-muted); overflow-wrap: anywhere; }
+.slt-m-rv-value:last-child { color: var(--slt-ui-ink); }
+.slt-m-rv-arrow { width: 14px; height: 1px; background: var(--slt-ui-ink-faint); flex: 0 0 auto; }
+.slt-m-rv-revert,
+.slt-m-inbox-btn {
+    padding: 6px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--slt-ui-line);
+    background: transparent;
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.slt-m-rv-revert:hover, .slt-m-inbox-btn:hover { background: var(--slt-ui-line); }
+
+.slt-m-pal-dialog { --slt-ui-w: 38rem; }
+.slt-m-pal { display: flex; flex-direction: column; max-height: min(68vh, 560px); }
+.slt-m-pal-bar { display: flex; align-items: center; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--slt-ui-line); color: var(--slt-ui-ink-muted); }
+.slt-m-pal-icon { display: inline-flex; }
+.slt-m-pal-input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--slt-ui-ink); font: inherit; font-size: 17px; font-weight: 550; }
+.slt-m-pal-input::placeholder { color: var(--slt-ui-ink-faint); }
+.slt-m-pal-results { overflow-y: auto; padding: 8px; min-height: 120px; }
+.slt-m-pal-results::-webkit-scrollbar { width: 6px; }
+.slt-m-pal-results::-webkit-scrollbar-thumb { background: var(--slt-ui-line); border-radius: 6px; }
+.slt-m-pal-group { padding: 10px 12px 4px; font-size: 10.5px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.09em; color: var(--slt-ui-ink-faint); }
+.slt-m-pal-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+.slt-m-pal-item.active { background: var(--slt-ui-accent-soft); box-shadow: inset 2px 0 0 var(--slt-ui-accent); }
+.slt-m-pal-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slt-m-pal-hint { flex: 0 1 auto; min-width: 0; max-width: 55%; font-size: 12px; font-weight: 500; color: var(--slt-ui-ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slt-m-pal-empty { padding: 28px 12px; text-align: center; color: var(--slt-ui-ink-faint); font-size: 13px; }
+.slt-m-pal-foot { display: flex; gap: 16px; padding: 10px 20px; border-top: 1px solid var(--slt-ui-line); font-size: 11.5px; color: var(--slt-ui-ink-faint); }
+.slt-m-pal-foot kbd { margin-right: 3px; }
+
+.slt-m-inbox { display: flex; flex-direction: column; gap: 6px; }
+.slt-m-inbox-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-ink) 3%, transparent);
+}
+.slt-m-inbox-row.unread { border-color: var(--slt-ui-accent-line); }
+.slt-m-inbox-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--slt-ui-accent); }
+.slt-m-inbox-title { font-weight: 650; font-size: 13.5px; }
+.slt-m-inbox-desc { font-size: 12.5px; color: var(--slt-ui-ink-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.slt-m-inbox-time { font-size: 11.5px; color: var(--slt-ui-ink-faint); margin-top: 4px; }
+.slt-m-inbox-empty { padding: 26px 8px; text-align: center; }
+.slt-m-inbox-empty-title { font-weight: 750; font-size: 15px; color: var(--slt-ui-ink); }
+.slt-m-inbox-empty-sub { font-size: 13px; color: var(--slt-ui-ink-faint); margin-top: 4px; }
+
+@keyframes slt-m-tab-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px) {
+    .slt-modal-root { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+    .slt-modal-root .slt-m-side { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 12px; border-right: 0; border-bottom: 1px solid var(--slt-m-border); overflow: visible; }
+    .slt-modal-root .slt-m-side-nav { flex-direction: row; flex-wrap: wrap; flex-basis: 100%; }
+    .slt-modal-root .slt-m-side-label,
+    .slt-modal-root .slt-m-side-item-label,
+    .slt-modal-root .slt-m-side-search-label,
+    .slt-modal-root .slt-m-side-search kbd,
+    .slt-modal-root .slt-m-enabled-sub { display: none; }
+    .slt-modal-root .slt-m-cz-nav { flex-direction: row; flex-wrap: wrap; }
+    .slt-modal-root .slt-m-side-item { width: auto; }
+    .slt-modal-root .slt-m-side-item.active::before { display: none; }
+    .slt-modal-root .slt-m-side-search { width: auto; }
+    .slt-modal-root .slt-m-topbar { padding: 14px 12px; flex-wrap: wrap; }
+    .slt-modal-root .slt-m-review-label { display: none; }
+    .slt-modal-root .slt-m-tab-host { padding: 14px 12px 20px; }
+    .slt-modal-root .slt-m-field { grid-template-columns: 1fr; align-items: start; gap: 6px; }
+    .slt-modal-root .slt-m-field-toggle { grid-template-columns: minmax(0, 1fr) max-content; align-items: center; }
+    .slt-modal-root .slt-m-field-reset { visibility: visible; opacity: 0; }
+    .slt-modal-root .slt-m-field-reset-on { opacity: 0.6; }
+    .slt-m-rv-row { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .slt-modal-root .slt-m-tab-content, .slt-modal-root .slt-m-cz-category { animation: none; }
+    .slt-modal-root *, .slt-modal-root *::before, .slt-modal-root *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+`;
+
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
   var SPICY_LYRICS_CACHE_NAMES2 = ["SpicyLyrics_LyricsStore_g1", "SpicyLyrics_LyricsStore"];
-  function showActionNotification(message, isError = false) {
-    if (state.showNotifications && Spicetify.showNotification) {
-      Spicetify.showNotification(message, isError);
-    }
-  }
   function clearAllCachedTranslations() {
     clearTranslationCache();
     clearWordBreakdownCache();
-    showActionNotification("All cached translations deleted!");
+    notify({ kind: "success", key: "slt-cache", title: "Cached translations deleted", description: "Songs will be translated fresh the next time they play." });
   }
   async function clearSpicyLyricsCachedLyrics() {
     try {
@@ -12719,40 +16173,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (typeof caches !== "undefined" && typeof caches.delete === "function") {
         await Promise.all(SPICY_LYRICS_CACHE_NAMES2.map((name) => caches.delete(name)));
       }
-      showActionNotification("Spicy Lyrics cached lyrics deleted!");
+      notify({ kind: "success", key: "slt-cache", title: "Spicy Lyrics cache cleared", description: "Lyrics will be downloaded again as songs play." });
     } catch (e) {
-      showActionNotification("Failed to clear Spicy Lyrics cached lyrics", true);
+      notify({ kind: "error", key: "slt-cache", title: "Couldn't clear the Spicy Lyrics cache", description: e instanceof Error ? e.message : void 0 });
     }
-  }
-  function bindModalCacheActions(container) {
-    const viewSpicyLyricsCacheButton = container.querySelector("#slt-view-spicy-lyrics-cache");
-    const spicyLyricsCacheButton = container.querySelector("#slt-clear-spicy-lyrics-cache");
-    const translationCacheButton = container.querySelector("#slt-clear-translation-cache");
-    viewSpicyLyricsCacheButton?.addEventListener("click", () => {
-      hideModal();
-      setTimeout(() => openSpicyLyricsCacheViewer(), 150);
-    });
-    spicyLyricsCacheButton?.addEventListener("click", async () => {
-      const previousText = spicyLyricsCacheButton.textContent || "Clear Spicy Lyrics Cache";
-      spicyLyricsCacheButton.disabled = true;
-      spicyLyricsCacheButton.textContent = "Clearing...";
-      await clearSpicyLyricsCachedLyrics();
-      spicyLyricsCacheButton.textContent = "Cleared";
-      setTimeout(() => {
-        spicyLyricsCacheButton.disabled = false;
-        spicyLyricsCacheButton.textContent = previousText;
-      }, 1200);
-    });
-    translationCacheButton?.addEventListener("click", () => {
-      const previousText = translationCacheButton.textContent || "Clear All Cached Translations";
-      translationCacheButton.disabled = true;
-      clearAllCachedTranslations();
-      translationCacheButton.textContent = "Cleared";
-      setTimeout(() => {
-        translationCacheButton.disabled = false;
-        translationCacheButton.textContent = previousText;
-      }, 1200);
-    });
   }
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
@@ -12825,7 +16249,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     input?.addEventListener("change", () => onChange(input.value));
     return row;
   }
-  function runSettingEffects(effects, value) {
+  function runSettingEffects(effects, value, deferRetranslate = false) {
     if (effects.includes("qualityIndicatorClass")) {
       document.body.classList.toggle("slt-hide-quality-indicator", !Boolean(value));
     }
@@ -12839,9 +16263,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       setOverlayLearningMode(isLearningActive());
       syncLearningButton();
     }
-    if (effects.includes("romanizationDisplay") || effects.includes("reapplyTranslations") || effects.includes("retranslate")) {
+    const retranslate = effects.includes("romanizationDisplay") || effects.includes("reapplyTranslations") || effects.includes("retranslate");
+    if (retranslate && !deferRetranslate)
       forceRetranslate();
-    }
+    return retranslate;
   }
   function applySettingById(id, value) {
     const field = getSettingField(id);
@@ -12849,6 +16274,21 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return;
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
+  }
+  function applySettingsBatch(changes) {
+    let retranslate = false;
+    let refreshModels = false;
+    for (const { field, value } of changes) {
+      const effects = writeSettingValue(field, value);
+      if (runSettingEffects(effects, value, true))
+        retranslate = true;
+      if (field.id.endsWith("-api-key"))
+        refreshModels = true;
+    }
+    if (retranslate)
+      forceRetranslate();
+    if (refreshModels)
+      syncModelLists({ force: true });
   }
   function updateSettingFieldVisibility(root, visibleDisplay) {
     const api = getCurrentApiPreference();
@@ -12963,9 +16403,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         try {
           await showCurrentChangelog();
         } catch (e) {
-          if (Spicetify.showNotification) {
-            Spicetify.showNotification("Failed to load changelog", true);
-          }
+          notify("Failed to load changelog", true);
         } finally {
           if (btn) {
             btn.textContent = "View Changelog";
@@ -12974,7 +16412,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
       }
     ));
-    const nativeVersionHash = getContentHashShort();
+    const nativeVersionHash = getDisplayHash().hash.substring(0, 8);
     const nativeVersionLabel = `Version ${VERSION}${nativeVersionHash ? ` \xB7 ${nativeVersionHash}` : ""}`;
     sectionContent.appendChild(createNativeButton(
       "slt-settings.check-updates",
@@ -13078,710 +16516,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       subtree: true
     });
   }
-  var modalFieldHandles = [];
-  function buildModalField(field, onChanged) {
-    const id = getModalSettingInputId(field);
-    const row = document.createElement("div");
-    row.className = field.type === "toggle" ? "slt-modal-field slt-modal-toggle-field" : "slt-modal-field";
-    row.setAttribute("data-slt-setting-field", field.id);
-    const description = field.description ? `<span class="slt-description">${escapeHtml3(field.description)}</span>` : "";
-    let controlMarkup;
-    if (field.type === "toggle") {
-      controlMarkup = `
-            <label class="slt-toggle">
-                <input type="checkbox" id="${id}">
-                <span class="slt-toggle-slider"></span>
-            </label>`;
-    } else if (field.type === "select") {
-      const options = (field.options || []).map((option) => `<option value="${escapeHtml3(option.value)}">${escapeHtml3(option.text)}</option>`).join("");
-      controlMarkup = `<select id="${id}">${options}</select>`;
-    } else {
-      controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml3(field.placeholder || "")}" autocomplete="off" spellcheck="false" data-form-type="other">`;
-    }
-    row.innerHTML = `
-        <div class="slt-modal-field-copy">
-            <label for="${id}">${escapeHtml3(field.label)}</label>
-            ${description}
-        </div>
-        <div class="slt-modal-field-control">
-            ${controlMarkup}
-            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml3(field.label)} to default">\u21BA</button>
-        </div>`;
-    const control = row.querySelector(`#${id}`);
-    const resetButton = row.querySelector(".slt-field-reset");
-    const sync = () => {
-      const value = readSettingValue(field);
-      if (field.type === "toggle") {
-        control.checked = value === true;
-      } else {
-        control.value = String(value);
-      }
-      resetButton.classList.toggle("slt-field-reset-on", !isSettingAtDefault(field));
-    };
-    control.addEventListener("change", () => {
-      const value = field.type === "toggle" ? control.checked : control.value;
-      handleSettingChange(field, value, void 0, "");
-      onChanged();
-    });
-    resetButton.addEventListener("click", () => {
-      handleSettingChange(field, field.defaultValue, void 0, "");
-      onChanged();
-    });
-    sync();
-    return { field, row, sync };
-  }
-  function applyModalSettingsFilter(container, query) {
-    const api = getCurrentApiPreference();
-    let matches = 0;
-    for (const handle of modalFieldHandles) {
-      const visible = isSettingFieldVisible(handle.field, api) && matchesSettingQuery(handle.field, query);
-      handle.row.style.display = visible ? "" : "none";
-      if (visible)
-        matches++;
-    }
-    container.querySelectorAll("[data-slt-section]").forEach((sectionEl) => {
-      const section = sectionEl;
-      const hasVisibleRow = Array.from(section.querySelectorAll(".slt-modal-field")).some((row) => row.style.display !== "none");
-      section.style.display = hasVisibleRow ? "" : "none";
-    });
-    container.querySelectorAll("[data-slt-category]").forEach((categoryEl) => {
-      const category = categoryEl;
-      const hasVisibleSection = Array.from(category.querySelectorAll("[data-slt-section]")).some((section) => section.style.display !== "none");
-      category.style.display = hasVisibleSection ? "" : "none";
-    });
-    const status = container.querySelector("#slt-settings-search-status");
-    if (status) {
-      status.textContent = query.trim() ? `${matches} setting${matches === 1 ? "" : "s"} matched` : "";
-    }
-  }
-  function buildModalSettingsPanel() {
-    modalFieldHandles.length = 0;
-    const panel = document.createElement("div");
-    panel.className = "slt-settings-panel";
-    const search = document.createElement("div");
-    search.className = "slt-settings-search";
-    search.innerHTML = `
-        <input type="search" id="slt-settings-search-input" placeholder="Search settings\u2026" autocomplete="off" spellcheck="false">
-        <span id="slt-settings-search-status"></span>`;
-    panel.appendChild(search);
-    const refresh = () => {
-      const input = panel.querySelector("#slt-settings-search-input");
-      modalFieldHandles.forEach((handle) => handle.sync());
-      applyModalSettingsFilter(panel, input?.value || "");
-    };
-    for (const category of SETTINGS_CATEGORIES) {
-      const sections = getSectionsForCategory(category);
-      if (sections.length === 0)
-        continue;
-      const categoryEl = document.createElement("div");
-      categoryEl.className = "slt-settings-category";
-      categoryEl.setAttribute("data-slt-category", category.id);
-      categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml3(category.label)}</div>`;
-      for (const section of sections) {
-        const fields = SETTINGS_SCHEMA.filter((field) => field.section === section);
-        if (fields.length === 0)
-          continue;
-        const sectionEl = document.createElement("div");
-        sectionEl.className = "slt-settings-section";
-        sectionEl.setAttribute("data-slt-section", section);
-        sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml3(section)}</div>`;
-        for (const field of fields) {
-          const handle = buildModalField(field, refresh);
-          modalFieldHandles.push(handle);
-          sectionEl.appendChild(handle.row);
-        }
-        categoryEl.appendChild(sectionEl);
-      }
-      panel.appendChild(categoryEl);
-    }
-    const searchInput = panel.querySelector("#slt-settings-search-input");
-    searchInput.addEventListener("input", () => applyModalSettingsFilter(panel, searchInput.value));
-    applyModalSettingsFilter(panel, "");
-    syncModelLists();
-    return panel;
-  }
-  function connectionStateLabel(connectionState) {
-    switch (connectionState) {
-      case "connected":
-        return "Connected";
-      case "connecting":
-        return "Connecting\u2026";
-      case "reconnecting":
-        return "Reconnecting\u2026";
-      case "error":
-        return "Connection error";
-      default:
-        return "Disconnected";
-    }
-  }
-  function connectionLatencyClass(latencyMs) {
-    if (latencyMs === null)
-      return "";
-    if (latencyMs <= 150)
-      return "slt-conn-great";
-    if (latencyMs <= 300)
-      return "slt-conn-ok";
-    if (latencyMs <= 500)
-      return "slt-conn-bad";
-    return "slt-conn-horrible";
-  }
-  function renderConnectionStatusMarkup() {
-    return `
-        <div class="slt-conn-card" id="slt-connection-status">
-            <div class="slt-conn-head">
-                <span class="slt-conn-dot"></span>
-                <span class="slt-conn-title">Connection Status</span>
-                <span class="slt-conn-state">Disconnected</span>
-            </div>
-            <div class="slt-conn-metrics">
-                <div class="slt-conn-metric">
-                    <span class="slt-conn-value slt-conn-ping">\u2014</span>
-                    <span class="slt-conn-label">Ping</span>
-                </div>
-                <div class="slt-conn-metric">
-                    <span class="slt-conn-value slt-conn-users">\u2014</span>
-                    <span class="slt-conn-label">Users installed</span>
-                </div>
-            </div>
-        </div>`;
-  }
-  function updateConnectionStatusCard(root) {
-    const card = root.querySelector("#slt-connection-status");
-    if (!card)
-      return;
-    const conn = getConnectionState();
-    const dot = card.querySelector(".slt-conn-dot");
-    const stateEl = card.querySelector(".slt-conn-state");
-    const pingEl = card.querySelector(".slt-conn-ping");
-    const usersEl = card.querySelector(".slt-conn-users");
-    const latencyClass = connectionLatencyClass(conn.latencyMs);
-    const showLatency = conn.state === "connected" && latencyClass;
-    if (dot)
-      dot.className = `slt-conn-dot slt-conn-${conn.state}${showLatency ? " " + latencyClass : ""}`;
-    if (stateEl)
-      stateEl.textContent = connectionStateLabel(conn.state);
-    if (pingEl) {
-      pingEl.textContent = conn.latencyMs !== null ? `${conn.latencyMs} ms` : "\u2014";
-      pingEl.className = `slt-conn-value slt-conn-ping${latencyClass ? " " + latencyClass : ""}`;
-    }
-    if (usersEl)
-      usersEl.textContent = conn.totalUsers > 0 ? conn.totalUsers.toLocaleString() : "\u2014";
-  }
-  function startConnectionStatusUpdates(root) {
-    updateConnectionStatusCard(root);
-    const card = root.querySelector("#slt-connection-status");
-    const interval = setInterval(() => {
-      if (!card || !card.isConnected) {
-        clearInterval(interval);
-        return;
-      }
-      updateConnectionStatusCard(root);
-    }, 2e3);
-  }
-  function createSettingsUI() {
-    const container = document.createElement("div");
-    container.className = "slt-settings-container";
-    container.innerHTML = `
-        <style>
-            .slt-settings-container {
-                --slt-radius: 16px;
-                --slt-radius-sm: 11px;
-                --slt-hairline: rgba(255, 255, 255, 0.07);
-                --slt-hairline-strong: rgba(255, 255, 255, 0.14);
-                --slt-surface: rgba(255, 255, 255, 0.035);
-                --slt-surface-hover: rgba(255, 255, 255, 0.06);
-                --slt-text: hsla(0, 0%, 100%, 0.92);
-                --slt-text-2: hsla(0, 0%, 100%, 0.58);
-                --slt-text-3: hsla(0, 0%, 100%, 0.4);
-                --slt-accent: var(--spice-button-active, #1db954);
-                --slt-ease: cubic-bezier(0.32, 0.72, 0, 1);
-                --slt-gloss:
-                    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-                padding: 2px 2px 4px;
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                width: 100%;
-                max-width: 100%;
-                box-sizing: border-box;
-                color: var(--slt-text);
-                -webkit-font-smoothing: antialiased;
-            }
-            @keyframes slt-modal-rise {
-                from { opacity: 0; transform: translateY(8px) scale(0.992); }
-                to { opacity: 1; transform: none; }
-            }
-            .slt-settings-container::-webkit-scrollbar { width: 9px; }
-            .slt-settings-container::-webkit-scrollbar-track { background: transparent; }
-            .slt-settings-container::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 999px;
-                border: 2px solid transparent;
-                background-clip: padding-box;
-            }
-            .slt-settings-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
-            .slt-settings-panel {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-            }
-            .slt-settings-search {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 6px 14px 12px;
-            }
-            .slt-settings-search input {
-                flex: 1;
-                min-height: 38px;
-                padding: 8px 13px;
-                border-radius: var(--slt-radius-sm);
-                border: 1px solid var(--slt-hairline-strong);
-                background-color: var(--slt-surface);
-                color: var(--slt-text);
-                font-size: 13px;
-                font-weight: 500;
-                box-sizing: border-box;
-            }
-            .slt-settings-search input:focus {
-                outline: none;
-                border-color: rgba(255, 255, 255, 0.4);
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-            }
-            #slt-settings-search-status {
-                font-size: 12px;
-                color: var(--slt-text-3);
-                white-space: nowrap;
-            }
-            .slt-settings-category {
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-            }
-            .slt-settings-category-title {
-                padding: 14px 14px 6px;
-                font-size: 11px;
-                font-weight: 800;
-                letter-spacing: 0.09em;
-                text-transform: uppercase;
-                color: var(--slt-text-3);
-            }
-            .slt-settings-section {
-                display: flex;
-                flex-direction: column;
-                border-radius: var(--slt-radius-sm);
-                background: var(--slt-surface);
-                margin-bottom: 8px;
-                overflow: hidden;
-            }
-            .slt-settings-section-title {
-                padding: 10px 14px 8px;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.02em;
-                color: var(--slt-text-2);
-            }
-            .slt-settings-section .slt-modal-field:last-child::after { opacity: 0; }
-            .slt-field-reset {
-                flex-shrink: 0;
-                width: 28px;
-                height: 28px;
-                margin-left: 8px;
-                border-radius: 999px;
-                border: 1px solid transparent;
-                background: transparent;
-                color: var(--slt-text-3);
-                font-size: 14px;
-                line-height: 1;
-                cursor: pointer;
-                opacity: 0;
-                pointer-events: none;
-                transition: opacity 0.2s var(--slt-ease), color 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
-            }
-            .slt-field-reset.slt-field-reset-on {
-                opacity: 1;
-                pointer-events: auto;
-                border-color: var(--slt-hairline-strong);
-                color: var(--slt-text-2);
-            }
-            .slt-field-reset.slt-field-reset-on:hover {
-                color: var(--slt-text);
-                border-color: rgba(255, 255, 255, 0.32);
-            }
-            .slt-modal-field {
-                display: grid;
-                grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
-                align-items: center;
-                gap: 18px;
-                padding: 13px 14px;
-                border-radius: var(--slt-radius-sm);
-                position: relative;
-                transition: background 0.2s var(--slt-ease);
-            }
-            .slt-modal-field:hover { background: var(--slt-surface); }
-            .slt-modal-field::after {
-                content: '';
-                position: absolute;
-                left: 14px; right: 14px; bottom: 0;
-                height: 1px;
-                background: var(--slt-hairline);
-            }
-            .slt-modal-field:hover::after { opacity: 0; }
-            .slt-modal-field-copy {
-                min-width: 0;
-            }
-            .slt-modal-field-copy label {
-                display: block;
-                font-size: 14px;
-                font-weight: 600;
-                letter-spacing: 0.005em;
-                color: var(--slt-text);
-                line-height: 1.35;
-            }
-            .slt-modal-field-control {
-                display: flex;
-                align-items: center;
-                justify-content: flex-end;
-                min-width: 0;
-            }
-            .slt-modal-field select,
-            .slt-modal-field input[type="text"],
-            .slt-modal-field input[type="password"] {
-                width: 100%;
-                min-height: 40px;
-                padding: 9px 13px;
-                border-radius: var(--slt-radius-sm);
-                border: 1px solid var(--slt-hairline-strong);
-                background-color: var(--slt-surface);
-                color: var(--slt-text);
-                font-size: 14px;
-                font-weight: 500;
-                box-sizing: border-box;
-                transition: border-color 0.2s var(--slt-ease), background-color 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease);
-                cursor: pointer;
-            }
-            .slt-modal-field select {
-                appearance: none;
-                -webkit-appearance: none;
-                padding-right: 38px;
-                background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
-                background-repeat: no-repeat;
-                background-position: right 13px center;
-                background-size: 14px 14px;
-            }
-            .slt-modal-field select option,
-            .slt-modal-field select optgroup {
-                background-color: #1c1c20;
-                color: var(--slt-text);
-                font-weight: 500;
-            }
-            .slt-modal-field select:hover,
-            .slt-modal-field input[type="text"]:hover,
-            .slt-modal-field input[type="password"]:hover {
-                background-color: var(--slt-surface-hover);
-                border-color: rgba(255, 255, 255, 0.22);
-            }
-            .slt-modal-field select:focus,
-            .slt-modal-field input[type="text"]:focus,
-            .slt-modal-field input[type="password"]:focus {
-                outline: none;
-                border-color: rgba(255, 255, 255, 0.4);
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-            }
-            .slt-toggle {
-                position: relative;
-                width: 46px;
-                height: 27px;
-                flex-shrink: 0;
-            }
-            .slt-toggle input {
-                opacity: 0;
-                width: 0;
-                height: 0;
-            }
-            .slt-toggle-slider {
-                position: absolute;
-                cursor: pointer;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background-color: rgba(255, 255, 255, 0.1);
-                box-shadow: var(--slt-gloss);
-                transition: background-color 0.28s var(--slt-ease);
-                border-radius: 999px;
-            }
-            .slt-toggle-slider:before {
-                position: absolute;
-                content: "";
-                height: 21px;
-                width: 21px;
-                left: 3px;
-                bottom: 3px;
-                background-color: #fff;
-                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-                transition: transform 0.28s var(--slt-ease);
-                border-radius: 50%;
-            }
-            .slt-toggle input:checked + .slt-toggle-slider {
-                background-color: var(--slt-accent);
-            }
-            .slt-toggle input:checked + .slt-toggle-slider:before {
-                transform: translateX(19px);
-            }
-            .slt-button {
-                padding: 10px 20px;
-                border-radius: 999px;
-                border: 1px solid transparent;
-                background: rgba(255, 255, 255, 0.92);
-                color: #000;
-                font-size: 13px;
-                font-weight: 700;
-                letter-spacing: 0.01em;
-                cursor: pointer;
-                transition: transform 0.18s var(--slt-ease), background 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
-                white-space: nowrap;
-                box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
-            }
-            .slt-button:hover {
-                transform: translateY(-1px);
-                background: #fff;
-                box-shadow: 0 6px 18px -4px rgba(0, 0, 0, 0.5);
-            }
-            .slt-button:active {
-                transform: translateY(0) scale(0.985);
-            }
-            .slt-button.secondary {
-                background: var(--slt-surface);
-                border: 1px solid var(--slt-hairline-strong);
-                color: var(--slt-text);
-                box-shadow: var(--slt-gloss);
-            }
-            .slt-button.secondary:hover {
-                background: var(--slt-surface-hover);
-                border-color: rgba(255, 255, 255, 0.28);
-                box-shadow: var(--slt-gloss), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
-            }
-            .slt-button.danger {
-                background: rgba(255, 90, 90, 0.14);
-                border: 1px solid rgba(255, 90, 90, 0.32);
-                color: #ff8a8a;
-                box-shadow: none;
-            }
-            .slt-button.danger:hover {
-                background: rgba(255, 90, 90, 0.26);
-                border-color: rgba(255, 90, 90, 0.5);
-                color: #fff;
-            }
-            .slt-button:disabled {
-                cursor: default;
-                opacity: 0.5;
-                transform: none;
-                box-shadow: none;
-            }
-            .slt-description {
-                display: block;
-                font-size: 12.5px;
-                color: var(--slt-text-3);
-                margin-top: 3px;
-                line-height: 1.4;
-            }
-            .slt-modal-actions,
-            .slt-modal-footer {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                flex-wrap: wrap;
-                padding-top: 16px;
-            }
-            .slt-modal-actions {
-                border-top: 1px solid var(--slt-hairline);
-                margin-top: 10px;
-                padding: 16px 6px 4px;
-            }
-            .slt-modal-footer { padding: 4px 6px 0; }
-            .slt-modal-cache-actions {
-                display: flex;
-                gap: 8px;
-                flex-wrap: wrap;
-                justify-content: flex-end;
-            }
-            .slt-modal-footer {
-                color: var(--spice-subtext);
-                font-size: 13px;
-                padding-bottom: 2px;
-            }
-            .slt-modal-footer-buttons {
-                display: flex;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .slt-modal-meta {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .slt-modal-shortcut {
-                color: var(--spice-subtext);
-                font-size: 12px;
-                opacity: 0.7;
-                padding-top: 2px;
-            }
-            .slt-conn-card {
-                margin: 6px 2px 2px;
-                padding: 14px 16px;
-                border-radius: var(--slt-radius-sm);
-                background: var(--slt-surface);
-                box-shadow: inset 0 0 0 1px var(--slt-hairline);
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-            }
-            .slt-conn-head {
-                display: flex;
-                align-items: center;
-                gap: 9px;
-            }
-            .slt-conn-dot {
-                width: 9px;
-                height: 9px;
-                border-radius: 999px;
-                background: var(--slt-text-3);
-                flex-shrink: 0;
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
-            }
-            .slt-conn-dot.slt-conn-connecting,
-            .slt-conn-dot.slt-conn-reconnecting { background: #ffd35c; }
-            .slt-conn-dot.slt-conn-error { background: #f1556c; }
-            .slt-conn-dot.slt-conn-connected { background: #1ed760; }
-            .slt-conn-dot.slt-conn-great { background: #1ed760; }
-            .slt-conn-dot.slt-conn-ok { background: #ffd35c; }
-            .slt-conn-dot.slt-conn-bad { background: #ff9f45; }
-            .slt-conn-dot.slt-conn-horrible { background: #f1556c; }
-            .slt-conn-title {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--slt-text);
-            }
-            .slt-conn-state {
-                margin-left: auto;
-                font-size: 12px;
-                color: var(--slt-text-2);
-            }
-            .slt-conn-metrics {
-                display: flex;
-                gap: 10px;
-            }
-            .slt-conn-metric {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                padding: 10px 12px;
-                border-radius: var(--slt-radius-sm);
-                background: rgba(0, 0, 0, 0.18);
-            }
-            .slt-conn-value {
-                font-size: 17px;
-                font-weight: 600;
-                color: var(--slt-text);
-                font-variant-numeric: tabular-nums;
-            }
-            .slt-conn-value.slt-conn-great { color: #1ed760; }
-            .slt-conn-value.slt-conn-ok { color: #ffd35c; }
-            .slt-conn-value.slt-conn-bad { color: #ff9f45; }
-            .slt-conn-value.slt-conn-horrible { color: #f1556c; }
-            .slt-conn-label {
-                font-size: 11px;
-                letter-spacing: 0.02em;
-                color: var(--slt-text-3);
-            }
-            @media (max-width: 620px) {
-                .slt-modal-field {
-                    grid-template-columns: 1fr;
-                    gap: 8px;
-                }
-                .slt-modal-field-control {
-                    justify-content: stretch;
-                }
-            }
-        </style>
-
-        <div id="slt-settings-panel-mount"></div>
-
-        ${renderConnectionStatusMarkup()}
-
-        <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
-                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
-            </div>
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
-                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
-            </div>
-        </div>
-
-        <div class="slt-modal-footer">
-            <div>
-                <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
-                ${(() => {
-      const h = getContentHashShort();
-      return h ? `<span style="margin: 0 8px; color: var(--spice-subtext);">\xB7</span><span style="font-size: 12px; color: var(--spice-subtext); font-family: 'JetBrains Mono','Consolas',monospace;">${h}</span>` : "";
-    })()}
-                <span style="margin: 0 8px; color: var(--spice-subtext);">\u2022</span>
-                <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
-            </div>
-            <div class="slt-modal-footer-buttons">
-                <button class="slt-button secondary" id="slt-view-changelog-popup">View Changelog</button>
-                <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
-            </div>
-        </div>
-
-        <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
-    `;
-    const settingsMount = container.querySelector("#slt-settings-panel-mount");
-    settingsMount?.replaceWith(buildModalSettingsPanel());
-    setTimeout(() => {
-      bindModalCacheActions(container);
-      startConnectionStatusUpdates(container);
-      const viewCacheButton = container.querySelector("#slt-view-cache");
-      const viewChangelogPopupButton = container.querySelector("#slt-view-changelog-popup");
-      const checkUpdatesButton = container.querySelector("#slt-check-updates");
-      viewCacheButton?.addEventListener("click", () => {
-        hideModal();
-        setTimeout(() => openCacheViewer(), 150);
-      });
-      viewChangelogPopupButton?.addEventListener("click", async () => {
-        viewChangelogPopupButton.textContent = "Loading...";
-        viewChangelogPopupButton.disabled = true;
-        hideModal();
-        try {
-          await showCurrentChangelog();
-        } catch (e) {
-          if (Spicetify.showNotification) {
-            Spicetify.showNotification("Failed to load changelog", true);
-          }
-        } finally {
-          viewChangelogPopupButton.textContent = "View Changelog";
-          viewChangelogPopupButton.disabled = false;
-        }
-      });
-      checkUpdatesButton?.addEventListener("click", () => {
-        runManualUpdateCheck(checkUpdatesButton, {
-          beforePrompt: async () => {
-            hideModal();
-            await new Promise((resolve) => setTimeout(resolve, 300));
-          }
-        });
-      });
-    }, 0);
-    return container;
-  }
-  function formatBytes(bytes) {
+  function formatBytes2(bytes) {
     if (bytes < 1024)
       return bytes + " B";
     if (bytes < 1024 * 1024)
@@ -13952,9 +16687,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   async function openCachedLyricsViewer(trackUri, targetLang, sourceLang) {
     const trackCache = getTrackCache(trackUri, targetLang);
     if (!trackCache) {
-      if (Spicetify.showNotification) {
-        Spicetify.showNotification("Could not load cached translation for this track", true);
-      }
+      notify("Could not load cached translation for this track", true);
       return;
     }
     const translatedLines = trackCache.lines || [];
@@ -14187,9 +16920,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       backToCacheButton.textContent = backToCacheLabel;
     if (Spicetify.PopupModal) {
       displayModal({
-        title: "Cached Lyrics Viewer",
+        title: "Cached lyrics",
         content,
-        isLarge: true
+        size: "xl"
       });
     }
     const backToCacheBtn = content.querySelector("#slt-lyrics-back-to-cache");
@@ -14221,9 +16954,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       });
       lines.push("-".repeat(40));
       lines.push("Exported from Spicy Lyric Translator");
-      const text = lines.join("\n");
+      const text3 = lines.join("\n");
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(text3);
         copyBtn.textContent = "Copied!";
         copyBtn.classList.add("slt-copied");
         setTimeout(() => {
@@ -14299,7 +17032,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       saveBtn.disabled = true;
       saveBtn.textContent = "Saved!";
       saveBtn.classList.add("slt-copied");
-      content.querySelectorAll(".slt-line-dirty").forEach((el) => el.classList.remove("slt-line-dirty"));
+      content.querySelectorAll(".slt-line-dirty").forEach((el2) => el2.classList.remove("slt-line-dirty"));
       setTimeout(() => {
         saveBtn.textContent = "Save Edits";
         saveBtn.classList.remove("slt-copied");
@@ -14579,7 +17312,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             </div>
             <div class="slt-stat">
                 <span class="slt-stat-label">Cache Size</span>
-                <span class="slt-stat-value" id="slt-stat-size">${formatBytes(stats.sizeBytes)}</span>
+                <span class="slt-stat-value" id="slt-stat-size">${formatBytes2(stats.sizeBytes)}</span>
             </div>
             <div class="slt-stat">
                 <span class="slt-stat-label">Oldest Entry</span>
@@ -14647,9 +17380,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           button.textContent = "Opening...";
           try {
             const played = await playCachedTrack(uri);
-            if (Spicetify.showNotification) {
-              Spicetify.showNotification(played ? "Opening cached track" : "Unable to play track directly", !played);
-            }
+            notify(played ? "Opening cached track" : "Unable to play track directly", !played);
           } finally {
             button.disabled = false;
             button.textContent = previousText || "Play";
@@ -14673,9 +17404,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             await new Promise((resolve) => setTimeout(resolve, 120));
             await openCachedLyricsViewer(uri, lang, sourceLang);
           } catch (error2) {
-            if (Spicetify.showNotification) {
-              Spicetify.showNotification("Failed to open cached lyrics viewer", true);
-            }
+            notify("Failed to open cached lyrics viewer", true);
           } finally {
             button.disabled = false;
             button.textContent = previousText || "View Lyrics";
@@ -14700,7 +17429,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
               if (linesEl)
                 linesEl.textContent = String(newStats.totalLines);
               if (sizeEl)
-                sizeEl.textContent = formatBytes(newStats.sizeBytes);
+                sizeEl.textContent = formatBytes2(newStats.sizeBytes);
               const list = container.querySelector("#slt-cache-list");
               if (list && list.querySelectorAll(".slt-cache-item").length === 0) {
                 list.innerHTML = '<div class="slt-empty-cache">No cached translations</div>';
@@ -14737,7 +17466,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function openCacheViewer() {
     if (Spicetify.PopupModal) {
       displayModal({
-        title: "Translation Cache",
+        title: "Translation cache",
         content: createCacheViewerUI(),
         isLarge: true
       });
@@ -14782,9 +17511,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                 const buffer = await res.arrayBuffer();
                 sizeBytes = buffer.byteLength;
                 totalSize += sizeBytes;
-                const text = new TextDecoder().decode(buffer);
-                rawJson = text;
-                const parsed = JSON.parse(text);
+                const text3 = new TextDecoder().decode(buffer);
+                rawJson = text3;
+                const parsed = JSON.parse(text3);
                 let lyricsData = parsed;
                 if (parsed && !parsed.Type && parsed.Content !== void 0) {
                   lyricsData = parsed.Content;
@@ -15054,7 +17783,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             </div>
             <div class="slt-stat">
                 <span class="slt-stat-label">Cache Size</span>
-                <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes(totalSize)}</span>
+                <span class="slt-stat-value" id="slt-sl-stat-size">${formatBytes2(totalSize)}</span>
             </div>
         </div>
 
@@ -15069,7 +17798,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           if (len)
             detailParts.push(len);
         }
-        detailParts.push(formatBytes(item.sizeBytes));
+        detailParts.push(formatBytes2(item.sizeBytes));
         if (item.cachedAt)
           detailParts.push(formatDate(item.cachedAt));
         const metaText = detailParts.join(" \xB7 ");
@@ -15122,9 +17851,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             try {
               const uri = `spotify:track:${trackId}`;
               const played = await playCachedTrack(uri);
-              if (Spicetify.showNotification) {
-                Spicetify.showNotification(played ? "Opening cached track" : "Unable to play track directly", !played);
-              }
+              notify(played ? "Opening cached track" : "Unable to play track directly", !played);
             } finally {
               button.disabled = false;
               button.textContent = previousText || "Play";
@@ -15163,7 +17890,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
                   }
                   const sizeEl = container.querySelector("#slt-sl-stat-size");
                   if (sizeEl)
-                    sizeEl.textContent = formatBytes(currentTotalSize);
+                    sizeEl.textContent = formatBytes2(currentTotalSize);
                   const list = container.querySelector("#slt-sl-cache-list");
                   if (list && list.querySelectorAll(".slt-cache-item").length === 0) {
                     list.innerHTML = '<div class="slt-empty-cache">No cached Spicy Lyrics data</div>';
@@ -15216,7 +17943,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (prettyJson.length > JSON_VIEW_LIMIT) {
       prettyJsonTruncated = true;
       prettyJson = prettyJson.slice(0, JSON_VIEW_LIMIT) + `
-\u2026 (truncated at ${formatBytes(JSON_VIEW_LIMIT)} of ${formatBytes(originalJsonLength)})`;
+\u2026 (truncated at ${formatBytes2(JSON_VIEW_LIMIT)} of ${formatBytes2(originalJsonLength)})`;
     }
     const renderInfoCell = (label, value, title) => `<div class="slt-lyrics-info-cell"${title ? ` title="${escapeHtml3(title)}"` : ""}>
             <span class="slt-lyrics-info-label">${escapeHtml3(label)}</span>
@@ -15307,19 +18034,19 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             ${renderInfoCell("Language", item.lang ? item.lang.toUpperCase() : "\u2014")}
             ${renderInfoCell("Lines", item.linesCount ? String(item.linesCount) : "\u2014")}
             ${renderInfoCell("Track Length", trackLen || "\u2014")}
-            ${renderInfoCell("Size", formatBytes(item.sizeBytes))}
+            ${renderInfoCell("Size", formatBytes2(item.sizeBytes))}
             ${renderInfoCell("Cached", item.cachedAt ? formatDate(item.cachedAt) : "\u2014")}
         </div>
         <div class="slt-lyrics-header">${escapeHtml3(displayTitle)} \xB7 ${escapeHtml3(item.url.hostname)}</div>
         ${item.firstLineSample ? `<div class="slt-lyrics-sample"><span class="slt-lyrics-sample-label">First Line</span>${escapeHtml3(item.firstLineSample)}</div>` : ""}
-        ${prettyJsonTruncated ? `<div class="slt-lyrics-sample" style="color: #f0b86e;"><span class="slt-lyrics-sample-label">Notice</span>JSON preview truncated for performance. Use Copy JSON to copy the full ${formatBytes(originalJsonLength)} payload.</div>` : ""}
+        ${prettyJsonTruncated ? `<div class="slt-lyrics-sample" style="color: #f0b86e;"><span class="slt-lyrics-sample-label">Notice</span>JSON preview truncated for performance. Use Copy JSON to copy the full ${formatBytes2(originalJsonLength)} payload.</div>` : ""}
         <div class="slt-json-box" id="slt-sl-entry-json">${escapeHtml3(prettyJson || "(empty response)")}</div>
     `;
     if (Spicetify.PopupModal) {
       displayModal({
-        title: "Spicy Lyrics Entry",
+        title: "Spicy Lyrics entry",
         content,
-        isLarge: true
+        size: "xl"
       });
     }
     const backBtn = content.querySelector("#slt-sl-entry-back");
@@ -15354,7 +18081,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   async function openSpicyLyricsCacheViewer() {
     if (Spicetify.PopupModal) {
       displayModal({
-        title: "Spicy Lyrics Cache",
+        title: "Spicy Lyrics cache",
         content: (() => {
           const div = document.createElement("div");
           div.style.padding = "20px";
@@ -15366,22 +18093,37 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       });
       const ui = await createSpicyLyricsCacheViewerUI();
       displayModal({
-        title: "Spicy Lyrics Cache",
+        title: "Spicy Lyrics cache",
         content: ui,
         isLarge: true
       });
     }
   }
   var SLT_MENU_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
-  function openSettingsModal() {
-    if (Spicetify.PopupModal) {
-      displayModal({
-        title: "Spicy Lyric Translator Settings",
-        content: createSettingsUI(),
-        isLarge: true
-      });
+  function openSettingsModal(options = {}) {
+    if (isSettingsOpen()) {
+      if (options.reveal)
+        revealSetting(options.reveal);
+      else if (options.tab)
+        goToSettings(options.tab, options.category);
+      return;
     }
+    openDialog({
+      title: "Spicy Lyric Translator settings",
+      bare: true,
+      size: "xl",
+      className: "slt-settings-dialog",
+      content: createSettingsShell({ tab: options.tab, category: options.category }),
+      onClose: () => destroySettingsShell()
+    });
+    if (options.reveal)
+      revealSetting(options.reveal);
   }
+  registerSettingLinker({
+    match: matchSettingInText,
+    byId: settingById,
+    reveal: (id) => openSettingsModal({ reveal: id })
+  });
   async function registerSettings() {
     while (typeof Spicetify === "undefined" || !Spicetify.Platform) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -15394,7 +18136,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             new Spicetify.Menu.Item(
               "SLT Settings",
               false,
-              openSettingsModal,
+              () => openSettingsModal(),
               SLT_MENU_ICON
             ).register();
             return true;

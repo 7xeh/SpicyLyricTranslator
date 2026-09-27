@@ -41,13 +41,19 @@ const step = (label, fn) => {
     return detail;
 };
 
+const quoteForShell = (arg) => (/^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${String(arg).replace(/"/g, '""')}"`);
+
 const run = (command, args, options = {}) => {
-    const result = spawnSync(command, args, {
+    const useShell = IS_WINDOWS && command !== process.execPath;
+    const spawnOptions = {
         cwd: __dirname,
-        shell: IS_WINDOWS && command !== process.execPath,
+        shell: useShell,
         encoding: 'utf8',
         stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
-    });
+    };
+    const result = useShell
+        ? spawnSync([command, ...args].map(quoteForShell).join(' '), spawnOptions)
+        : spawnSync(command, args, spawnOptions);
     if (result.error) {
         if (result.error.code === 'ENOENT') {
             fail(`"${command}" was not found on PATH`, command === 'spicetify' ? 'Install Spicetify: https://spicetify.app/docs/getting-started' : undefined);

@@ -2,24 +2,24 @@ import { storage } from './storage';
 import { state, isLearningActive } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
-import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getContentHashShort } from './updater';
+import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getDisplayHash, registerSettingLinker } from './updater';
 import { forceRetranslate, syncLearningButton } from './core';
 import { displayModal, hideModal } from './modal';
+import { openDialog } from './surface';
+import { notify } from './notify';
+import { createSettingsShell, destroySettingsShell, isSettingsOpen, revealSetting, goToSettings, matchSettingInText, settingById, TabId } from './settingsShell';
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
-import { getConnectionState, setConnectionIndicatorHidden } from './connectivity';
+import { setConnectionIndicatorHidden } from './connectivity';
 import { setOverlayRomanization, setOverlayLearningMode } from './translationOverlay';
 import {
     SETTINGS_SCHEMA,
     SETTINGS_CATEGORIES,
-    SettingsCategory,
     SettingsEffect,
     SettingsField,
     getCurrentApiPreference,
     getSettingField,
     getSectionsForCategory,
-    isSettingAtDefault,
     isSettingFieldVisible,
-    matchesSettingQuery,
     readSettingValue,
     refreshProviderModelLists,
     writeSettingValue
@@ -28,16 +28,10 @@ import {
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 const SPICY_LYRICS_CACHE_NAMES = ['SpicyLyrics_LyricsStore_g1', 'SpicyLyrics_LyricsStore'];
 
-function showActionNotification(message: string, isError: boolean = false): void {
-    if (state.showNotifications && Spicetify.showNotification) {
-        Spicetify.showNotification(message, isError);
-    }
-}
-
 export function clearAllCachedTranslations(): void {
     clearTranslationCache();
     clearWordBreakdownCache();
-    showActionNotification('All cached translations deleted!');
+    notify({ kind: 'success', key: 'slt-cache', title: 'Cached translations deleted', description: 'Songs will be translated fresh the next time they play.' });
 }
 
 export async function clearSpicyLyricsCachedLyrics(): Promise<void> {
@@ -46,56 +40,10 @@ export async function clearSpicyLyricsCachedLyrics(): Promise<void> {
         if (typeof caches !== 'undefined' && typeof caches.delete === 'function') {
             await Promise.all(SPICY_LYRICS_CACHE_NAMES.map(name => caches.delete(name)));
         }
-        showActionNotification('Spicy Lyrics cached lyrics deleted!');
+        notify({ kind: 'success', key: 'slt-cache', title: 'Spicy Lyrics cache cleared', description: 'Lyrics will be downloaded again as songs play.' });
     } catch (e) {
-        showActionNotification('Failed to clear Spicy Lyrics cached lyrics', true);
+        notify({ kind: 'error', key: 'slt-cache', title: "Couldn't clear the Spicy Lyrics cache", description: e instanceof Error ? e.message : undefined });
     }
-}
-
-export function renderModalCacheActionsMarkup(): string {
-    return `
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
-                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
-            </div>
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
-                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
-            </div>`;
-}
-
-export function bindModalCacheActions(container: ParentNode): void {
-    const viewSpicyLyricsCacheButton = container.querySelector('#slt-view-spicy-lyrics-cache') as HTMLButtonElement | null;
-    const spicyLyricsCacheButton = container.querySelector('#slt-clear-spicy-lyrics-cache') as HTMLButtonElement | null;
-    const translationCacheButton = container.querySelector('#slt-clear-translation-cache') as HTMLButtonElement | null;
-
-    viewSpicyLyricsCacheButton?.addEventListener('click', () => {
-        hideModal();
-        setTimeout(() => openSpicyLyricsCacheViewer(), 150);
-    });
-
-    spicyLyricsCacheButton?.addEventListener('click', async () => {
-        const previousText = spicyLyricsCacheButton.textContent || 'Clear Spicy Lyrics Cache';
-        spicyLyricsCacheButton.disabled = true;
-        spicyLyricsCacheButton.textContent = 'Clearing...';
-        await clearSpicyLyricsCachedLyrics();
-        spicyLyricsCacheButton.textContent = 'Cleared';
-        setTimeout(() => {
-            spicyLyricsCacheButton.disabled = false;
-            spicyLyricsCacheButton.textContent = previousText;
-        }, 1200);
-    });
-
-    translationCacheButton?.addEventListener('click', () => {
-        const previousText = translationCacheButton.textContent || 'Clear All Cached Translations';
-        translationCacheButton.disabled = true;
-        clearAllCachedTranslations();
-        translationCacheButton.textContent = 'Cleared';
-        setTimeout(() => {
-            translationCacheButton.disabled = false;
-            translationCacheButton.textContent = previousText;
-        }, 1200);
-    });
 }
 
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
@@ -180,7 +128,7 @@ function createNativeInput(id: string, label: string, type: string, currentValue
     return row;
 }
 
-function runSettingEffects(effects: SettingsEffect[], value: string | boolean): void {
+function runSettingEffects(effects: SettingsEffect[], value: string | boolean, deferRetranslate: boolean = false): boolean {
     if (effects.includes('qualityIndicatorClass')) {
         document.body.classList.toggle('slt-hide-quality-indicator', !Boolean(value));
     }
@@ -195,9 +143,9 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean): 
         syncLearningButton();
     }
 
-    if (effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate')) {
-        forceRetranslate();
-    }
+    const retranslate = effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate');
+    if (retranslate && !deferRetranslate) forceRetranslate();
+    return retranslate;
 }
 
 export function applySettingById(id: string, value: string | boolean): void {
@@ -205,6 +153,18 @@ export function applySettingById(id: string, value: string | boolean): void {
     if (!field) return;
     const effects = writeSettingValue(field, value);
     runSettingEffects(effects, value);
+}
+
+export function applySettingsBatch(changes: { field: SettingsField; value: string | boolean }[]): void {
+    let retranslate = false;
+    let refreshModels = false;
+    for (const { field, value } of changes) {
+        const effects = writeSettingValue(field, value);
+        if (runSettingEffects(effects, value, true)) retranslate = true;
+        if (field.id.endsWith('-api-key')) refreshModels = true;
+    }
+    if (retranslate) forceRetranslate();
+    if (refreshModels) syncModelLists({ force: true });
 }
 
 function updateSettingFieldVisibility(root: ParentNode, visibleDisplay: string): void {
@@ -236,7 +196,7 @@ function rebuildModelSelects(fieldIds: string[]): void {
     }
 }
 
-function syncModelLists(options: { fieldId?: string; force?: boolean } = {}): void {
+export function syncModelLists(options: { fieldId?: string; force?: boolean } = {}): void {
     refreshProviderModelLists(options).then(rebuildModelSelects).catch(() => undefined);
 }
 
@@ -334,9 +294,7 @@ function createNativeSettingsSection(): HTMLElement {
             try {
                 await showCurrentChangelog();
             } catch (e) {
-                if (Spicetify.showNotification) {
-                    Spicetify.showNotification('Failed to load changelog', true);
-                }
+                notify('Failed to load changelog', true);
             } finally {
                 if (btn) {
                     btn.textContent = 'View Changelog';
@@ -346,7 +304,7 @@ function createNativeSettingsSection(): HTMLElement {
         }
     ));
 
-    const nativeVersionHash = getContentHashShort();
+    const nativeVersionHash = getDisplayHash().hash.substring(0, 8);
     const nativeVersionLabel = `Version ${VERSION}${nativeVersionHash ? ` · ${nativeVersionHash}` : ''}`;
     sectionContent.appendChild(createNativeButton(
         'slt-settings.check-updates',
@@ -475,744 +433,6 @@ function watchForSettingsPage(): void {
         childList: true,
         subtree: true
     });
-}
-
-interface SettingsFieldHandle {
-    field: SettingsField;
-    row: HTMLElement;
-    sync: () => void;
-}
-
-const modalFieldHandles: SettingsFieldHandle[] = [];
-
-function buildModalField(field: SettingsField, onChanged: () => void): SettingsFieldHandle {
-    const id = getModalSettingInputId(field);
-    const row = document.createElement('div');
-    row.className = field.type === 'toggle' ? 'slt-modal-field slt-modal-toggle-field' : 'slt-modal-field';
-    row.setAttribute('data-slt-setting-field', field.id);
-
-    const description = field.description
-        ? `<span class="slt-description">${escapeHtml(field.description)}</span>`
-        : '';
-
-    let controlMarkup: string;
-    if (field.type === 'toggle') {
-        controlMarkup = `
-            <label class="slt-toggle">
-                <input type="checkbox" id="${id}">
-                <span class="slt-toggle-slider"></span>
-            </label>`;
-    } else if (field.type === 'select') {
-        const options = (field.options || [])
-            .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.text)}</option>`)
-            .join('');
-        controlMarkup = `<select id="${id}">${options}</select>`;
-    } else {
-        controlMarkup = `<input type="${field.type}" id="${id}" placeholder="${escapeHtml(field.placeholder || '')}" autocomplete="off" spellcheck="false" data-form-type="other">`;
-    }
-
-    row.innerHTML = `
-        <div class="slt-modal-field-copy">
-            <label for="${id}">${escapeHtml(field.label)}</label>
-            ${description}
-        </div>
-        <div class="slt-modal-field-control">
-            ${controlMarkup}
-            <button type="button" class="slt-field-reset" title="Reset to default" aria-label="Reset ${escapeHtml(field.label)} to default">↺</button>
-        </div>`;
-
-    const control = row.querySelector(`#${id}`) as HTMLInputElement | HTMLSelectElement;
-    const resetButton = row.querySelector('.slt-field-reset') as HTMLButtonElement;
-
-    const sync = (): void => {
-        const value = readSettingValue(field);
-        if (field.type === 'toggle') {
-            (control as HTMLInputElement).checked = value === true;
-        } else {
-            control.value = String(value);
-        }
-        resetButton.classList.toggle('slt-field-reset-on', !isSettingAtDefault(field));
-    };
-
-    control.addEventListener('change', () => {
-        const value = field.type === 'toggle' ? (control as HTMLInputElement).checked : control.value;
-        handleSettingChange(field, value, undefined, '');
-        onChanged();
-    });
-
-    resetButton.addEventListener('click', () => {
-        handleSettingChange(field, field.defaultValue, undefined, '');
-        onChanged();
-    });
-
-    sync();
-    return { field, row, sync };
-}
-
-function applyModalSettingsFilter(container: ParentNode, query: string): void {
-    const api = getCurrentApiPreference();
-    let matches = 0;
-
-    for (const handle of modalFieldHandles) {
-        const visible = isSettingFieldVisible(handle.field, api) && matchesSettingQuery(handle.field, query);
-        handle.row.style.display = visible ? '' : 'none';
-        if (visible) matches++;
-    }
-
-    container.querySelectorAll('[data-slt-section]').forEach(sectionEl => {
-        const section = sectionEl as HTMLElement;
-        const hasVisibleRow = Array.from(section.querySelectorAll('.slt-modal-field'))
-            .some(row => (row as HTMLElement).style.display !== 'none');
-        section.style.display = hasVisibleRow ? '' : 'none';
-    });
-
-    container.querySelectorAll('[data-slt-category]').forEach(categoryEl => {
-        const category = categoryEl as HTMLElement;
-        const hasVisibleSection = Array.from(category.querySelectorAll('[data-slt-section]'))
-            .some(section => (section as HTMLElement).style.display !== 'none');
-        category.style.display = hasVisibleSection ? '' : 'none';
-    });
-
-    const status = container.querySelector('#slt-settings-search-status') as HTMLElement | null;
-    if (status) {
-        status.textContent = query.trim() ? `${matches} setting${matches === 1 ? '' : 's'} matched` : '';
-    }
-}
-
-function buildModalSettingsPanel(): HTMLElement {
-    modalFieldHandles.length = 0;
-
-    const panel = document.createElement('div');
-    panel.className = 'slt-settings-panel';
-
-    const search = document.createElement('div');
-    search.className = 'slt-settings-search';
-    search.innerHTML = `
-        <input type="search" id="slt-settings-search-input" placeholder="Search settings…" autocomplete="off" spellcheck="false">
-        <span id="slt-settings-search-status"></span>`;
-    panel.appendChild(search);
-
-    const refresh = (): void => {
-        const input = panel.querySelector('#slt-settings-search-input') as HTMLInputElement | null;
-        modalFieldHandles.forEach(handle => handle.sync());
-        applyModalSettingsFilter(panel, input?.value || '');
-    };
-
-    for (const category of SETTINGS_CATEGORIES) {
-        const sections = getSectionsForCategory(category);
-        if (sections.length === 0) continue;
-
-        const categoryEl = document.createElement('div');
-        categoryEl.className = 'slt-settings-category';
-        categoryEl.setAttribute('data-slt-category', category.id);
-        categoryEl.innerHTML = `<div class="slt-settings-category-title">${escapeHtml(category.label)}</div>`;
-
-        for (const section of sections) {
-            const fields = SETTINGS_SCHEMA.filter(field => field.section === section);
-            if (fields.length === 0) continue;
-
-            const sectionEl = document.createElement('div');
-            sectionEl.className = 'slt-settings-section';
-            sectionEl.setAttribute('data-slt-section', section);
-            sectionEl.innerHTML = `<div class="slt-settings-section-title">${escapeHtml(section)}</div>`;
-
-            for (const field of fields) {
-                const handle = buildModalField(field, refresh);
-                modalFieldHandles.push(handle);
-                sectionEl.appendChild(handle.row);
-            }
-
-            categoryEl.appendChild(sectionEl);
-        }
-
-        panel.appendChild(categoryEl);
-    }
-
-    const searchInput = panel.querySelector('#slt-settings-search-input') as HTMLInputElement;
-    searchInput.addEventListener('input', () => applyModalSettingsFilter(panel, searchInput.value));
-
-    applyModalSettingsFilter(panel, '');
-    syncModelLists();
-    return panel;
-}
-
-function connectionStateLabel(connectionState: string): string {
-    switch (connectionState) {
-        case 'connected': return 'Connected';
-        case 'connecting': return 'Connecting…';
-        case 'reconnecting': return 'Reconnecting…';
-        case 'error': return 'Connection error';
-        default: return 'Disconnected';
-    }
-}
-
-function connectionLatencyClass(latencyMs: number | null): string {
-    if (latencyMs === null) return '';
-    if (latencyMs <= 150) return 'slt-conn-great';
-    if (latencyMs <= 300) return 'slt-conn-ok';
-    if (latencyMs <= 500) return 'slt-conn-bad';
-    return 'slt-conn-horrible';
-}
-
-function renderConnectionStatusMarkup(): string {
-    return `
-        <div class="slt-conn-card" id="slt-connection-status">
-            <div class="slt-conn-head">
-                <span class="slt-conn-dot"></span>
-                <span class="slt-conn-title">Connection Status</span>
-                <span class="slt-conn-state">Disconnected</span>
-            </div>
-            <div class="slt-conn-metrics">
-                <div class="slt-conn-metric">
-                    <span class="slt-conn-value slt-conn-ping">—</span>
-                    <span class="slt-conn-label">Ping</span>
-                </div>
-                <div class="slt-conn-metric">
-                    <span class="slt-conn-value slt-conn-users">—</span>
-                    <span class="slt-conn-label">Users installed</span>
-                </div>
-            </div>
-        </div>`;
-}
-
-function updateConnectionStatusCard(root: ParentNode): void {
-    const card = root.querySelector('#slt-connection-status') as HTMLElement | null;
-    if (!card) return;
-
-    const conn = getConnectionState();
-    const dot = card.querySelector('.slt-conn-dot') as HTMLElement | null;
-    const stateEl = card.querySelector('.slt-conn-state') as HTMLElement | null;
-    const pingEl = card.querySelector('.slt-conn-ping') as HTMLElement | null;
-    const usersEl = card.querySelector('.slt-conn-users') as HTMLElement | null;
-    const latencyClass = connectionLatencyClass(conn.latencyMs);
-    const showLatency = conn.state === 'connected' && latencyClass;
-
-    if (dot) dot.className = `slt-conn-dot slt-conn-${conn.state}${showLatency ? ' ' + latencyClass : ''}`;
-    if (stateEl) stateEl.textContent = connectionStateLabel(conn.state);
-    if (pingEl) {
-        pingEl.textContent = conn.latencyMs !== null ? `${conn.latencyMs} ms` : '—';
-        pingEl.className = `slt-conn-value slt-conn-ping${latencyClass ? ' ' + latencyClass : ''}`;
-    }
-    if (usersEl) usersEl.textContent = conn.totalUsers > 0 ? conn.totalUsers.toLocaleString() : '—';
-}
-
-function startConnectionStatusUpdates(root: HTMLElement): void {
-    updateConnectionStatusCard(root);
-    const card = root.querySelector('#slt-connection-status') as HTMLElement | null;
-    const interval = setInterval(() => {
-        if (!card || !card.isConnected) {
-            clearInterval(interval);
-            return;
-        }
-        updateConnectionStatusCard(root);
-    }, 2000);
-}
-
-function createSettingsUI(): HTMLElement {
-    const container = document.createElement('div');
-    container.className = 'slt-settings-container';
-    container.innerHTML = `
-        <style>
-            .slt-settings-container {
-                --slt-radius: 16px;
-                --slt-radius-sm: 11px;
-                --slt-hairline: rgba(255, 255, 255, 0.07);
-                --slt-hairline-strong: rgba(255, 255, 255, 0.14);
-                --slt-surface: rgba(255, 255, 255, 0.035);
-                --slt-surface-hover: rgba(255, 255, 255, 0.06);
-                --slt-text: hsla(0, 0%, 100%, 0.92);
-                --slt-text-2: hsla(0, 0%, 100%, 0.58);
-                --slt-text-3: hsla(0, 0%, 100%, 0.4);
-                --slt-accent: var(--spice-button-active, #1db954);
-                --slt-ease: cubic-bezier(0.32, 0.72, 0, 1);
-                --slt-gloss:
-                    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-                padding: 2px 2px 4px;
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                width: 100%;
-                max-width: 100%;
-                box-sizing: border-box;
-                color: var(--slt-text);
-                -webkit-font-smoothing: antialiased;
-            }
-            @keyframes slt-modal-rise {
-                from { opacity: 0; transform: translateY(8px) scale(0.992); }
-                to { opacity: 1; transform: none; }
-            }
-            .slt-settings-container::-webkit-scrollbar { width: 9px; }
-            .slt-settings-container::-webkit-scrollbar-track { background: transparent; }
-            .slt-settings-container::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 999px;
-                border: 2px solid transparent;
-                background-clip: padding-box;
-            }
-            .slt-settings-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); background-clip: padding-box; }
-            .slt-settings-panel {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-            }
-            .slt-settings-search {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 6px 14px 12px;
-            }
-            .slt-settings-search input {
-                flex: 1;
-                min-height: 38px;
-                padding: 8px 13px;
-                border-radius: var(--slt-radius-sm);
-                border: 1px solid var(--slt-hairline-strong);
-                background-color: var(--slt-surface);
-                color: var(--slt-text);
-                font-size: 13px;
-                font-weight: 500;
-                box-sizing: border-box;
-            }
-            .slt-settings-search input:focus {
-                outline: none;
-                border-color: rgba(255, 255, 255, 0.4);
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-            }
-            #slt-settings-search-status {
-                font-size: 12px;
-                color: var(--slt-text-3);
-                white-space: nowrap;
-            }
-            .slt-settings-category {
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-            }
-            .slt-settings-category-title {
-                padding: 14px 14px 6px;
-                font-size: 11px;
-                font-weight: 800;
-                letter-spacing: 0.09em;
-                text-transform: uppercase;
-                color: var(--slt-text-3);
-            }
-            .slt-settings-section {
-                display: flex;
-                flex-direction: column;
-                border-radius: var(--slt-radius-sm);
-                background: var(--slt-surface);
-                margin-bottom: 8px;
-                overflow: hidden;
-            }
-            .slt-settings-section-title {
-                padding: 10px 14px 8px;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 0.02em;
-                color: var(--slt-text-2);
-            }
-            .slt-settings-section .slt-modal-field:last-child::after { opacity: 0; }
-            .slt-field-reset {
-                flex-shrink: 0;
-                width: 28px;
-                height: 28px;
-                margin-left: 8px;
-                border-radius: 999px;
-                border: 1px solid transparent;
-                background: transparent;
-                color: var(--slt-text-3);
-                font-size: 14px;
-                line-height: 1;
-                cursor: pointer;
-                opacity: 0;
-                pointer-events: none;
-                transition: opacity 0.2s var(--slt-ease), color 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
-            }
-            .slt-field-reset.slt-field-reset-on {
-                opacity: 1;
-                pointer-events: auto;
-                border-color: var(--slt-hairline-strong);
-                color: var(--slt-text-2);
-            }
-            .slt-field-reset.slt-field-reset-on:hover {
-                color: var(--slt-text);
-                border-color: rgba(255, 255, 255, 0.32);
-            }
-            .slt-modal-field {
-                display: grid;
-                grid-template-columns: minmax(180px, 1fr) minmax(220px, 300px);
-                align-items: center;
-                gap: 18px;
-                padding: 13px 14px;
-                border-radius: var(--slt-radius-sm);
-                position: relative;
-                transition: background 0.2s var(--slt-ease);
-            }
-            .slt-modal-field:hover { background: var(--slt-surface); }
-            .slt-modal-field::after {
-                content: '';
-                position: absolute;
-                left: 14px; right: 14px; bottom: 0;
-                height: 1px;
-                background: var(--slt-hairline);
-            }
-            .slt-modal-field:hover::after { opacity: 0; }
-            .slt-modal-field-copy {
-                min-width: 0;
-            }
-            .slt-modal-field-copy label {
-                display: block;
-                font-size: 14px;
-                font-weight: 600;
-                letter-spacing: 0.005em;
-                color: var(--slt-text);
-                line-height: 1.35;
-            }
-            .slt-modal-field-control {
-                display: flex;
-                align-items: center;
-                justify-content: flex-end;
-                min-width: 0;
-            }
-            .slt-modal-field select,
-            .slt-modal-field input[type="text"],
-            .slt-modal-field input[type="password"] {
-                width: 100%;
-                min-height: 40px;
-                padding: 9px 13px;
-                border-radius: var(--slt-radius-sm);
-                border: 1px solid var(--slt-hairline-strong);
-                background-color: var(--slt-surface);
-                color: var(--slt-text);
-                font-size: 14px;
-                font-weight: 500;
-                box-sizing: border-box;
-                transition: border-color 0.2s var(--slt-ease), background-color 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease);
-                cursor: pointer;
-            }
-            .slt-modal-field select {
-                appearance: none;
-                -webkit-appearance: none;
-                padding-right: 38px;
-                background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.55)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
-                background-repeat: no-repeat;
-                background-position: right 13px center;
-                background-size: 14px 14px;
-            }
-            .slt-modal-field select option,
-            .slt-modal-field select optgroup {
-                background-color: #1c1c20;
-                color: var(--slt-text);
-                font-weight: 500;
-            }
-            .slt-modal-field select:hover,
-            .slt-modal-field input[type="text"]:hover,
-            .slt-modal-field input[type="password"]:hover {
-                background-color: var(--slt-surface-hover);
-                border-color: rgba(255, 255, 255, 0.22);
-            }
-            .slt-modal-field select:focus,
-            .slt-modal-field input[type="text"]:focus,
-            .slt-modal-field input[type="password"]:focus {
-                outline: none;
-                border-color: rgba(255, 255, 255, 0.4);
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-            }
-            .slt-toggle {
-                position: relative;
-                width: 46px;
-                height: 27px;
-                flex-shrink: 0;
-            }
-            .slt-toggle input {
-                opacity: 0;
-                width: 0;
-                height: 0;
-            }
-            .slt-toggle-slider {
-                position: absolute;
-                cursor: pointer;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background-color: rgba(255, 255, 255, 0.1);
-                box-shadow: var(--slt-gloss);
-                transition: background-color 0.28s var(--slt-ease);
-                border-radius: 999px;
-            }
-            .slt-toggle-slider:before {
-                position: absolute;
-                content: "";
-                height: 21px;
-                width: 21px;
-                left: 3px;
-                bottom: 3px;
-                background-color: #fff;
-                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-                transition: transform 0.28s var(--slt-ease);
-                border-radius: 50%;
-            }
-            .slt-toggle input:checked + .slt-toggle-slider {
-                background-color: var(--slt-accent);
-            }
-            .slt-toggle input:checked + .slt-toggle-slider:before {
-                transform: translateX(19px);
-            }
-            .slt-button {
-                padding: 10px 20px;
-                border-radius: 999px;
-                border: 1px solid transparent;
-                background: rgba(255, 255, 255, 0.92);
-                color: #000;
-                font-size: 13px;
-                font-weight: 700;
-                letter-spacing: 0.01em;
-                cursor: pointer;
-                transition: transform 0.18s var(--slt-ease), background 0.2s var(--slt-ease), box-shadow 0.2s var(--slt-ease), border-color 0.2s var(--slt-ease);
-                white-space: nowrap;
-                box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
-            }
-            .slt-button:hover {
-                transform: translateY(-1px);
-                background: #fff;
-                box-shadow: 0 6px 18px -4px rgba(0, 0, 0, 0.5);
-            }
-            .slt-button:active {
-                transform: translateY(0) scale(0.985);
-            }
-            .slt-button.secondary {
-                background: var(--slt-surface);
-                border: 1px solid var(--slt-hairline-strong);
-                color: var(--slt-text);
-                box-shadow: var(--slt-gloss);
-            }
-            .slt-button.secondary:hover {
-                background: var(--slt-surface-hover);
-                border-color: rgba(255, 255, 255, 0.28);
-                box-shadow: var(--slt-gloss), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
-            }
-            .slt-button.danger {
-                background: rgba(255, 90, 90, 0.14);
-                border: 1px solid rgba(255, 90, 90, 0.32);
-                color: #ff8a8a;
-                box-shadow: none;
-            }
-            .slt-button.danger:hover {
-                background: rgba(255, 90, 90, 0.26);
-                border-color: rgba(255, 90, 90, 0.5);
-                color: #fff;
-            }
-            .slt-button:disabled {
-                cursor: default;
-                opacity: 0.5;
-                transform: none;
-                box-shadow: none;
-            }
-            .slt-description {
-                display: block;
-                font-size: 12.5px;
-                color: var(--slt-text-3);
-                margin-top: 3px;
-                line-height: 1.4;
-            }
-            .slt-modal-actions,
-            .slt-modal-footer {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                flex-wrap: wrap;
-                padding-top: 16px;
-            }
-            .slt-modal-actions {
-                border-top: 1px solid var(--slt-hairline);
-                margin-top: 10px;
-                padding: 16px 6px 4px;
-            }
-            .slt-modal-footer { padding: 4px 6px 0; }
-            .slt-modal-cache-actions {
-                display: flex;
-                gap: 8px;
-                flex-wrap: wrap;
-                justify-content: flex-end;
-            }
-            .slt-modal-footer {
-                color: var(--spice-subtext);
-                font-size: 13px;
-                padding-bottom: 2px;
-            }
-            .slt-modal-footer-buttons {
-                display: flex;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .slt-modal-meta {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-wrap: wrap;
-            }
-            .slt-modal-shortcut {
-                color: var(--spice-subtext);
-                font-size: 12px;
-                opacity: 0.7;
-                padding-top: 2px;
-            }
-            .slt-conn-card {
-                margin: 6px 2px 2px;
-                padding: 14px 16px;
-                border-radius: var(--slt-radius-sm);
-                background: var(--slt-surface);
-                box-shadow: inset 0 0 0 1px var(--slt-hairline);
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-            }
-            .slt-conn-head {
-                display: flex;
-                align-items: center;
-                gap: 9px;
-            }
-            .slt-conn-dot {
-                width: 9px;
-                height: 9px;
-                border-radius: 999px;
-                background: var(--slt-text-3);
-                flex-shrink: 0;
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
-            }
-            .slt-conn-dot.slt-conn-connecting,
-            .slt-conn-dot.slt-conn-reconnecting { background: #ffd35c; }
-            .slt-conn-dot.slt-conn-error { background: #f1556c; }
-            .slt-conn-dot.slt-conn-connected { background: #1ed760; }
-            .slt-conn-dot.slt-conn-great { background: #1ed760; }
-            .slt-conn-dot.slt-conn-ok { background: #ffd35c; }
-            .slt-conn-dot.slt-conn-bad { background: #ff9f45; }
-            .slt-conn-dot.slt-conn-horrible { background: #f1556c; }
-            .slt-conn-title {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--slt-text);
-            }
-            .slt-conn-state {
-                margin-left: auto;
-                font-size: 12px;
-                color: var(--slt-text-2);
-            }
-            .slt-conn-metrics {
-                display: flex;
-                gap: 10px;
-            }
-            .slt-conn-metric {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                padding: 10px 12px;
-                border-radius: var(--slt-radius-sm);
-                background: rgba(0, 0, 0, 0.18);
-            }
-            .slt-conn-value {
-                font-size: 17px;
-                font-weight: 600;
-                color: var(--slt-text);
-                font-variant-numeric: tabular-nums;
-            }
-            .slt-conn-value.slt-conn-great { color: #1ed760; }
-            .slt-conn-value.slt-conn-ok { color: #ffd35c; }
-            .slt-conn-value.slt-conn-bad { color: #ff9f45; }
-            .slt-conn-value.slt-conn-horrible { color: #f1556c; }
-            .slt-conn-label {
-                font-size: 11px;
-                letter-spacing: 0.02em;
-                color: var(--slt-text-3);
-            }
-            @media (max-width: 620px) {
-                .slt-modal-field {
-                    grid-template-columns: 1fr;
-                    gap: 8px;
-                }
-                .slt-modal-field-control {
-                    justify-content: stretch;
-                }
-            }
-        </style>
-
-        <div id="slt-settings-panel-mount"></div>
-
-        ${renderConnectionStatusMarkup()}
-
-        <div class="slt-modal-actions" style="flex-direction: column; align-items: stretch; gap: 8px;">
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-view-cache" style="flex: 1;">View Translation Cache</button>
-                <button class="slt-button secondary" id="slt-view-spicy-lyrics-cache" type="button" style="flex: 1;">View Spicy Lyrics Cache</button>
-            </div>
-            <div style="display: flex; gap: 8px; width: 100%;">
-                <button class="slt-button secondary" id="slt-clear-spicy-lyrics-cache" type="button" style="flex: 1;">Clear Spicy Lyrics Cache</button>
-                <button class="slt-button danger" id="slt-clear-translation-cache" type="button" style="flex: 1;">Clear All Cached Translations</button>
-            </div>
-        </div>
-
-        <div class="slt-modal-footer">
-            <div>
-                <span style="font-size: 14px; color: var(--spice-subtext);">Version ${VERSION}</span>
-                ${(() => { const h = getContentHashShort(); return h ? `<span style="margin: 0 8px; color: var(--spice-subtext);">·</span><span style="font-size: 12px; color: var(--spice-subtext); font-family: 'JetBrains Mono','Consolas',monospace;">${h}</span>` : ''; })()}
-                <span style="margin: 0 8px; color: var(--spice-subtext);">•</span>
-                <a href="${REPO_URL}" target="_blank" style="font-size: 14px; color: var(--spice-button);">GitHub</a>
-            </div>
-            <div class="slt-modal-footer-buttons">
-                <button class="slt-button secondary" id="slt-view-changelog-popup">View Changelog</button>
-                <button class="slt-button secondary" id="slt-check-updates">Check for Updates</button>
-            </div>
-        </div>
-
-        <div class="slt-modal-shortcut">Keyboard shortcut: Alt+T to toggle translation</div>
-    `;
-
-    const settingsMount = container.querySelector('#slt-settings-panel-mount');
-    settingsMount?.replaceWith(buildModalSettingsPanel());
-
-    setTimeout(() => {
-        bindModalCacheActions(container);
-        startConnectionStatusUpdates(container);
-        const viewCacheButton = container.querySelector('#slt-view-cache') as HTMLButtonElement;
-        const viewChangelogPopupButton = container.querySelector('#slt-view-changelog-popup') as HTMLButtonElement;
-        const checkUpdatesButton = container.querySelector('#slt-check-updates') as HTMLButtonElement;
-
-        viewCacheButton?.addEventListener('click', () => {
-            hideModal();
-            setTimeout(() => openCacheViewer(), 150);
-        });
-
-        viewChangelogPopupButton?.addEventListener('click', async () => {
-            viewChangelogPopupButton.textContent = 'Loading...';
-            viewChangelogPopupButton.disabled = true;
-            hideModal();
-            try {
-                await showCurrentChangelog();
-            } catch (e) {
-                if (Spicetify.showNotification) {
-                    Spicetify.showNotification('Failed to load changelog', true);
-                }
-            } finally {
-                viewChangelogPopupButton.textContent = 'View Changelog';
-                viewChangelogPopupButton.disabled = false;
-            }
-        });
-
-        checkUpdatesButton?.addEventListener('click', () => {
-            runManualUpdateCheck(checkUpdatesButton, {
-                beforePrompt: async () => {
-                    hideModal();
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                }
-            });
-        });
-    }, 0);
-
-    return container;
 }
 
 function formatBytes(bytes: number): string {
@@ -1391,9 +611,7 @@ async function playCachedTrack(trackUri: string): Promise<boolean> {
 async function openCachedLyricsViewer(trackUri: string, targetLang: string, sourceLang: string): Promise<void> {
     const trackCache = getTrackCache(trackUri, targetLang);
     if (!trackCache) {
-        if (Spicetify.showNotification) {
-            Spicetify.showNotification('Could not load cached translation for this track', true);
-        }
+        notify('Could not load cached translation for this track', true);
         return;
     }
     const translatedLines = trackCache.lines || [];
@@ -1630,9 +848,9 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
 
     if (Spicetify.PopupModal) {
         displayModal({
-            title: 'Cached Lyrics Viewer',
+            title: 'Cached lyrics',
             content,
-            isLarge: true
+            size: 'xl'
         });
     }
 
@@ -2111,9 +1329,7 @@ function createCacheViewerUI(): HTMLElement {
 
                 try {
                     const played = await playCachedTrack(uri);
-                    if (Spicetify.showNotification) {
-                        Spicetify.showNotification(played ? 'Opening cached track' : 'Unable to play track directly', !played);
-                    }
+                    notify(played ? 'Opening cached track' : 'Unable to play track directly', !played);
                 } finally {
                     button.disabled = false;
                     button.textContent = previousText || 'Play';
@@ -2139,9 +1355,7 @@ function createCacheViewerUI(): HTMLElement {
                     await new Promise(resolve => setTimeout(resolve, 120));
                     await openCachedLyricsViewer(uri, lang, sourceLang);
                 } catch (error) {
-                    if (Spicetify.showNotification) {
-                        Spicetify.showNotification('Failed to open cached lyrics viewer', true);
-                    }
+                    notify('Failed to open cached lyrics viewer', true);
                 } finally {
                     button.disabled = false;
                     button.textContent = previousText || 'View Lyrics';
@@ -2200,10 +1414,10 @@ function createCacheViewerUI(): HTMLElement {
     return container;
 }
 
-function openCacheViewer(): void {
+export function openCacheViewer(): void {
     if (Spicetify.PopupModal) {
         displayModal({
-            title: 'Translation Cache',
+            title: 'Translation cache',
             content: createCacheViewerUI(),
             isLarge: true
         });
@@ -2591,9 +1805,7 @@ function openCacheViewer(): void {
                 try {
                     const uri = `spotify:track:${trackId}`;
                     const played = await playCachedTrack(uri);
-                    if (Spicetify.showNotification) {
-                        Spicetify.showNotification(played ? 'Opening cached track' : 'Unable to play track directly', !played);
-                    }
+                    notify(played ? 'Opening cached track' : 'Unable to play track directly', !played);
                 } finally {
                     button.disabled = false;
                     button.textContent = previousText || 'Play';
@@ -2815,9 +2027,9 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
 
     if (Spicetify.PopupModal) {
         displayModal({
-            title: 'Spicy Lyrics Entry',
+            title: 'Spicy Lyrics entry',
             content,
-            isLarge: true
+            size: 'xl'
         });
     }
 
@@ -2850,10 +2062,10 @@ function openSpicyLyricsEntryInspector(item: SpicyLyricsCacheItem): void {
     });
 }
 
-async function openSpicyLyricsCacheViewer(): Promise<void> {
+export async function openSpicyLyricsCacheViewer(): Promise<void> {
     if (Spicetify.PopupModal) {
         displayModal({
-            title: 'Spicy Lyrics Cache',
+            title: 'Spicy Lyrics cache',
             content: (() => {
                 const div = document.createElement('div');
                 div.style.padding = '20px';
@@ -2867,7 +2079,7 @@ async function openSpicyLyricsCacheViewer(): Promise<void> {
         const ui = await createSpicyLyricsCacheViewerUI();
 
         displayModal({
-            title: 'Spicy Lyrics Cache',
+            title: 'Spicy Lyrics cache',
             content: ui,
             isLarge: true
         });
@@ -2876,15 +2088,28 @@ async function openSpicyLyricsCacheViewer(): Promise<void> {
 
 const SLT_MENU_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
 
-export function openSettingsModal(): void {
-    if (Spicetify.PopupModal) {
-        displayModal({
-            title: 'Spicy Lyric Translator Settings',
-            content: createSettingsUI(),
-            isLarge: true
-        });
+export function openSettingsModal(options: { reveal?: string; tab?: TabId; category?: string } = {}): void {
+    if (isSettingsOpen()) {
+        if (options.reveal) revealSetting(options.reveal);
+        else if (options.tab) goToSettings(options.tab, options.category);
+        return;
     }
+    openDialog({
+        title: 'Spicy Lyric Translator settings',
+        bare: true,
+        size: 'xl',
+        className: 'slt-settings-dialog',
+        content: createSettingsShell({ tab: options.tab, category: options.category }),
+        onClose: () => destroySettingsShell(),
+    });
+    if (options.reveal) revealSetting(options.reveal);
 }
+
+registerSettingLinker({
+    match: matchSettingInText,
+    byId: settingById,
+    reveal: (id) => openSettingsModal({ reveal: id }),
+});
 
 export async function registerSettings(): Promise<void> {
     while (typeof Spicetify === 'undefined' || !Spicetify.Platform) {
@@ -2900,7 +2125,7 @@ export async function registerSettings(): Promise<void> {
                     new (Spicetify as any).Menu.Item(
                         'SLT Settings',
                         false,
-                        openSettingsModal,
+                        () => openSettingsModal(),
                         SLT_MENU_ICON
                     ).register();
                     return true;

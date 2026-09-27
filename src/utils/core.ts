@@ -35,6 +35,7 @@ import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese
 import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
+import { notify, dismissNotification } from './notify';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 import { cleanLyricText, normalizeLyricMatchKey } from './text';
 
@@ -786,9 +787,13 @@ export async function translateCurrentLyrics(): Promise<void> {
     if (isOffline()) {
         const cacheStats = getCacheStats();
         if (cacheStats.entries === 0) {
-            if (state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('Offline - translations unavailable', true);
-            }
+            notify({
+                kind: 'warning',
+                key: 'slt-offline',
+                title: "You're offline",
+                description: 'Translations come back once the connection does. Songs you already translated still work.',
+                inbox: false,
+            });
             return;
         }
     }
@@ -837,8 +842,8 @@ export async function translateCurrentLyrics(): Promise<void> {
                     domLyricsKey,
                     preApiSkipCheck.detectedLanguage
                 );
-                if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
-                    Spicetify.showNotification(preApiSkipCheck.reason || 'Lyrics already in target language');
+                if (shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
+                    notify({ kind: 'info', key: 'slt-skip', title: preApiSkipCheck.reason || 'Lyrics already in target language' });
                 }
                 return;
             }
@@ -900,8 +905,14 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         if (!sourceSelection.canTranslate) {
             removeTranslations();
-            if (romanizationOn && state.showNotifications && Spicetify.showNotification) {
-                Spicetify.showNotification('Original lyrics unavailable while romanization is enabled', true);
+            if (romanizationOn) {
+                notify({
+                    kind: 'warning',
+                    key: 'slt-romanization-source',
+                    title: 'Original lyrics unavailable',
+                    description: 'Spicy Lyrics is only showing the romanized line for this song, so there is nothing to translate from.',
+                    inbox: false,
+                });
             }
             return;
         }
@@ -984,8 +995,8 @@ export async function translateCurrentLyrics(): Promise<void> {
                     skipCheck.detectedLanguage
                 );
                 restoreButtonState();
-                if (state.showNotifications && Spicetify.showNotification && shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
-                    Spicetify.showNotification(skipCheck.reason || 'Lyrics already in target language');
+                if (shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
+                    notify({ kind: 'info', key: 'slt-skip', title: skipCheck.reason || 'Lyrics already in target language' });
                 }
                 return;
             } else {
@@ -1241,15 +1252,18 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         void fillVisibleGaps();
 
-        if (state.showNotifications && Spicetify.showNotification) {
-            const notif = buildTranslationNotification(translations, currentTrackUri, state.targetLanguage);
-            if (notif) Spicetify.showNotification(notif);
-        }
+        dismissNotification('slt-translate-failed');
+        const notif = buildTranslationNotification(translations, currentTrackUri, state.targetLanguage);
+        if (notif) notify({ kind: 'success', key: 'slt-translated', title: notif });
     } catch (err) {
         error('Translation failed:', err);
-        if (state.showNotifications && Spicetify.showNotification) {
-            Spicetify.showNotification('Translation failed. Please try again.', true);
-        }
+        notify({
+            kind: 'error',
+            key: 'slt-translate-failed',
+            title: "Couldn't translate this song",
+            description: err instanceof Error && err.message ? err.message : 'The translation service did not answer.',
+            actions: [{ label: 'Try again', primary: true, onClick: () => { forceRetranslate(); } }],
+        });
         setButtonErrorState(true);
         setTimeout(() => setButtonErrorState(false), 3000);
     } finally {

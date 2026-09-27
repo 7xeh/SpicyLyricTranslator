@@ -1,8 +1,10 @@
 import { storage } from './storage';
 import { debug, warn, error as logError } from './debug';
-import { displayModal, hideModal } from './modal';
+import { el, text, openDialog, openDock, activeDock, prefersReducedMotion, SurfaceAction, SurfaceHandle } from './surface';
+import { toast, dismissToast, removeInboxEntries, registerInboxAction, ToastHandle } from './toast';
 
 declare const __VERSION__: string;
+declare const __BUILD_HASH__: string;
 
 const METADATA_KEYS = [
     '_spicy_lyric_translater_metadata',
@@ -56,7 +58,8 @@ const STORAGE_KEYS = {
     pending: 'pending-update',
     snooze: 'update-snooze',
     lastVersion: 'last-known-version',
-    lastHash: 'last-known-hash'
+    lastHash: 'last-known-hash',
+    skip: 'update-skip'
 } as const;
 
 const LEGACY_STORAGE_KEYS = [
@@ -98,6 +101,7 @@ interface PendingUpdate {
     fromHash: string;
     changelog: string;
     createdAt: number;
+    resume?: boolean;
 }
 
 let isInstalling = false;
@@ -142,6 +146,17 @@ export function getContentHashShort(length: number = 8): string {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : '';
 }
 
+export function getBuildHash(): string {
+    return typeof __BUILD_HASH__ === 'string' && !__BUILD_HASH__.startsWith('SLT_BUILD_HASH_PLACEHOLDER') ? __BUILD_HASH__ : '';
+}
+
+export function getDisplayHash(): { hash: string; source: 'delivered' | 'build' | '' } {
+    if (LOADED_HASH) return { hash: LOADED_HASH, source: 'delivered' };
+    const build = getBuildHash();
+    if (build) return { hash: build, source: 'build' };
+    return { hash: '', source: '' };
+}
+
 export function isLoaderMode(): boolean {
     return IS_LOADER_MODE;
 }
@@ -177,12 +192,6 @@ async function computeSHA256(text: string): Promise<string | null> {
 
 function wait(ms: number): Promise<void> {
     return new Promise(resolve => window.setTimeout(resolve, ms));
-}
-
-function notify(message: string, isError: boolean = false): void {
-    try {
-        Spicetify.showNotification?.(message, isError);
-    } catch {}
 }
 
 async function fetchSelfHostedRelease(): Promise<RemoteRelease | null> {
@@ -308,7 +317,18 @@ function getPromptKey(result: UpdateCheckResult): string | null {
     return null;
 }
 
+function runCheck(trigger: UpdateTrigger): Promise<UpdateCheckResult> {
+    if (!inFlightCheck) {
+        lastCheckTime = Date.now();
+        inFlightCheck = resolveUpdateStatus(trigger).finally(() => {
+            inFlightCheck = null;
+        });
+    }
+    return inFlightCheck;
+}
+
 function isSnoozed(key: string): boolean {
+    if (storage.get(STORAGE_KEYS.skip) === key) return true;
     try {
         const raw = storage.get(STORAGE_KEYS.snooze);
         if (!raw) return false;
@@ -319,16 +339,13 @@ function isSnoozed(key: string): boolean {
     }
 }
 
-function snooze(key: string): void {
-    storage.set(STORAGE_KEYS.snooze, JSON.stringify({ key, until: Date.now() + SNOOZE_MS }));
+function snooze(key: string, ms: number = SNOOZE_MS): void {
+    storage.set(STORAGE_KEYS.snooze, JSON.stringify({ key, until: Date.now() + ms }));
 }
 
-function isUpdaterModalOpen(): boolean {
-    try {
-        return !!document.querySelector('.slt-updater-modal');
-    } catch {
-        return false;
-    }
+function clearSnooze(): void {
+    storage.remove(STORAGE_KEYS.snooze);
+    storage.remove(STORAGE_KEYS.skip);
 }
 
 export async function checkForUpdates(options: { trigger?: UpdateTrigger } | boolean = {}): Promise<UpdateCheckResult> {
@@ -336,14 +353,7 @@ export async function checkForUpdates(options: { trigger?: UpdateTrigger } | boo
         ? (options ? 'manual' : 'auto')
         : (options.trigger ?? 'manual');
 
-    if (!inFlightCheck) {
-        lastCheckTime = Date.now();
-        inFlightCheck = resolveUpdateStatus(trigger).finally(() => {
-            inFlightCheck = null;
-        });
-    }
-
-    const result = await inFlightCheck;
+    const result = await runCheck(trigger);
 
     if (result.status === 'error') {
         increaseBackoff();
@@ -354,11 +364,15 @@ export async function checkForUpdates(options: { trigger?: UpdateTrigger } | boo
     const key = getPromptKey(result);
     if (key && !isInstalling) {
         if (trigger === 'manual') {
-            storage.remove(STORAGE_KEYS.snooze);
-            presentPrompt(result);
-        } else if (!isSnoozed(key) && !isUpdaterModalOpen()) {
-            presentPrompt(result);
+            clearSnooze();
+            presentPrompt(result, 'manual');
+        } else if (!isSnoozed(key)) {
+            presentPrompt(result, 'auto');
+        } else if (storage.get(STORAGE_KEYS.skip) !== key) {
+            setWaiting(result);
         }
+    } else if (!key) {
+        setWaiting(null);
     }
 
     if (schedulerStarted && !isInstalling) {
@@ -375,7 +389,7 @@ export async function getUpdateInfo(): Promise<{
     latestVersion: string | null;
     releaseUrl: string | null;
 } | null> {
-    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus('manual');
+    const result = await runCheck('manual');
     if (result.status === 'error') return null;
 
     return {
@@ -392,45 +406,55 @@ export async function isUpdateAvailable(): Promise<boolean> {
     return !!(info?.hasUpdate || info?.hasHotfix);
 }
 
-export async function runManualUpdateCheck(button: HTMLButtonElement | null, options: { beforePrompt?: () => Promise<void> | void } = {}): Promise<UpdateCheckResult | null> {
+export async function runManualUpdateCheck(button: HTMLButtonElement | null): Promise<UpdateCheckResult | null> {
     if (button?.disabled) return null;
 
-    const idleText = button?.dataset.sltIdleText || button?.textContent || 'Check for Updates';
-    const setButton = (text: string, disabled: boolean) => {
+    const idleText = button?.dataset.sltIdleText || button?.textContent || 'Check for updates';
+    const setButton = (label: string, disabled: boolean) => {
         if (!button) return;
         button.dataset.sltIdleText = idleText;
-        button.textContent = text;
+        button.textContent = label;
         button.disabled = disabled;
     };
-    const restoreLater = (text: string) => {
-        setButton(text, true);
+    const restoreLater = (label: string) => {
+        setButton(label, true);
         window.setTimeout(() => setButton(idleText, false), 2500);
     };
 
-    setButton('Checking...', true);
+    setButton('Checking…', true);
 
-    const result = inFlightCheck ? await inFlightCheck : await resolveUpdateStatus('manual');
+    const result = await runCheck('manual');
 
     if (result.status === 'update' || result.status === 'hotfix') {
         setButton(idleText, false);
-        try {
-            await options.beforePrompt?.();
-        } catch {}
-        storage.remove(STORAGE_KEYS.snooze);
+        clearSnooze();
         resetBackoff();
-        presentPrompt(result);
+        presentPrompt(result, 'manual');
         return result;
     }
 
     if (result.status === 'current') {
         resetBackoff();
         restoreLater('Up to date');
-        notify(`You're on the latest version (v${result.current.text})`);
+        setWaiting(null);
+        toast({
+            kind: 'success',
+            key: 'slt-update-check',
+            title: "You're up to date",
+            description: `v${result.current.text} is the latest Spicy Lyric Translator.`,
+        });
         return result;
     }
 
+    increaseBackoff();
     restoreLater('Check failed');
-    notify(`Couldn't check for updates: ${result.message}`, true);
+    toast({
+        kind: 'error',
+        key: 'slt-update-check',
+        title: "Couldn't check for updates",
+        description: result.message,
+        actions: [{ label: 'Try again', onClick: () => { runManualUpdateCheck(button); } }],
+    });
     return result;
 }
 
@@ -511,31 +535,133 @@ function readPending(): PendingUpdate | null {
     }
 }
 
-async function installUpdate(result: Extract<UpdateCheckResult, { status: 'update' | 'hotfix' }>, content: HTMLElement): Promise<void> {
+type ActionableResult = Extract<UpdateCheckResult, { status: 'update' | 'hotfix' }>;
+
+interface PlaybackInfo {
+    uri: string;
+    name: string;
+    duration: number;
+    progress: number;
+    playing: boolean;
+}
+
+function playbackInfo(): PlaybackInfo | null {
+    try {
+        const player: any = Spicetify.Player;
+        const item = player?.data?.item;
+        if (!item?.uri) return null;
+        const duration = Number(player.getDuration?.() ?? item.duration?.milliseconds ?? player.data?.duration ?? 0) || 0;
+        return {
+            uri: item.uri,
+            name: item.name || 'this song',
+            duration,
+            progress: Number(player.getProgress?.() ?? 0) || 0,
+            playing: !!player.isPlaying?.(),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function canWaitForSong(): boolean {
+    const info = playbackInfo();
+    return !!info && info.playing && info.duration > 0 && info.duration - info.progress > 8000;
+}
+
+function formatClock(ms: number): string {
+    const total = Math.max(0, Math.round(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+let songWaiter: (() => void) | null = null;
+let waitToast: ToastHandle | null = null;
+
+function waitForSongEnd(onEnd: () => void, onTick: (info: PlaybackInfo) => void): () => void {
+    const startUri = playbackInfo()?.uri;
+    let done = false;
+    const onSong = () => finish();
+    const interval = window.setInterval(() => {
+        const info = playbackInfo();
+        if (!info) return;
+        if (startUri && info.uri !== startUri) {
+            finish();
+            return;
+        }
+        onTick(info);
+    }, 1000);
+    const cleanup = () => {
+        window.clearInterval(interval);
+        try { Spicetify.Player.removeEventListener('songchange', onSong); } catch {}
+    };
+    const finish = () => {
+        if (done) return;
+        done = true;
+        cleanup();
+        onEnd();
+    };
+    try { Spicetify.Player.addEventListener('songchange', onSong); } catch {}
+    const first = playbackInfo();
+    if (first) onTick(first);
+    return () => {
+        if (done) return;
+        done = true;
+        cleanup();
+    };
+}
+
+function cancelSongWait(): void {
+    songWaiter?.();
+    songWaiter = null;
+    waitToast = null;
+    dismissToast('slt-update-wait');
+}
+
+let waitingResult: ActionableResult | null = null;
+
+function setWaiting(result: UpdateCheckResult | null): void {
+    waitingResult = result && (result.status === 'update' || result.status === 'hotfix') ? result : null;
+    try {
+        document.body.classList.toggle('slt-update-waiting', !!waitingResult);
+    } catch {}
+    if (!waitingResult) removeInboxEntries(e => e.id === 'slt-update');
+}
+
+export function hasWaitingUpdate(): { kind: PromptKind; version: string } | null {
+    return waitingResult ? { kind: waitingResult.status, version: waitingResult.remote.version.text } : null;
+}
+
+export function openWaitingUpdate(origin?: DOMRect | null): void {
+    if (waitingResult) {
+        openUpdateCard(waitingResult, origin);
+        return;
+    }
+    checkForUpdates({ trigger: 'manual' }).catch(() => {});
+}
+
+registerInboxAction('open-update', () => openWaitingUpdate());
+
+interface InstallUi {
+    progress: (percent: number, label: string) => void;
+    fail: (message: string) => void;
+}
+
+async function installUpdate(result: ActionableResult, ui: InstallUi, options: { resume?: boolean } = {}): Promise<void> {
     if (isInstalling) return;
     isInstalling = true;
+    cancelSongWait();
 
     if (checkTimer !== null) {
         window.clearTimeout(checkTimer);
         checkTimer = null;
     }
 
-    const progress = content.querySelector('.slt-upd-progress') as HTMLElement | null;
-    const progressFill = content.querySelector('.slt-upd-progress-fill') as HTMLElement | null;
-    const progressText = content.querySelector('.slt-upd-progress-text') as HTMLElement | null;
-    const buttons = content.querySelector('.slt-upd-buttons') as HTMLElement | null;
-
-    const step = async (percent: number, text: string, delayMs: number) => {
-        if (progressFill) progressFill.style.width = `${percent}%`;
-        if (progressText) progressText.textContent = text;
+    const step = async (percent: number, label: string, delayMs: number) => {
+        ui.progress(percent, label);
         await wait(delayMs);
     };
 
-    if (progress) progress.style.display = 'block';
-    if (buttons) buttons.style.display = 'none';
-
     try {
-        await step(20, 'Preparing update...', 250);
+        await step(18, 'Getting things ready…', 220);
 
         let changelog = result.remote.changelog;
         if (!changelog) {
@@ -548,16 +674,18 @@ async function installUpdate(result: Extract<UpdateCheckResult, { status: 'updat
             fromVersion: result.current.text,
             fromHash: LOADED_HASH,
             changelog,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            resume: !!options.resume,
         };
 
         if (!storage.set(STORAGE_KEYS.pending, JSON.stringify(pending))) {
             throw new Error('Could not save update state');
         }
-        storage.remove(STORAGE_KEYS.snooze);
+        clearSnooze();
+        removeInboxEntries(e => e.id === 'slt-update');
 
-        await step(70, result.status === 'hotfix' ? 'Hotfix ready' : `v${pending.version} ready`, 300);
-        await step(100, 'Reloading Spotify...', 350);
+        await step(70, result.status === 'hotfix' ? 'Patch ready' : `v${pending.version} ready`, 280);
+        await step(100, 'Reloading Spotify…', 320);
 
         clearLoaderMetadata();
         window.location.reload();
@@ -565,115 +693,306 @@ async function installUpdate(result: Extract<UpdateCheckResult, { status: 'updat
         logError('Update install failed:', e);
         storage.remove(STORAGE_KEYS.pending);
         isInstalling = false;
-
-        if (progress) {
-            progress.innerHTML = `<div class="slt-upd-error">Update couldn't be installed. Restart Spotify to try again.</div>`;
-        }
-        if (buttons) {
-            buttons.style.display = 'flex';
-            buttons.innerHTML = `
-                <button class="slt-upd-btn secondary" type="button" data-action="close">Close</button>
-                <button class="slt-upd-btn primary" type="button" data-action="reload">Reload Now</button>
-            `;
-            buttons.querySelector('[data-action="close"]')?.addEventListener('click', () => hideModal());
-            buttons.querySelector('[data-action="reload"]')?.addEventListener('click', () => window.location.reload());
-        }
-
+        ui.fail("The update couldn't be installed. Restart Spotify to try again.");
         if (schedulerStarted) scheduleNextCheck();
     }
 }
 
-function presentPrompt(result: UpdateCheckResult): void {
-    if (result.status !== 'update' && result.status !== 'hotfix') return;
+function backgroundUi(): InstallUi {
+    return {
+        progress: () => {},
+        fail: (message) => { toast({ kind: 'error', title: "Update didn't install", description: message }); },
+    };
+}
 
+function versionLabels(result: ActionableResult): { from: string; to: string } {
+    if (result.status === 'hotfix') {
+        return {
+            from: `v${result.current.text} · ${getContentHashShort() || 'current'}`,
+            to: `v${result.remote.version.text} · ${result.hash.substring(0, 8)}`,
+        };
+    }
+    return { from: `v${result.current.text}`, to: `v${result.remote.version.text}` };
+}
+
+function versionRow(from: string, to: string): HTMLElement {
+    return el('div', { class: 'slt-upd-versions' },
+        el('span', { class: 'slt-upd-chip', text: from }),
+        el('span', { class: 'slt-upd-flow', 'aria-hidden': 'true' }),
+        el('span', { class: 'slt-upd-chip slt-upd-chip-to', text: to }),
+    );
+}
+
+function notesBlock(changelogHtml: string, expanded: boolean): { node: HTMLElement; content: HTMLElement; action: SurfaceAction } {
+    const content = el('div', { class: 'slt-upd-notes-content', html: changelogHtml });
+    const node = el('div', { class: 'slt-upd-notes' }, el('div', { class: 'slt-upd-notes-title', text: 'Changelog' }), content);
+    node.hidden = !expanded;
+    const action: SurfaceAction = {
+        id: 'notes',
+        label: expanded ? 'Hide changelog' : 'Show changelog',
+        kind: 'quiet',
+        keepOpen: true,
+        onClick: (handle) => {
+            const open = node.hidden;
+            node.hidden = !open;
+            const label = handle.footer.querySelector('[data-action="notes"] .slt-ui-btn-label');
+            if (label) label.textContent = open ? 'Hide changelog' : 'Show changelog';
+            handle.footer.querySelector('[data-action="notes"]')?.setAttribute('aria-expanded', String(open));
+            if (open) {
+                node.scrollTop = 0;
+                if (!prefersReducedMotion()) {
+                    node.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: 'ease-out' });
+                }
+            }
+        },
+    };
+    return { node, content, action };
+}
+
+function progressRing(): { node: HTMLElement; set: (fraction: number) => void } {
+    const node = el('span', { class: 'slt-upd-ring-wrap' });
+    node.innerHTML = '<svg class="slt-ui-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="slt-ui-ring-track" cx="10" cy="10" r="7.5"/><circle class="slt-ui-ring-fill" cx="10" cy="10" r="7.5" stroke-dasharray="47.12" stroke-dashoffset="47.12"/></svg>';
+    const fill = node.querySelector('.slt-ui-ring-fill') as SVGCircleElement;
+    return {
+        node,
+        set: (fraction) => fill.setAttribute('stroke-dashoffset', String(47.12 * (1 - Math.min(1, Math.max(0, fraction))))),
+    };
+}
+
+function presentPrompt(result: UpdateCheckResult, trigger: UpdateTrigger): void {
+    if (result.status !== 'update' && result.status !== 'hotfix') return;
+    setWaiting(result);
     const key = getPromptKey(result)!;
-    const existing = document.querySelector('.slt-updater-modal[data-prompt-key]') as HTMLElement | null;
-    if (existing?.dataset.promptKey === key) return;
+    if (activeCardKey === key && activeDock()) return;
+
+    if (trigger === 'manual') {
+        dismissToast('slt-update');
+        openUpdateCard(result);
+        return;
+    }
 
     const isHotfix = result.status === 'hotfix';
-    const installable = isHotfix || result.installable;
-    const remoteVersion = result.remote.version.text;
-
-    const fromLabel = isHotfix ? `v${result.current.text} · ${getContentHashShort() || 'current'}` : `v${result.current.text}`;
-    const toLabel = isHotfix ? `v${remoteVersion} · ${result.hash.substring(0, 8)}` : `v${remoteVersion}`;
-
-    const title = isHotfix ? 'Hotfix available' : 'Update available';
-    const subtitle = isHotfix
-        ? `A patched build of v${remoteVersion} is ready. It only takes a quick reload.`
-        : installable
-            ? `Spicy Lyric Translator v${remoteVersion} is ready to install.`
-            : `v${remoteVersion} is out. This copy was installed manually, so grab the new build from GitHub.`;
-
-    const primaryButton = installable
-        ? `<button class="slt-upd-btn primary" type="button" data-action="install">${isHotfix ? 'Apply Hotfix' : 'Install & Reload'}</button>`
-        : `<a class="slt-upd-btn primary" href="${escapeHtml(result.remote.releaseUrl)}" target="_blank" rel="noopener noreferrer" data-action="open">View Release</a>`;
-
-    const content = buildUpdaterModal({
-        variant: isHotfix ? 'hotfix' : 'update',
-        icon: isHotfix ? '🔧' : UPDATE_ICON_HTML,
-        title,
-        subtitle,
-        versionRow: { from: fromLabel, to: toLabel },
-        changelogHtml: result.remote.changelog
-            ? formatReleaseNotes(result.remote.changelog)
-            : '<span class="slt-upd-muted">Loading changelog...</span>',
-        buttonsHtml: `
-            <button class="slt-upd-btn secondary" type="button" data-action="later">Later</button>
-            ${primaryButton}
-        `,
-        withProgress: installable
+    let opened = false;
+    toast({
+        kind: 'update',
+        tone: isHotfix ? 'hotfix' : 'accent',
+        key: 'slt-update',
+        title: isHotfix ? `A patch for v${result.current.text} is ready` : `Spicy Lyric Translator v${result.remote.version.text} is out`,
+        description: isHotfix ? 'Same version, a few fixes. It takes one quick reload.' : `You're on v${result.current.text}.`,
+        duration: Infinity,
+        inboxAction: { id: 'open-update', label: 'Open' },
+        actions: [{
+            label: 'Details',
+            primary: true,
+            onClick: (_event, handle) => {
+                opened = true;
+                const rect = handle.rect();
+                handle.close('replace');
+                openUpdateCard(result, rect);
+            },
+        }],
+        onDismiss: () => {
+            if (!opened) snooze(key);
+        },
     });
-    content.dataset.promptKey = key;
+}
+
+let activeCardKey: string | null = null;
+
+function openUpdateCard(result: ActionableResult, origin?: DOMRect | null): void {
+    ensureUpdaterStyles();
+    dismissToast('slt-update');
+    const key = getPromptKey(result)!;
+    const isHotfix = result.status === 'hotfix';
+    const installable = isHotfix || result.installable;
+    const labels = versionLabels(result);
+
+    const lead = text(installable
+        ? 'Installing reloads Spotify. Pick a moment that won’t cut off your music.'
+        : 'This copy was installed by hand, so grab the new build from the release page.');
+    const status = el('div', { class: 'slt-upd-status', hidden: true });
+    const progress = el('div', { class: 'slt-upd-progress', hidden: true },
+        el('div', { class: 'slt-upd-progress-bar' }, el('div', { class: 'slt-upd-progress-fill' })),
+        el('div', { class: 'slt-upd-progress-text', text: 'Starting…' }),
+    );
+    const notes = notesBlock(result.remote.changelog
+        ? formatReleaseNotes(result.remote.changelog)
+        : '<span class="slt-upd-muted">Loading changelog…</span>', false);
 
     if (!result.remote.changelog) {
-        fetchChangelogForVersion(remoteVersion).then(changelog => {
+        fetchChangelogForVersion(result.remote.version.text).then(changelog => {
             result.remote.changelog = changelog;
-            const target = content.querySelector('.slt-upd-notes-content');
-            if (target) target.innerHTML = formatReleaseNotes(changelog);
+            notes.content.innerHTML = formatReleaseNotes(changelog);
         }).catch(() => {});
     }
 
-    content.querySelector('[data-action="later"]')?.addEventListener('click', () => {
-        snooze(key);
-        hideModal();
-    });
-    content.querySelector('[data-action="install"]')?.addEventListener('click', () => {
-        installUpdate(result, content);
-    });
-    content.querySelector('[data-action="open"]')?.addEventListener('click', () => {
-        snooze(key);
-        hideModal();
-    });
+    const laterMenu: SurfaceAction = {
+        id: 'later',
+        label: 'Not now',
+        kind: 'quiet',
+        menu: [
+            { label: 'Remind me in 4 hours', onClick: () => { snooze(key, 4 * 60 * 60 * 1000); card.close(); } },
+            { label: 'Remind me tomorrow', onClick: () => { snooze(key, 24 * 60 * 60 * 1000); card.close(); } },
+            {
+                label: isHotfix ? 'Skip this patch' : 'Skip this version',
+                hint: 'No reminders until the next release',
+                onClick: () => {
+                    storage.set(STORAGE_KEYS.skip, key);
+                    setWaiting(null);
+                    card.close();
+                },
+            },
+        ],
+    };
 
-    displayModal({ title: 'Spicy Lyric Translator', content, isLarge: true });
+    const ui: InstallUi = {
+        progress: (percent, label) => {
+            status.hidden = true;
+            lead.hidden = true;
+            progress.hidden = false;
+            (progress.querySelector('.slt-upd-progress-fill') as HTMLElement).style.width = `${percent}%`;
+            (progress.querySelector('.slt-upd-progress-text') as HTMLElement).textContent = label;
+            card.setBusy(true);
+        },
+        fail: (message) => {
+            card.setBusy(false);
+            progress.hidden = true;
+            status.hidden = false;
+            status.className = 'slt-upd-status slt-upd-status-error';
+            status.textContent = message;
+            card.setTone('error');
+            card.setActions([
+                { label: 'Close', kind: 'quiet' },
+                { label: 'Reload now', kind: 'primary', keepOpen: true, onClick: () => window.location.reload() },
+            ]);
+        },
+    };
+
+    let waitLabel = 'After this song';
+
+    const installNow = (resume = false) => {
+        card.setActions([]);
+        installUpdate(result, ui, { resume });
+    };
+
+    const startSongWait = () => {
+        const ring = progressRing();
+        const line = el('div', { class: 'slt-upd-status-text' });
+        const sub = el('div', { class: 'slt-upd-status-sub' });
+        status.className = 'slt-upd-status';
+        status.replaceChildren(ring.node, el('div', { class: 'slt-upd-status-copy' }, line, sub));
+        status.hidden = false;
+        lead.hidden = true;
+        cancelSongWait();
+        songWaiter = waitForSongEnd(() => {
+            songWaiter = null;
+            waitToast = null;
+            dismissToast('slt-update-wait');
+            try { (Spicetify.Player as any).pause?.(); } catch {}
+            if (!card.closed) {
+                installNow(true);
+                return;
+            }
+            installUpdate(result, backgroundUi(), { resume: true });
+        }, (info) => {
+            const left = Math.max(0, info.duration - info.progress);
+            waitLabel = `After “${info.name}” · ${formatClock(left)} left`;
+            line.textContent = `Updating when “${info.name}” ends`;
+            sub.textContent = info.playing ? `${formatClock(left)} left` : `Paused · ${formatClock(left)} left`;
+            ring.set(info.duration ? info.progress / info.duration : 0);
+            waitToast?.update({ description: waitLabel });
+        });
+        card.setActions([
+            { label: 'Cancel', kind: 'quiet', keepOpen: true, onClick: () => { cancelSongWait(); card.close(); openUpdateCard(result); } },
+            { label: 'Reload now', kind: 'ghost', keepOpen: true, onClick: () => installNow(false) },
+        ]);
+        card.root.dataset.waiting = 'true';
+    };
+
+    const baseActions = (): SurfaceAction[] => {
+        if (!installable) {
+            return [
+                notes.action,
+                laterMenu,
+                { label: 'Open release page', kind: 'primary', href: result.remote.releaseUrl, onClick: () => { snooze(key); } },
+            ];
+        }
+        if (canWaitForSong()) {
+            return [
+                notes.action,
+                laterMenu,
+                { label: 'Reload now', kind: 'ghost', keepOpen: true, onClick: () => installNow(false) },
+                { label: 'Update after this song', kind: 'primary', keepOpen: true, onClick: startSongWait },
+            ];
+        }
+        return [
+            notes.action,
+            laterMenu,
+            { label: isHotfix ? 'Apply and reload' : 'Update and reload', kind: 'primary', keepOpen: true, onClick: () => installNow(false) },
+        ];
+    };
+
+    const card = openDock({
+        tone: isHotfix ? 'hotfix' : 'accent',
+        eyebrow: isHotfix ? 'Spicy Lyric Translator · Patch' : 'Spicy Lyric Translator · Update',
+        title: isHotfix ? `A patch for v${result.current.text}` : `v${result.remote.version.text} is ready`,
+        body: [versionRow(labels.from, labels.to), lead, status, progress, notes.node],
+        actions: baseActions(),
+        origin,
+        onDismiss: () => {
+            if (songWaiter) {
+                waitToast = toast({
+                    kind: 'update',
+                    tone: isHotfix ? 'hotfix' : 'accent',
+                    key: 'slt-update-wait',
+                    title: 'Update queued',
+                    description: waitLabel,
+                    duration: Infinity,
+                    inbox: false,
+                    actions: [
+                        { label: 'Reload now', primary: true, onClick: () => installUpdate(result, backgroundUi(), { resume: false }) },
+                        { label: 'Cancel', onClick: () => cancelSongWait() },
+                    ],
+                    onDismiss: () => cancelSongWait(),
+                });
+                return;
+            }
+            snooze(key);
+        },
+        onClose: () => {
+            if (activeCardKey === key) activeCardKey = null;
+        },
+    });
+    activeCardKey = key;
 }
 
-function showAppliedModal(kind: PromptKind, version: string, changelog: string): void {
-    const isHotfix = kind === 'hotfix';
-    const hashShort = getContentHashShort();
-
-    const content = buildUpdaterModal({
-        variant: isHotfix ? 'hotfix' : 'update',
-        icon: isHotfix ? '🔧' : UPDATE_ICON_HTML,
-        title: isHotfix ? 'Hotfix applied' : 'Updated successfully',
-        titleBadges: [`v${version}`, ...(hashShort ? [hashShort] : [])],
-        subtitle: isHotfix ? `The latest v${version} build is now running.` : `Spicy Lyric Translator v${version} is now running.`,
-        changelogHtml: formatReleaseNotes(changelog),
-        buttonsHtml: `
-            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
-            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
-        `,
-        withProgress: false
+function resumeAfterReload(): Promise<boolean> {
+    return new Promise(resolve => {
+        const started = Date.now();
+        const attempt = () => {
+            try {
+                const player: any = Spicetify?.Player;
+                if (player?.data?.item) {
+                    if (!player.isPlaying?.()) player.play?.();
+                    resolve(true);
+                    return;
+                }
+            } catch {}
+            if (Date.now() - started > 12000) {
+                resolve(false);
+                return;
+            }
+            window.setTimeout(attempt, 400);
+        };
+        attempt();
     });
-
-    content.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => hideModal());
-    displayModal({ title: 'Spicy Lyric Translator', content, isLarge: true });
 }
 
 export async function showPostUpdateChangelog(): Promise<void> {
     const pending = readPending();
     const lastKnownVersion = storage.get(STORAGE_KEYS.lastVersion);
     const lastKnownHash = storage.get(STORAGE_KEYS.lastHash);
+    const legacyHotfix = storage.get('hotfix-detected') === 'true';
 
     storage.remove(STORAGE_KEYS.pending);
     for (const key of LEGACY_STORAGE_KEYS) storage.remove(key);
@@ -681,7 +1000,7 @@ export async function showPostUpdateChangelog(): Promise<void> {
     if (LOADED_HASH) storage.set(STORAGE_KEYS.lastHash, LOADED_HASH);
 
     const current = getCurrentVersion();
-    let applied: { kind: PromptKind; version: string; changelog: string; exactChangelogOnly: boolean } | null = null;
+    let applied: { kind: PromptKind; version: string; from: string; changelog: string; exactChangelogOnly: boolean; resume: boolean } | null = null;
 
     if (pending && Date.now() - pending.createdAt < PENDING_TTL_MS) {
         const target = parseVersion(pending.version);
@@ -692,26 +1011,35 @@ export async function showPostUpdateChangelog(): Promise<void> {
 
         if (!reached) {
             await wait(APPLIED_MODAL_DELAY_MS);
-            notify('The update was downloaded but not applied yet. Restart Spotify to finish updating.', true);
+            toast({
+                kind: 'warning',
+                title: 'The update is downloaded, not applied yet',
+                description: 'Restart Spotify to finish updating.',
+                actions: [{ label: 'Reload', primary: true, onClick: () => window.location.reload() }],
+            });
             return;
         }
 
         applied = {
             kind: versionDelta > 0 ? 'update' : pending.kind,
             version: CURRENT_VERSION,
+            from: pending.fromVersion,
             changelog: versionDelta > 0 ? '' : pending.changelog,
-            exactChangelogOnly: false
+            exactChangelogOnly: false,
+            resume: !!pending.resume,
         };
     } else if (lastKnownVersion) {
         const last = parseVersion(lastKnownVersion);
         if (last && compareVersions(current, last) > 0) {
-            applied = { kind: 'update', version: CURRENT_VERSION, changelog: '', exactChangelogOnly: !IS_LOADER_MODE };
-        } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && lastKnownHash && lastKnownHash !== LOADED_HASH) {
-            applied = { kind: 'hotfix', version: CURRENT_VERSION, changelog: '', exactChangelogOnly: false };
+            applied = { kind: 'update', version: CURRENT_VERSION, from: last.text, changelog: '', exactChangelogOnly: !IS_LOADER_MODE, resume: false };
+        } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && ((lastKnownHash && lastKnownHash !== LOADED_HASH) || legacyHotfix)) {
+            applied = { kind: 'hotfix', version: CURRENT_VERSION, from: CURRENT_VERSION, changelog: '', exactChangelogOnly: false, resume: false };
         }
     }
 
     if (!applied) return;
+
+    const resumed = applied.resume ? resumeAfterReload() : Promise.resolve(false);
 
     let changelog = applied.changelog;
     if (!changelog) {
@@ -720,357 +1048,291 @@ export async function showPostUpdateChangelog(): Promise<void> {
     }
 
     await wait(APPLIED_MODAL_DELAY_MS);
-    showAppliedModal(applied.kind, applied.version, changelog);
+    const didResume = await resumed;
+
+    if (applied.kind === 'hotfix') {
+        const hash = getContentHashShort();
+        const version = applied.version;
+        toast({
+            kind: 'success',
+            title: `Patched v${version}`,
+            description: `${hash ? `Build ${hash}. ` : ''}${didResume ? 'Your music picked up where it left off.' : 'Everything is up to date.'}`,
+            duration: 9000,
+            inbox: true,
+            actions: [{ label: 'What changed', onClick: () => openWhatsNew({ mode: 'applied', version, changelog, kind: 'hotfix', expanded: true }) }],
+        });
+        return;
+    }
+
+    openWhatsNew({ mode: 'applied', version: applied.version, from: applied.from, changelog, kind: 'update', resumed: didResume });
 }
 
-export async function showCurrentChangelog(): Promise<void> {
+export async function showCurrentChangelog(options: { expanded?: boolean } = {}): Promise<void> {
     const changelog = await fetchChangelogForVersion(CURRENT_VERSION);
-    const hashShort = getContentHashShort();
-
-    const content = buildUpdaterModal({
-        variant: 'update',
-        icon: UPDATE_ICON_HTML,
-        title: "What's new",
-        titleBadges: [`v${CURRENT_VERSION}`, ...(hashShort ? [hashShort] : [])],
-        subtitle: 'Changelog for the version you are running',
-        changelogHtml: formatReleaseNotes(changelog),
-        buttonsHtml: `
-            <a class="slt-upd-btn secondary" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">View on GitHub</a>
-            <button class="slt-upd-btn primary" type="button" data-action="dismiss">Got it</button>
-        `,
-        withProgress: false
-    });
-
-    content.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => hideModal());
-    displayModal({ title: 'Spicy Lyric Translator', content, isLarge: true });
+    openWhatsNew({ mode: 'current', version: CURRENT_VERSION, changelog, kind: 'update', expanded: options.expanded });
 }
 
-const UPDATE_ICON_HTML = '<img class="slt-upd-hero-emoji" src="https://cdn.discordapp.com/emojis/1526398149407543389.webp?size=96" alt="" draggable="false">';
-
-interface UpdaterModalOptions {
-    variant: 'update' | 'hotfix';
-    icon: string;
-    title: string;
-    titleBadges?: string[];
-    subtitle: string;
-    versionRow?: { from: string; to: string };
-    changelogHtml: string;
-    buttonsHtml: string;
-    withProgress: boolean;
+export interface SettingLinker {
+    match: (text: string) => { id: string; label: string } | null;
+    byId: (id: string) => { id: string; label: string } | null;
+    reveal: (id: string) => void;
 }
 
-function buildUpdaterModal(options: UpdaterModalOptions): HTMLElement {
-    const content = document.createElement('div');
-    content.className = `slt-updater-modal slt-upd-${options.variant}`;
+let settingLinker: SettingLinker | null = null;
 
-    const badges = (options.titleBadges || [])
-        .map((badge, index) => `<span class="slt-upd-badge${index > 0 ? ' subtle' : ''}">${escapeHtml(badge)}</span>`)
-        .join('');
+export function registerSettingLinker(linker: SettingLinker): void {
+    settingLinker = linker;
+}
 
-    const versionRow = options.versionRow
-        ? `<div class="slt-upd-versions">
-                <span class="slt-upd-version from">${escapeHtml(options.versionRow.from)}</span>
-                <span class="slt-upd-arrow">→</span>
-                <span class="slt-upd-version to">${escapeHtml(options.versionRow.to)}</span>
-            </div>`
-        : '';
+interface Highlight {
+    html: string;
+    setting: { id: string; label: string } | null;
+}
 
-    const progress = options.withProgress
-        ? `<div class="slt-upd-progress">
-                <div class="slt-upd-progress-bar"><div class="slt-upd-progress-fill"></div></div>
-                <div class="slt-upd-progress-text">Starting...</div>
-            </div>`
-        : '';
+function extractHighlights(body: string): Highlight[] {
+    const out: Highlight[] = [];
+    for (const raw of (body || '').split('\n')) {
+        const m = raw.replace(/\r$/, '').match(/^[-*+]\s+(.*\S)/);
+        if (!m) continue;
+        let line = m[1];
+        let setting: Highlight['setting'] = null;
+        const tag = line.match(/\[setting:([A-Za-z0-9_]+)\]/);
+        if (tag) {
+            line = line.replace(tag[0], '').trim();
+            const found = settingLinker?.byId(tag[1]);
+            setting = found || null;
+        }
+        if (!setting) setting = settingLinker?.match(line.replace(/[*_`~]/g, '')) || null;
+        if (!line) continue;
+        out.push({ html: processInlineMarkdown(escapeHtml(line)), setting });
+        if (out.length >= 3) break;
+    }
+    return out;
+}
 
-    content.innerHTML = `
-        <style>${UPDATER_STYLES}</style>
-        <div class="slt-upd-hero">
-            <div class="slt-upd-hero-icon">${options.icon}</div>
-            <div class="slt-upd-hero-text">
-                <div class="slt-upd-hero-title">${escapeHtml(options.title)}${badges}</div>
-                <div class="slt-upd-hero-subtitle">${escapeHtml(options.subtitle)}</div>
-            </div>
-        </div>
-        ${versionRow}
-        <div class="slt-upd-notes collapsed">
-            <button class="slt-upd-notes-toggle" type="button" aria-expanded="false">
-                <span class="slt-upd-notes-title">Changelog</span>
-                <span class="slt-upd-notes-toggle-label">Show</span>
-                <span class="slt-upd-notes-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="slt-upd-notes-content" hidden>${options.changelogHtml}</div>
-        </div>
-        ${progress}
-        <div class="slt-upd-buttons">${options.buttonsHtml}</div>
-    `;
+function openWhatsNew(options: {
+    mode: 'applied' | 'current';
+    version: string;
+    from?: string;
+    changelog: string;
+    kind: PromptKind;
+    resumed?: boolean;
+    expanded?: boolean;
+}): void {
+    ensureUpdaterStyles();
+    const hashShort = getDisplayHash().hash.substring(0, 8);
+    const highlights = extractHighlights(options.changelog);
+    const notes = notesBlock(formatReleaseNotes(options.changelog), !!options.expanded);
 
-    const notes = content.querySelector('.slt-upd-notes') as HTMLElement | null;
-    const toggle = content.querySelector('.slt-upd-notes-toggle') as HTMLButtonElement | null;
-    const notesContent = content.querySelector('.slt-upd-notes-content') as HTMLElement | null;
-    const toggleLabel = content.querySelector('.slt-upd-notes-toggle-label') as HTMLElement | null;
-    toggle?.addEventListener('click', () => {
-        const expand = notes?.classList.contains('collapsed') ?? false;
-        notes?.classList.toggle('collapsed', !expand);
-        if (notesContent) notesContent.hidden = !expand;
-        toggle.setAttribute('aria-expanded', String(expand));
-        if (toggleLabel) toggleLabel.textContent = expand ? 'Hide' : 'Show';
+    const meta = el('div', { class: 'slt-upd-meta' },
+        el('span', { class: 'slt-upd-chip slt-upd-chip-to', text: `v${options.version}` }),
+        hashShort ? el('span', { class: 'slt-upd-chip', text: hashShort, title: getDisplayHash().hash }) : null,
+    );
+
+    const intro = options.mode === 'applied'
+        ? text(`${options.from && options.from !== options.version ? `Updated from v${options.from}. ` : ''}${options.resumed ? 'Your music picked up where it left off.' : 'Here are the highlights.'}`)
+        : text('The highlights from the version you’re running.');
+
+    const body: HTMLElement[] = [meta, intro];
+
+    let dialog: SurfaceHandle | null = null;
+    if (highlights.length) {
+        const list = el('ol', { class: 'slt-upd-hl-list' });
+        highlights.forEach((h, i) => {
+            const item = el('li', { class: 'slt-upd-hl' },
+                el('span', { class: 'slt-upd-hl-dot', text: String(i + 1), 'aria-hidden': 'true' }),
+                el('div', { class: 'slt-upd-hl-text', html: h.html }),
+            );
+            if (h.setting && settingLinker) {
+                const setting = h.setting;
+                const btn = el('button', { class: 'slt-upd-hl-try', type: 'button', text: 'Try it', title: `Open “${setting.label}” in settings` });
+                btn.addEventListener('click', () => {
+                    dialog?.close();
+                    settingLinker?.reveal(setting.id);
+                });
+                item.append(btn);
+            }
+            list.append(item);
+        });
+        body.push(list);
+    }
+    body.push(notes.node);
+
+    dialog = openDialog({
+        eyebrow: options.mode === 'applied' ? 'Spicy Lyric Translator · Updated' : 'Spicy Lyric Translator',
+        title: options.mode === 'applied'
+            ? (options.kind === 'hotfix' ? `Patched v${options.version}` : `You’re on v${options.version}`)
+            : `What’s new in v${options.version}`,
+        tone: options.kind === 'hotfix' ? 'hotfix' : 'accent',
+        size: 'md',
+        body,
+        actions: [
+            notes.action,
+            { label: 'Release page', kind: 'quiet', href: `${RELEASES_URL}/tag/v${encodeURIComponent(options.version)}`, keepOpen: true },
+            { label: 'Done', kind: 'primary' },
+        ],
     });
+}
 
-    return content;
+function ensureUpdaterStyles(): void {
+    if (document.getElementById('slt-upd-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'slt-upd-styles';
+    style.textContent = UPDATER_STYLES;
+    document.head.appendChild(style);
 }
 
 const UPDATER_STYLES = `
-    @keyframes slt-upd-in {
-        from { opacity: 0; transform: translateY(8px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes slt-upd-shimmer {
-        0% { background-position: -200% center; }
-        100% { background-position: 200% center; }
-    }
-    @keyframes slt-upd-nudge {
-        0%, 100% { transform: translateX(0); }
-        50% { transform: translateX(4px); }
-    }
-    .slt-updater-modal {
-        --slt-cl-accent: #1ed760;
-        --slt-upd-accent-alt: #1db954;
-        --slt-upd-accent-rgb: 30, 215, 96;
-        padding: 2px;
-        color: var(--spice-text);
-        animation: slt-upd-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-    .slt-updater-modal.slt-upd-hotfix {
-        --slt-cl-accent: #ffb74d;
-        --slt-upd-accent-alt: #ff9800;
-        --slt-upd-accent-rgb: 255, 183, 77;
-    }
-    .slt-upd-hero {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        margin-bottom: 16px;
-        padding: 16px 18px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(var(--slt-upd-accent-rgb), 0.12) 0%, rgba(var(--slt-upd-accent-rgb), 0.03) 100%);
-        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.2);
-    }
-    .slt-upd-hero-icon {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 22px;
-        flex-shrink: 0;
-        box-shadow: 0 4px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-hero-emoji {
-        width: 28px;
-        height: 28px;
-        object-fit: contain;
-    }
-    .slt-upd-hero-text {
-        flex: 1;
-        min-width: 0;
-    }
-    .slt-upd-hero-title {
-        font-size: 16px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-    .slt-upd-hero-subtitle {
-        font-size: 12px;
-        color: var(--spice-subtext);
-        margin-top: 3px;
-    }
-    .slt-upd-badge {
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        color: #000;
-        padding: 3px 10px;
-        border-radius: 8px;
-        font-size: 11px;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-    }
-    .slt-upd-badge.subtle {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-subtext);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        font-size: 10px;
-        font-weight: 600;
-    }
-    .slt-upd-versions {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 12px;
-        padding: 12px 18px;
-        margin-bottom: 16px;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-    }
-    .slt-upd-version {
-        padding: 5px 12px;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-    }
-    .slt-upd-version.from {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-subtext);
-    }
-    .slt-upd-version.to {
-        background: rgba(var(--slt-upd-accent-rgb), 0.15);
-        color: var(--slt-cl-accent);
-        border: 1px solid rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-arrow {
-        color: var(--spice-subtext);
-        animation: slt-upd-nudge 1.8s ease-in-out infinite;
-    }
-    .slt-upd-notes {
-        margin-bottom: 16px;
-        border-radius: 10px;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-notes-toggle {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        padding: 12px 18px;
-        border: none;
-        background: transparent;
-        color: var(--spice-text);
-        cursor: pointer;
-        text-align: left;
-        transition: background 0.2s ease;
-    }
-    .slt-upd-notes-toggle:hover {
-        background: rgba(255, 255, 255, 0.04);
-    }
-    .slt-upd-notes-toggle:focus-visible {
-        outline: 2px solid var(--slt-cl-accent);
-        outline-offset: -2px;
-    }
-    .slt-upd-notes-title {
-        flex: 1;
-        font-weight: 600;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .slt-upd-notes-toggle-label {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--slt-cl-accent);
-    }
-    .slt-upd-notes-chevron {
-        color: var(--slt-cl-accent);
-        transition: transform 0.2s ease;
-    }
-    .slt-upd-notes.collapsed .slt-upd-notes-chevron {
-        transform: rotate(-90deg);
-    }
-    .slt-upd-notes-content {
-        padding: 0 18px 14px;
-        max-height: 280px;
-        overflow-y: auto;
-        color: var(--spice-subtext);
-        font-size: 13px;
-        line-height: 1.65;
-    }
-    .slt-upd-notes-content[hidden] { display: none; }
-    .slt-upd-notes-content::-webkit-scrollbar { width: 5px; }
-    .slt-upd-notes-content::-webkit-scrollbar-track { background: transparent; }
-    .slt-upd-notes-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
-    .slt-upd-notes-content strong { color: var(--spice-text); }
-    .slt-upd-notes-content del { opacity: 0.5; }
-    .slt-upd-muted {
-        font-style: italic;
-        color: var(--spice-subtext);
-    }
-    .slt-upd-progress {
-        display: none;
-        padding: 16px 18px;
-        margin-bottom: 16px;
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-progress-bar {
-        height: 6px;
-        border-radius: 6px;
-        overflow: hidden;
-        margin-bottom: 10px;
-        background: rgba(255, 255, 255, 0.06);
-    }
-    .slt-upd-progress-fill {
-        width: 0%;
-        height: 100%;
-        border-radius: 6px;
-        background: linear-gradient(90deg, var(--slt-upd-accent-alt), var(--slt-cl-accent), var(--slt-upd-accent-alt));
-        background-size: 200% 100%;
-        transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-        animation: slt-upd-shimmer 2s linear infinite;
-    }
-    .slt-upd-progress-text {
-        font-size: 12px;
-        font-weight: 500;
-        text-align: center;
-        color: var(--spice-subtext);
-    }
-    .slt-upd-error {
-        color: #e74c3c;
-        font-weight: 500;
-        text-align: center;
-    }
-    .slt-upd-buttons {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-    }
-    .slt-upd-btn {
-        display: inline-flex;
-        align-items: center;
-        padding: 10px 24px;
-        border-radius: 24px;
-        border: none;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
-        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    }
-    .slt-upd-btn.primary {
-        background: linear-gradient(135deg, var(--slt-upd-accent-alt), var(--slt-cl-accent));
-        color: #000;
-        box-shadow: 0 2px 12px rgba(var(--slt-upd-accent-rgb), 0.25);
-    }
-    .slt-upd-btn.primary:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 20px rgba(var(--slt-upd-accent-rgb), 0.35);
-    }
-    .slt-upd-btn.secondary {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--spice-text);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .slt-upd-btn.secondary:hover {
-        background: rgba(255, 255, 255, 0.1);
-    }
+.slt-upd-versions, .slt-upd-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.slt-upd-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-ink) 5%, transparent);
+    font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--slt-ui-ink-muted);
+    white-space: nowrap;
+}
+.slt-upd-chip-to {
+    color: var(--slt-ui-ink);
+}
+.slt-upd-flow {
+    position: relative;
+    flex: 1 1 24px;
+    min-width: 24px;
+    max-width: 80px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--slt-ui-line);
+    overflow: hidden;
+}
+.slt-upd-flow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--slt-ui-accent), transparent);
+    transform: translateX(-100%);
+    animation: slt-upd-flow 1.9s ease-in-out infinite;
+}
+@keyframes slt-upd-flow { to { transform: translateX(100%); } }
+.slt-upd-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--slt-ui-ink) 5%, transparent);
+    border: 1px solid var(--slt-ui-line);
+}
+.slt-upd-status[hidden], .slt-upd-progress[hidden], .slt-upd-notes[hidden], .slt-ui-text[hidden] { display: none; }
+.slt-upd-status-error {
+    display: block;
+    font-size: 13px;
+    color: var(--slt-ui-ink);
+    border-color: var(--slt-ui-accent-line);
+    background: var(--slt-ui-accent-soft);
+}
+.slt-upd-status-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.slt-upd-status-text { font-weight: 650; font-size: 13.5px; overflow-wrap: anywhere; }
+.slt-upd-status-sub { font-size: 12px; color: var(--slt-ui-ink-faint); font-variant-numeric: tabular-nums; }
+.slt-upd-ring-wrap { display: inline-flex; flex: 0 0 auto; }
+.slt-upd-ring-wrap .slt-ui-ring { width: 22px; height: 22px; }
+.slt-upd-progress { display: flex; flex-direction: column; gap: 8px; }
+.slt-upd-progress-bar {
+    height: 6px;
+    border-radius: 6px;
+    background: var(--slt-ui-line);
+    overflow: hidden;
+}
+.slt-upd-progress-fill {
+    width: 0;
+    height: 100%;
+    border-radius: 6px;
+    background: var(--slt-ui-accent);
+    transition: width 0.45s var(--slt-ui-ease);
+}
+.slt-upd-progress-text { font-size: 12.5px; color: var(--slt-ui-ink-muted); }
+.slt-upd-notes {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--slt-ui-line);
+    background: color-mix(in oklab, var(--slt-ui-field-deep) 70%, transparent);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--slt-ui-ink-muted);
+}
+.slt-upd-notes { scrollbar-width: thin; scrollbar-color: var(--slt-ui-line) transparent; }
+.slt-upd-notes::-webkit-scrollbar { width: 5px; }
+.slt-upd-notes::-webkit-scrollbar-button { display: none; }
+.slt-upd-notes::-webkit-scrollbar-thumb { background: var(--slt-ui-line); border-radius: 5px; }
+.slt-upd-notes-title {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--slt-ui-ink-faint);
+}
+.slt-upd-notes-content strong { color: var(--slt-ui-ink); }
+.slt-upd-notes-content del { opacity: 0.5; }
+.slt-upd-muted { color: var(--slt-ui-ink-faint); }
+.slt-upd-hl-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.slt-upd-hl {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 0;
+}
+.slt-upd-hl + .slt-upd-hl { border-top: 1px solid var(--slt-ui-line); }
+.slt-upd-hl-dot {
+    color: var(--slt-ui-ink-faint);
+    font-size: 12.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.slt-upd-hl-text { font-size: 13.5px; line-height: 1.45; color: var(--slt-ui-ink); overflow-wrap: anywhere; }
+.slt-upd-hl-text a { color: var(--slt-ui-ink); }
+.slt-upd-hl-try {
+    appearance: none;
+    align-self: center;
+    border: 1px solid var(--slt-ui-line);
+    border-radius: 9px;
+    padding: 5px 10px;
+    background: transparent;
+    color: var(--slt-ui-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+.slt-upd-hl-try:hover { background: var(--slt-ui-line); }
+.slt-upd-hl-try:focus-visible { outline: 2px solid var(--slt-ui-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+    .slt-upd-flow::after { animation: none; }
+}
 `;
+
 
 function escapeHtml(text: string): string {
     return String(text)
@@ -1092,13 +1354,13 @@ function processInlineMarkdown(text: string): string {
         })
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
             const safe = sanitizeUrl(url);
-            return safe ? `<a href="${safe}" style="color: var(--slt-cl-accent, #1db954); text-decoration: none;" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+            return safe ? `<a href="${safe}" style="color: var(--slt-ui-accent); text-decoration: none;" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
         })
         .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/(?<![*\w])\*([^*]+?)\*(?![*\w])/g, '<em>$1</em>')
         .replace(/~~(.*?)~~/g, '<del>$1</del>')
-        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--slt-cl-accent, #1db954);">$1</code>');
+        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--slt-ui-accent);">$1</code>');
 }
 
 function formatReleaseNotes(body: string): string {
@@ -1123,7 +1385,7 @@ function formatReleaseNotes(body: string): string {
 
         if (line.trim().startsWith('```')) {
             if (inCodeBlock) {
-                output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--spice-subtext); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join('\n')}</code></pre>`);
+                output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code','Consolas',monospace; font-size: 12px; color: var(--slt-ui-ink-muted); margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${codeContent.join('\n')}</code></pre>`);
                 codeContent = [];
                 inCodeBlock = false;
             } else {
@@ -1145,22 +1407,22 @@ function formatReleaseNotes(body: string): string {
         }
 
         const h3 = line.match(/^###\s+(.*)/);
-        if (h3) { closeLists(); output.push(`<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--spice-text);">${processInlineMarkdown(h3[1])}</div>`); continue; }
+        if (h3) { closeLists(); output.push(`<div style="font-weight: 600; margin-top: 12px; margin-bottom: 6px; color: var(--slt-ui-ink);">${processInlineMarkdown(h3[1])}</div>`); continue; }
 
         const h2 = line.match(/^##\s+(.*)/);
-        if (h2) { closeLists(); output.push(`<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--spice-text);">${processInlineMarkdown(h2[1])}</div>`); continue; }
+        if (h2) { closeLists(); output.push(`<div style="font-weight: 600; font-size: 14px; margin-top: 14px; margin-bottom: 8px; color: var(--slt-ui-ink);">${processInlineMarkdown(h2[1])}</div>`); continue; }
 
         const h1 = line.match(/^#\s+(.*)/);
-        if (h1) { closeLists(); output.push(`<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--spice-text);">${processInlineMarkdown(h1[1])}</div>`); continue; }
+        if (h1) { closeLists(); output.push(`<div style="font-weight: 700; font-size: 15px; margin-top: 16px; margin-bottom: 10px; color: var(--slt-ui-ink);">${processInlineMarkdown(h1[1])}</div>`); continue; }
 
         if (line.match(/^(---+|===+|\*\*\*+)\s*$/)) {
             closeLists();
-            output.push('<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">');
+            output.push('<hr style="border: none; border-top: 1px solid var(--slt-ui-line); margin: 12px 0;">');
             continue;
         }
 
         const bq = line.match(/^>\s?(.*)/);
-        if (bq) { closeLists(); output.push(`<div style="border-left: 3px solid var(--slt-cl-accent, #1db954); padding-left: 12px; margin: 6px 0; color: var(--spice-subtext); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`); continue; }
+        if (bq) { closeLists(); output.push(`<div style="border-left: 3px solid var(--slt-ui-accent); padding-left: 12px; margin: 6px 0; color: var(--slt-ui-ink-muted); font-style: italic;">${processInlineMarkdown(bq[1])}</div>`); continue; }
 
         const ul = line.match(/^([ \t]*)[-*+]\s+(.*)/);
         if (ul) {
@@ -1168,7 +1430,7 @@ function formatReleaseNotes(body: string): string {
             if (!inUl) { output.push('<ul style="margin: 4px 0; padding-left: 0; list-style: none;">'); inUl = true; }
             const depth = Math.min(Math.floor(ul[1].replace(/\t/g, '  ').length / 2), 5);
             const markers = ['•', '◦', '▪', '‣', '·', '•'];
-            output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0;">${markers[depth] || '•'}</span><span>${processInlineMarkdown(ul[2])}</span></li>`);
+            output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-ui-accent); flex-shrink: 0;">${markers[depth] || '•'}</span><span>${processInlineMarkdown(ul[2])}</span></li>`);
             continue;
         }
 
@@ -1177,17 +1439,17 @@ function formatReleaseNotes(body: string): string {
             if (inUl) { output.push('</ul>'); inUl = false; }
             if (!inOl) { output.push('<ol style="margin: 4px 0; padding-left: 0; list-style: none;">'); inOl = true; }
             const depth = Math.min(Math.floor(ol[1].replace(/\t/g, '  ').length / 2), 5);
-            output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-cl-accent, #1db954); flex-shrink: 0; min-width: 16px; font-weight: 600;">${ol[2]}.</span><span>${processInlineMarkdown(ol[3])}</span></li>`);
+            output.push(`<li style="display: flex; gap: 8px; margin: 3px 0; margin-left: ${depth * 18}px;"><span style="color: var(--slt-ui-accent); flex-shrink: 0; min-width: 16px; font-weight: 600;">${ol[2]}.</span><span>${processInlineMarkdown(ol[3])}</span></li>`);
             continue;
         }
 
         closeLists();
-        output.push(`<p style="margin: 4px 0; color: var(--spice-subtext);">${processInlineMarkdown(line)}</p>`);
+        output.push(`<p style="margin: 4px 0; color: var(--slt-ui-ink-muted);">${processInlineMarkdown(line)}</p>`);
     }
 
     closeLists();
     if (inCodeBlock) {
-        output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--spice-subtext); margin: 8px 0;"><code>${codeContent.join('\n')}</code></pre>`);
+        output.push(`<pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: var(--slt-ui-ink-muted); margin: 8px 0;"><code>${codeContent.join('\n')}</code></pre>`);
     }
 
     return output.join('');

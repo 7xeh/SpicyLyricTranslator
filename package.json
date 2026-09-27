@@ -18,7 +18,9 @@
     "test": "node tests/run-tests.mjs",
     "deploy": "node deploy.js",
     "redeploy": "node deploy.js --no-bump",
-    "reset": "spicetify config extensions spicy-lyric-translater.js- && spicetify apply",
+    "sync-ui": "node sync-ui.js",
+    "sync-ui:check": "node sync-ui.js --check",
+    "reset":"spicetify config extensions spicy-lyric-translater.js- && spicetify apply",
     "apply": "spicetify apply",
     "release": "npm run build && copy dist\\spicy-lyric-translater.js builds\\spicy-lyric-translater.js"
   },

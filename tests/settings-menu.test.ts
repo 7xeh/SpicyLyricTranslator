@@ -95,7 +95,7 @@ test('settings menu registers a single SLT Settings entry with an icon', async (
     assert.match(settingsItem.icon!, /^<svg/);
 });
 
-test('settings modal exposes cache repair actions for the translate button right-click flow', async () => {
+test('cache tab actions clear translations and the Spicy Lyrics lyric stores', async () => {
     storageMap.clear();
     const notifications: string[] = [];
     installSpicetifyMock([], notifications);
@@ -109,49 +109,25 @@ test('settings modal exposes cache repair actions for the translate button right
     };
 
     const settings = require('../src/utils/settings') as {
-        renderModalCacheActionsMarkup: () => string;
-        bindModalCacheActions: (container: ParentNode) => void;
+        clearAllCachedTranslations: () => void;
+        clearSpicyLyricsCachedLyrics: () => Promise<void>;
     };
-
-    const markup = settings.renderModalCacheActionsMarkup();
-    assert.match(markup, /id="slt-clear-spicy-lyrics-cache"/);
-    assert.match(markup, /Clear Spicy Lyrics Cache/);
-    assert.match(markup, /id="slt-clear-translation-cache"/);
-    assert.match(markup, /Clear All Cached Translations/);
-
-    const handlers = new Map<string, EventListenerOrEventListenerObject>();
-    const fakeContainer = {
-        querySelector: (selector: string) => {
-            if (selector !== '#slt-clear-spicy-lyrics-cache' && selector !== '#slt-clear-translation-cache') {
-                return null;
-            }
-            return {
-                addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
-                    handlers.set(selector, listener);
-                }
-            };
-        }
-    } as unknown as ParentNode;
-
-    settings.bindModalCacheActions(fakeContainer);
 
     storageMap.set('spicy-lyric-translator:translation-cache', '{"vi:hello":{"translation":"xin chao","timestamp":1}}');
     storageMap.set('slt-track-cache:spotify:track:def:vi', '{"lines":["xin chao"],"timestamp":1}');
     storageMap.set('slt-track-cache-index', '{"trackUris":["spotify:track:def:vi"]}');
 
-    const clearTranslations = handlers.get('#slt-clear-translation-cache') as EventListener;
-    clearTranslations(new Event('click'));
+    settings.clearAllCachedTranslations();
 
     assert.equal(storageMap.has('spicy-lyric-translator:translation-cache'), false);
     assert.equal(storageMap.has('slt-track-cache:spotify:track:def:vi'), false);
     assert.equal(storageMap.has('slt-track-cache-index'), false);
 
-    const clearSpicyLyrics = handlers.get('#slt-clear-spicy-lyrics-cache') as EventListener;
-    await clearSpicyLyrics(new Event('click'));
+    await settings.clearSpicyLyricsCachedLyrics();
 
     assert.deepEqual([...deletedCacheNames].sort(), ['SpicyLyrics_LyricsStore', 'SpicyLyrics_LyricsStore_g1']);
     assert.deepEqual(notifications, [
-        'All cached translations deleted!',
-        'Spicy Lyrics cached lyrics deleted!'
+        'Cached translations deleted',
+        'Spicy Lyrics cache cleared'
     ]);
 });

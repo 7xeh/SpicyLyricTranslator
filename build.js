@@ -1,7 +1,10 @@
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
+
+const BUILD_HASH_PLACEHOLDER = 'SLT_BUILD_HASH_PLACEHOLDER_000000000000000000000000000';
 
 const ARGS = process.argv.slice(2);
 const IS_WATCH = ARGS.includes('--watch');
@@ -61,6 +64,15 @@ const syncReadmeVersion = (version) => {
     if (updated !== raw) fs.writeFileSync(README_PATH, updated);
 };
 
+const stampBuildHash = () => {
+    if (!fs.existsSync(OUT_FILE)) return;
+    const code = fs.readFileSync(OUT_FILE, 'utf8');
+    if (!code.includes(BUILD_HASH_PLACEHOLDER)) return;
+    const hash = crypto.createHash('sha256').update(code).digest('hex');
+    fs.writeFileSync(OUT_FILE, code.split(BUILD_HASH_PLACEHOLDER).join(hash));
+    console.log(`[Hash] Build hash: ${hash.substring(0, 12)}`);
+};
+
 const formatMs = (ms) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`);
 
 const run = async () => {
@@ -110,7 +122,8 @@ const run = async () => {
         logLevel: 'info',
         define: {
             '__VERSION__': JSON.stringify(nextVersion),
-            '__DEV__': JSON.stringify(false)
+            '__DEV__': JSON.stringify(false),
+            '__BUILD_HASH__': JSON.stringify(BUILD_HASH_PLACEHOLDER)
         }
     };
 
@@ -130,6 +143,7 @@ const run = async () => {
     }
 
     await esbuild.build(buildOptions);
+    stampBuildHash();
 
     if (!SKIP_BUMP) {
         manifest.data.version = nextVersion;
