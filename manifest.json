@@ -8,7 +8,7 @@
       "url": "https://github.com/7xeh"
     }
   ],
-  "version": "2.2.0",
+  "version": "2.2.1",
   "main": "loader/SLT-loader.js",
   "preview": "https://github.com/7xeh/SpicyLyricTranslate/blob/main/slt_preview.gif?raw=true",
   "readme": "README.md",

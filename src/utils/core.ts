@@ -106,6 +106,7 @@ function matchesSkippedTranslation(
 let lastSkipNotifyKey: string | null = null;
 
 function shouldNotifySkip(trackUri: string | null, targetLanguage: string, romanizationOn: boolean): boolean {
+    if (!state.showSkipNotice) return false;
     const key = `${trackUri ?? ''}${targetLanguage}${romanizationOn ? '1' : '0'}`;
     if (lastSkipNotifyKey === key) return false;
     lastSkipNotifyKey = key;
@@ -1254,7 +1255,7 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         dismissNotification('slt-translate-failed');
         const notif = buildTranslationNotification(translations, currentTrackUri, state.targetLanguage);
-        if (notif) notify({ kind: 'success', key: 'slt-translated', title: notif });
+        if (notif && state.showTranslatedNotice) notify({ kind: 'success', key: 'slt-translated', title: notif });
     } catch (err) {
         error('Translation failed:', err);
         notify({

@@ -37,6 +37,8 @@ export interface ExtensionState {
     autoTranslate: boolean;
     showNotifications: boolean;
     notificationLevel: NotificationLevel;
+    showSkipNotice: boolean;
+    showTranslatedNotice: boolean;
     preferredApi: 'google' | 'libretranslate' | 'deepl' | 'openai' | 'gemini' | 'grok' | 'anthropic' | 'custom';
     customApiUrl: string;
     customApiKey: string;
@@ -77,6 +79,8 @@ export const state: ExtensionState = {
     targetLanguage: resolveStoredTargetLanguage(),
     autoTranslate: storage.get('auto-translate') === 'true',
     notificationLevel: resolveStoredNotificationLevel(),
+    showSkipNotice: storage.get('show-skip-notice') !== 'false',
+    showTranslatedNotice: storage.get('show-translated-notice') !== 'false',
     get showNotifications(): boolean {
         return this.notificationLevel !== 'off';
     },

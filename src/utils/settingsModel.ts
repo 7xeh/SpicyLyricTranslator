@@ -388,12 +388,35 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'select',
         storageKey: 'notification-level',
         defaultValue: 'all',
+        effects: ['fieldVisibility'],
         options: [
             { value: 'all', text: 'All' },
             { value: 'errors', text: 'Errors and warnings only' },
             { value: 'off', text: 'Off' }
         ],
         description: 'Which pop-up messages to show. Update prompts always appear, and warnings and errors are kept in the notification inbox either way.'
+    },
+    {
+        id: 'show-skip-notice',
+        section: 'Interface',
+        keywords: 'notifications toasts popup already in language same target skip skipped notice',
+        label: 'Notify When Lyrics Are Already in Target Language',
+        type: 'toggle',
+        storageKey: 'show-skip-notice',
+        defaultValue: true,
+        description: 'Show the "Lyrics already in ..." pop-up when a song is skipped because it is already in the language you translate to.',
+        visibleWhen: () => (storage.get('notification-level') || 'all') === 'all'
+    },
+    {
+        id: 'show-translated-notice',
+        section: 'Interface',
+        keywords: 'notifications toasts popup translated success complete done notice',
+        label: 'Notify When a Song Is Translated',
+        type: 'toggle',
+        storageKey: 'show-translated-notice',
+        defaultValue: true,
+        description: 'Show the pop-up confirming a song was translated.',
+        visibleWhen: () => (storage.get('notification-level') || 'all') === 'all'
     },
     {
         id: 'learning-mode',
@@ -672,6 +695,12 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'notification-level':
             state.notificationLevel = String(value) as NotificationLevel;
+            break;
+        case 'show-skip-notice':
+            state.showSkipNotice = Boolean(value);
+            break;
+        case 'show-translated-notice':
+            state.showTranslatedNotice = Boolean(value);
             break;
         case 'show-quality-indicator':
             state.showQualityIndicator = Boolean(value);

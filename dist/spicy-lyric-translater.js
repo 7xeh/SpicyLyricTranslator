@@ -5159,6 +5159,8 @@ ${text3}`
     targetLanguage: resolveStoredTargetLanguage(),
     autoTranslate: storage.get("auto-translate") === "true",
     notificationLevel: resolveStoredNotificationLevel(),
+    showSkipNotice: storage.get("show-skip-notice") !== "false",
+    showTranslatedNotice: storage.get("show-translated-notice") !== "false",
     get showNotifications() {
       return this.notificationLevel !== "off";
     },
@@ -10075,7 +10077,7 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.0" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.1" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -10143,7 +10145,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"ec23f9e492e0c78e583e5d11acc70efb2a7b6a004af17e8cd371df4671f70e81".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ec23f9e492e0c78e583e5d11acc70efb2a7b6a004af17e8cd371df4671f70e81" : "";
+    return !"ba67ac63a7b64d2b8bfeca8300dd4d77d4d325b5401ed2d03ed2dad51141ef79".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ba67ac63a7b64d2b8bfeca8300dd4d77d4d325b5401ed2d03ed2dad51141ef79" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -11735,12 +11737,35 @@ body.slt-update-waiting #TranslateToggle::after {
       type: "select",
       storageKey: "notification-level",
       defaultValue: "all",
+      effects: ["fieldVisibility"],
       options: [
         { value: "all", text: "All" },
         { value: "errors", text: "Errors and warnings only" },
         { value: "off", text: "Off" }
       ],
       description: "Which pop-up messages to show. Update prompts always appear, and warnings and errors are kept in the notification inbox either way."
+    },
+    {
+      id: "show-skip-notice",
+      section: "Interface",
+      keywords: "notifications toasts popup already in language same target skip skipped notice",
+      label: "Notify When Lyrics Are Already in Target Language",
+      type: "toggle",
+      storageKey: "show-skip-notice",
+      defaultValue: true,
+      description: 'Show the "Lyrics already in ..." pop-up when a song is skipped because it is already in the language you translate to.',
+      visibleWhen: () => (storage.get("notification-level") || "all") === "all"
+    },
+    {
+      id: "show-translated-notice",
+      section: "Interface",
+      keywords: "notifications toasts popup translated success complete done notice",
+      label: "Notify When a Song Is Translated",
+      type: "toggle",
+      storageKey: "show-translated-notice",
+      defaultValue: true,
+      description: "Show the pop-up confirming a song was translated.",
+      visibleWhen: () => (storage.get("notification-level") || "all") === "all"
     },
     {
       id: "learning-mode",
@@ -12002,6 +12027,12 @@ body.slt-update-waiting #TranslateToggle::after {
         break;
       case "notification-level":
         state.notificationLevel = String(value);
+        break;
+      case "show-skip-notice":
+        state.showSkipNotice = Boolean(value);
+        break;
+      case "show-translated-notice":
+        state.showTranslatedNotice = Boolean(value);
         break;
       case "show-quality-indicator":
         state.showQualityIndicator = Boolean(value);
@@ -12336,6 +12367,8 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   var lastSkipNotifyKey = null;
   function shouldNotifySkip(trackUri, targetLanguage, romanizationOn) {
+    if (!state.showSkipNotice)
+      return false;
     const key = `${trackUri ?? ""}${targetLanguage}${romanizationOn ? "1" : "0"}`;
     if (lastSkipNotifyKey === key)
       return false;
@@ -13330,7 +13363,7 @@ body.slt-update-waiting #TranslateToggle::after {
       void fillVisibleGaps();
       dismissNotification("slt-translate-failed");
       const notif = buildTranslationNotification(translations, currentTrackUri2, state.targetLanguage);
-      if (notif)
+      if (notif && state.showTranslatedNotice)
         notify({ kind: "success", key: "slt-translated", title: notif });
     } catch (err) {
       error("Translation failed:", err);
