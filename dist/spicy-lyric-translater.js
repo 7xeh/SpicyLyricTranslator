@@ -2695,6 +2695,9 @@ var SpicyLyricTranslater = (() => {
   var PARALLEL_TARGET_LINES_PER_CHUNK = 8;
   var NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
   var SPICETIFY_CORS_PROXY_BASE = "https://cors-proxy.spicetify.app/";
+  var DEEPL_MAX_TEXTS_PER_REQUEST = 50;
+  var DEEPL_FREE_BASE_URL = "https://api-free.deepl.com";
+  var DEEPL_PRO_BASE_URL = "https://api.deepl.com";
   function normalizeSourceLineForFingerprint(line) {
     return (line || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
@@ -3189,7 +3192,7 @@ var SpicyLyricTranslater = (() => {
     }
     if (apiKeys) {
       if (apiKeys.customApiKey !== void 0)
-        customApiKey = apiKeys.customApiKey;
+        customApiKey = apiKeys.customApiKey.trim();
       if (apiKeys.customApiFormat !== void 0)
         customApiFormat = apiKeys.customApiFormat;
       if (apiKeys.customApiModel !== void 0)
@@ -3197,25 +3200,25 @@ var SpicyLyricTranslater = (() => {
       if (apiKeys.libreTranslateApiUrl !== void 0)
         libreTranslateApiUrl = normalizeLibreTranslateUrl(apiKeys.libreTranslateApiUrl);
       if (apiKeys.libreTranslateApiKey !== void 0)
-        libreTranslateApiKey = apiKeys.libreTranslateApiKey;
+        libreTranslateApiKey = apiKeys.libreTranslateApiKey.trim();
       if (apiKeys.deeplApiKey !== void 0)
-        deeplApiKey = apiKeys.deeplApiKey;
+        deeplApiKey = apiKeys.deeplApiKey.trim();
       if (apiKeys.openaiApiKey !== void 0)
-        openaiApiKey = apiKeys.openaiApiKey;
+        openaiApiKey = apiKeys.openaiApiKey.trim();
       if (apiKeys.openaiModel !== void 0)
         openaiModel = normalizeOpenAIModelName(apiKeys.openaiModel);
       if (apiKeys.geminiApiKey !== void 0)
-        geminiApiKey = apiKeys.geminiApiKey;
+        geminiApiKey = apiKeys.geminiApiKey.trim();
       if (apiKeys.geminiModel !== void 0)
         geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
       if (apiKeys.geminiTemperature !== void 0)
         geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
       if (apiKeys.grokApiKey !== void 0)
-        grokApiKey = apiKeys.grokApiKey;
+        grokApiKey = apiKeys.grokApiKey.trim();
       if (apiKeys.grokModel !== void 0)
         grokModel = normalizeGrokModelName(apiKeys.grokModel);
       if (apiKeys.anthropicApiKey !== void 0)
-        anthropicApiKey = apiKeys.anthropicApiKey;
+        anthropicApiKey = apiKeys.anthropicApiKey.trim();
       if (apiKeys.anthropicModel !== void 0)
         anthropicModel = normalizeAnthropicModelName(apiKeys.anthropicModel);
       if (apiKeys.maxParallelChunks !== void 0)
@@ -3532,15 +3535,7 @@ var SpicyLyricTranslater = (() => {
     if (!deeplApiKey) {
       throw createProviderConfigError("DeepL API key not configured. Set it in Settings.");
     }
-    const isFreePlan = deeplApiKey.endsWith(":fx");
-    const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
-    const url = `${baseUrl}/v2/translate`;
-    const data = await postJsonProvider(
-      getSpicetifyCorsProxyUrl(url),
-      buildDeepLBody([text3], targetLang),
-      getDeepLHeaders(deeplApiKey),
-      "DeepL"
-    );
+    const data = await postDeepL([text3], targetLang, "DeepL");
     recordApiUsage(null);
     if (data.translations && data.translations.length > 0) {
       return {
@@ -3793,6 +3788,26 @@ ${text3}`
       "Content-Type": "application/json"
     };
   }
+  function isDeepLWrongEndpointError(error2) {
+    return error2 instanceof NonRetryableProviderError && error2.status === 403 && /wrong endpoint/i.test(error2.message);
+  }
+  async function postDeepL(texts, targetLang, providerName2) {
+    const apiKey = deeplApiKey;
+    const baseUrls = apiKey.endsWith(":fx") ? [DEEPL_FREE_BASE_URL, DEEPL_PRO_BASE_URL] : [DEEPL_PRO_BASE_URL, DEEPL_FREE_BASE_URL];
+    const send = (baseUrl) => postJsonProvider(
+      getSpicetifyCorsProxyUrl(`${baseUrl}/v2/translate`),
+      buildDeepLBody(texts, targetLang),
+      getDeepLHeaders(apiKey),
+      providerName2
+    );
+    try {
+      return await send(baseUrls[0]);
+    } catch (error2) {
+      if (!isDeepLWrongEndpointError(error2))
+        throw error2;
+      return send(baseUrls[1]);
+    }
+  }
   function getTranslationLanguageName(targetLang) {
     const variant = getLanguageVariantByCode(targetLang);
     if (variant)
@@ -4008,29 +4023,25 @@ ${text3}`
       throw createProviderConfigError("Custom API URL not configured. Set it in Settings.");
     }
     if (preferredApi === "deepl" && deeplApiKey || preferredApi === "custom" && customApiFormat === "deepl") {
-      const selectedDeepLKey = preferredApi === "custom" ? customApiKey : deeplApiKey;
-      const isFreePlan = selectedDeepLKey.endsWith(":fx");
-      const baseUrl = isFreePlan ? "https://api-free.deepl.com" : "https://api.deepl.com";
-      const url2 = preferredApi === "custom" ? validateCustomApiUrl() : `${baseUrl}/v2/translate`;
-      const data2 = preferredApi === "deepl" ? await postJsonProvider(
-        getSpicetifyCorsProxyUrl(url2),
-        buildDeepLBody(texts, targetLang),
-        getDeepLHeaders(selectedDeepLKey),
-        "DeepL batch"
-      ) : await postJsonProvider(
-        url2,
-        buildDeepLBody(texts, targetLang),
-        getCustomApiHeaders("deepl"),
-        "DeepL batch"
-      );
-      recordApiUsage(null);
-      if (data2.translations && Array.isArray(data2.translations)) {
-        return {
-          translations: data2.translations.map((t) => t.text || ""),
-          detectedLang: data2.translations[0]?.detected_source_language?.toLowerCase()
-        };
+      const customUrl = preferredApi === "custom" ? validateCustomApiUrl() : "";
+      const translations = [];
+      let detectedLang;
+      for (let start = 0; start < texts.length; start += DEEPL_MAX_TEXTS_PER_REQUEST) {
+        const chunk = texts.slice(start, start + DEEPL_MAX_TEXTS_PER_REQUEST);
+        const data2 = preferredApi === "deepl" ? await postDeepL(chunk, targetLang, "DeepL batch") : await postJsonProvider(
+          customUrl,
+          buildDeepLBody(chunk, targetLang),
+          getCustomApiHeaders("deepl"),
+          "DeepL batch"
+        );
+        recordApiUsage(null);
+        if (!data2?.translations || !Array.isArray(data2.translations)) {
+          throw new Error("DeepL batch returned unexpected format");
+        }
+        translations.push(...data2.translations.map((t) => t?.text || ""));
+        detectedLang = detectedLang || data2.translations[0]?.detected_source_language?.toLowerCase();
       }
-      throw new Error("DeepL batch returned unexpected format");
+      return { translations, detectedLang };
     }
     if (preferredApi === "custom" && !customApiSupportsBatchArray()) {
       throw new Error("Custom API format does not support array batch payloads");
@@ -10145,7 +10156,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"ba67ac63a7b64d2b8bfeca8300dd4d77d4d325b5401ed2d03ed2dad51141ef79".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ba67ac63a7b64d2b8bfeca8300dd4d77d4d325b5401ed2d03ed2dad51141ef79" : "";
+    return !"170c87645b1898b0ed0a2e8652d7c7cde1365202b9c63ac6455fdf3d9da3a518".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "170c87645b1898b0ed0a2e8652d7c7cde1365202b9c63ac6455fdf3d9da3a518" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)

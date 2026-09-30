@@ -350,6 +350,69 @@ test('DeepL 403 stops after one batch request instead of retrying marker and per
     assert.deepEqual(result.map(item => item.translatedText), ['\u5e7e\u5343\u306e\u6642\u3092\u5de1\u3063\u3066 \u4eca', '\u50d5\u3089\u51fa\u4f1a\u3048\u305f \u306e']);
 });
 
+test('DeepL batches split into requests of at most 50 texts', async () => {
+    resetState();
+    setPreferredApi('deepl', undefined, { deeplApiKey: 'test-key:fx' });
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        const body = JSON.parse(String(init?.body));
+        if (body.text.length > 50) {
+            return jsonResponse({ message: 'Too many texts' }, false, 400);
+        }
+        return jsonResponse({
+            translations: body.text.map((text: string) => ({ text: `ES:${text}`, detected_source_language: 'EN' }))
+        });
+    };
+
+    const sourceLines = Array.from({ length: 120 }, (_, i) => `line number ${i} of the song`);
+    const result = await translateLyrics(sourceLines, 'es');
+
+    assert.deepEqual(calls.map(call => JSON.parse(String(call.init?.body)).text.length), [50, 50, 20]);
+    assert.deepEqual(result.map(item => item.translatedText), sourceLines.map(line => `ES:${line}`));
+});
+
+test('DeepL trims pasted keys before picking the free endpoint', async () => {
+    resetState();
+    setPreferredApi('deepl', undefined, { deeplApiKey: '  test-key:fx \n' });
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        return jsonResponse({ translations: [{ text: 'Hola', detected_source_language: 'EN' }] });
+    };
+
+    const result = await translateText('Hello', 'es', 'en');
+
+    assert.equal(result.translatedText, 'Hola');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://cors-proxy.spicetify.app/https://api-free.deepl.com/v2/translate');
+    assert.equal((calls[0].init?.headers as Record<string, string>)['Authorization'], 'DeepL-Auth-Key test-key:fx');
+});
+
+test('DeepL retries the other host when the key belongs to a different plan', async () => {
+    resetState();
+    setPreferredApi('deepl', undefined, { deeplApiKey: 'pro-looking-key' });
+
+    const calls: FetchCall[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (url.includes('://api.deepl.com/')) {
+            return jsonResponse({ message: 'Wrong endpoint. Use https://api-free.deepl.com' }, false, 403);
+        }
+        return jsonResponse({ translations: [{ text: 'Hola', detected_source_language: 'EN' }] });
+    };
+
+    const result = await translateText('Hello', 'es', 'en');
+
+    assert.equal(result.translatedText, 'Hola');
+    assert.deepEqual(calls.map(call => call.url), [
+        'https://cors-proxy.spicetify.app/https://api.deepl.com/v2/translate',
+        'https://cors-proxy.spicetify.app/https://api-free.deepl.com/v2/translate'
+    ]);
+});
+
 test('DeepL without a key does not fall into the custom batch path', async () => {
     resetState();
     setPreferredApi('deepl');

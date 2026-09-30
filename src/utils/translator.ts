@@ -200,6 +200,9 @@ const PARALLEL_CHUNK_MIN_LINES = 12;
 const PARALLEL_TARGET_LINES_PER_CHUNK = 8;
 const NON_LATIN_SEGMENT_REGEX = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Greek}]+)/gu;
 const SPICETIFY_CORS_PROXY_BASE = 'https://cors-proxy.spicetify.app/';
+const DEEPL_MAX_TEXTS_PER_REQUEST = 50;
+const DEEPL_FREE_BASE_URL = 'https://api-free.deepl.com';
+const DEEPL_PRO_BASE_URL = 'https://api.deepl.com';
 
 function normalizeSourceLineForFingerprint(line: string): string {
     return (line || '')
@@ -839,20 +842,20 @@ export function setPreferredApi(api: ApiPreference, customUrl?: string, apiKeys?
         customApiUrl = customUrl;
     }
     if (apiKeys) {
-        if (apiKeys.customApiKey !== undefined) customApiKey = apiKeys.customApiKey;
+        if (apiKeys.customApiKey !== undefined) customApiKey = apiKeys.customApiKey.trim();
         if (apiKeys.customApiFormat !== undefined) customApiFormat = apiKeys.customApiFormat;
         if (apiKeys.customApiModel !== undefined) customApiModel = apiKeys.customApiModel;
         if (apiKeys.libreTranslateApiUrl !== undefined) libreTranslateApiUrl = normalizeLibreTranslateUrl(apiKeys.libreTranslateApiUrl);
-        if (apiKeys.libreTranslateApiKey !== undefined) libreTranslateApiKey = apiKeys.libreTranslateApiKey;
-        if (apiKeys.deeplApiKey !== undefined) deeplApiKey = apiKeys.deeplApiKey;
-        if (apiKeys.openaiApiKey !== undefined) openaiApiKey = apiKeys.openaiApiKey;
+        if (apiKeys.libreTranslateApiKey !== undefined) libreTranslateApiKey = apiKeys.libreTranslateApiKey.trim();
+        if (apiKeys.deeplApiKey !== undefined) deeplApiKey = apiKeys.deeplApiKey.trim();
+        if (apiKeys.openaiApiKey !== undefined) openaiApiKey = apiKeys.openaiApiKey.trim();
         if (apiKeys.openaiModel !== undefined) openaiModel = normalizeOpenAIModelName(apiKeys.openaiModel);
-        if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey;
+        if (apiKeys.geminiApiKey !== undefined) geminiApiKey = apiKeys.geminiApiKey.trim();
         if (apiKeys.geminiModel !== undefined) geminiModel = normalizeGeminiModelName(apiKeys.geminiModel);
         if (apiKeys.geminiTemperature !== undefined) geminiTemperature = normalizeGeminiTemperature(apiKeys.geminiTemperature);
-        if (apiKeys.grokApiKey !== undefined) grokApiKey = apiKeys.grokApiKey;
+        if (apiKeys.grokApiKey !== undefined) grokApiKey = apiKeys.grokApiKey.trim();
         if (apiKeys.grokModel !== undefined) grokModel = normalizeGrokModelName(apiKeys.grokModel);
-        if (apiKeys.anthropicApiKey !== undefined) anthropicApiKey = apiKeys.anthropicApiKey;
+        if (apiKeys.anthropicApiKey !== undefined) anthropicApiKey = apiKeys.anthropicApiKey.trim();
         if (apiKeys.anthropicModel !== undefined) anthropicModel = normalizeAnthropicModelName(apiKeys.anthropicModel);
         if (apiKeys.maxParallelChunks !== undefined) maxParallelChunks = normalizeMaxParallelChunks(apiKeys.maxParallelChunks);
     }
@@ -1218,16 +1221,7 @@ async function translateWithDeepL(text: string, targetLang: string): Promise<{ t
         throw createProviderConfigError('DeepL API key not configured. Set it in Settings.');
     }
 
-    const isFreePlan = deeplApiKey.endsWith(':fx');
-    const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
-    const url = `${baseUrl}/v2/translate`;
-
-    const data = await postJsonProvider(
-        getSpicetifyCorsProxyUrl(url),
-        buildDeepLBody([text], targetLang),
-        getDeepLHeaders(deeplApiKey),
-        'DeepL'
-    );
+    const data = await postDeepL([text], targetLang, 'DeepL');
     recordApiUsage(null);
 
     if (data.translations && data.translations.length > 0) {
@@ -1525,6 +1519,32 @@ function getDeepLHeaders(apiKey: string): Record<string, string> {
     };
 }
 
+function isDeepLWrongEndpointError(error: unknown): boolean {
+    return error instanceof NonRetryableProviderError &&
+        error.status === 403 &&
+        /wrong endpoint/i.test(error.message);
+}
+
+async function postDeepL(texts: string[], targetLang: string, providerName: string): Promise<any> {
+    const apiKey = deeplApiKey;
+    const baseUrls = apiKey.endsWith(':fx')
+        ? [DEEPL_FREE_BASE_URL, DEEPL_PRO_BASE_URL]
+        : [DEEPL_PRO_BASE_URL, DEEPL_FREE_BASE_URL];
+    const send = (baseUrl: string) => postJsonProvider(
+        getSpicetifyCorsProxyUrl(`${baseUrl}/v2/translate`),
+        buildDeepLBody(texts, targetLang),
+        getDeepLHeaders(apiKey),
+        providerName
+    );
+
+    try {
+        return await send(baseUrls[0]);
+    } catch (error) {
+        if (!isDeepLWrongEndpointError(error)) throw error;
+        return send(baseUrls[1]);
+    }
+}
+
 function getTranslationLanguageName(targetLang: string): string {
     const variant = getLanguageVariantByCode(targetLang);
     if (variant) return variant.promptName;
@@ -1768,31 +1788,29 @@ async function translateBatchArray(texts: string[], targetLang: string): Promise
     }
 
     if ((preferredApi === 'deepl' && deeplApiKey) || (preferredApi === 'custom' && customApiFormat === 'deepl')) {
-        const selectedDeepLKey = preferredApi === 'custom' ? customApiKey : deeplApiKey;
-        const isFreePlan = selectedDeepLKey.endsWith(':fx');
-        const baseUrl = isFreePlan ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
-        const url = preferredApi === 'custom' ? validateCustomApiUrl() : `${baseUrl}/v2/translate`;
-        const data = preferredApi === 'deepl'
-            ? await postJsonProvider(
-                getSpicetifyCorsProxyUrl(url),
-                buildDeepLBody(texts, targetLang),
-                getDeepLHeaders(selectedDeepLKey),
-                'DeepL batch'
-            )
-            : await postJsonProvider(
-                url,
-                buildDeepLBody(texts, targetLang),
-                getCustomApiHeaders('deepl'),
-                'DeepL batch'
-            );
-        recordApiUsage(null);
-        if (data.translations && Array.isArray(data.translations)) {
-            return {
-                translations: data.translations.map((t: any) => t.text || ''),
-                detectedLang: data.translations[0]?.detected_source_language?.toLowerCase()
-            };
+        const customUrl = preferredApi === 'custom' ? validateCustomApiUrl() : '';
+        const translations: string[] = [];
+        let detectedLang: string | undefined;
+
+        for (let start = 0; start < texts.length; start += DEEPL_MAX_TEXTS_PER_REQUEST) {
+            const chunk = texts.slice(start, start + DEEPL_MAX_TEXTS_PER_REQUEST);
+            const data = preferredApi === 'deepl'
+                ? await postDeepL(chunk, targetLang, 'DeepL batch')
+                : await postJsonProvider(
+                    customUrl,
+                    buildDeepLBody(chunk, targetLang),
+                    getCustomApiHeaders('deepl'),
+                    'DeepL batch'
+                );
+            recordApiUsage(null);
+            if (!data?.translations || !Array.isArray(data.translations)) {
+                throw new Error('DeepL batch returned unexpected format');
+            }
+            translations.push(...data.translations.map((t: any) => t?.text || ''));
+            detectedLang = detectedLang || data.translations[0]?.detected_source_language?.toLowerCase();
         }
-        throw new Error('DeepL batch returned unexpected format');
+
+        return { translations, detectedLang };
     }
 
     if (preferredApi === 'custom' && !customApiSupportsBatchArray()) {
