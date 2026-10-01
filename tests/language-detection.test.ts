@@ -9,7 +9,9 @@ import {
     detectChineseScript,
     isLikelyNonTargetLine,
     assessMixedLanguageContent,
-    detectRomanizedJapanese
+    detectRomanizedJapanese,
+    isExcludedSourceLanguage,
+    isChineseScriptConversion
 } from '../src/utils/languageDetection';
 
 test('normalizeLanguageCode folds English-based creoles/variants into "en"', () => {
@@ -313,4 +315,24 @@ test('Norwegian Bokmal/Nynorsk codes fold into "no"', () => {
     assert.equal(normalizeLanguageCode('nn-NO'), 'no');
     assert.equal(normalizeLanguageCode('Swedish'), 'sv');
     assert.equal(isSameLanguage('nb', 'no'), true);
+});
+
+test('isExcludedSourceLanguage matches detected codes against the skip list', () => {
+    assert.equal(isExcludedSourceLanguage('ja', ['ja', 'es']), true);
+    assert.equal(isExcludedSourceLanguage('es-419', ['es']), true);
+    assert.equal(isExcludedSourceLanguage('zh-hant', ['zh-TW']), true);
+    assert.equal(isExcludedSourceLanguage('zh-hans', ['zh-TW']), false);
+    assert.equal(isExcludedSourceLanguage('ko', ['ja']), false);
+    assert.equal(isExcludedSourceLanguage('ja', []), false);
+    assert.equal(isExcludedSourceLanguage('unknown', ['ja']), false);
+    assert.equal(isExcludedSourceLanguage(null, ['ja']), false);
+});
+
+test('isChineseScriptConversion only fires between Chinese orthographies', () => {
+    assert.equal(isChineseScriptConversion('zh-hant', 'zh'), true);
+    assert.equal(isChineseScriptConversion('zh-hans', 'zh-TW'), true);
+    assert.equal(isChineseScriptConversion('zh-hani', 'zh-TW'), true);
+    assert.equal(isChineseScriptConversion('ja', 'zh'), false);
+    assert.equal(isChineseScriptConversion('zh-hant', 'en'), false);
+    assert.equal(isChineseScriptConversion(null, 'zh'), false);
 });

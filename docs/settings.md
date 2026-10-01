@@ -11,7 +11,9 @@ Settings live in two places, with the same options in both:
 | --- | --- |
 | **Target Language** | The language to translate into. Full Google Translate language list |
 | **Use Regional Variant** | Asks for a regional variant of the target language (currently Valencian for Catalan). Only shown when the language has a variant *and* the provider is OpenAI, Gemini, Grok, Claude, or Custom — code-based providers have no variant model, so the option hides rather than silently returning the standard language |
-| **Translation Display** | Replace, or Below each line |
+| **Translation Display** | Below each line (default), Replace, or None (original lyrics only, pairs with Learning Mode) |
+| **Don't Translate** | Languages you already read. Songs detected in one of them are left untranslated, and lines in them are skipped inside songs that are otherwise in your target language |
+| **Replace Lyrics When Only the Script Changes** | Shown when the target is Chinese. Between Simplified and Traditional Chinese, the converted lyrics replace the original instead of appearing below it |
 | **Show Romanization** | Adds a pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one |
 | **Translation API** | Google, LibreTranslate, DeepL, OpenAI, Gemini, Grok, Claude, or Custom |
 | **Parallel Translation Requests** | 1–6 concurrent requests on LLM providers. Faster on long songs; higher values increase API usage and can hit free-tier rate limits |

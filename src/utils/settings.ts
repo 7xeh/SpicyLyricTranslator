@@ -1,5 +1,5 @@
 import { storage } from './storage';
-import { state, isLearningActive } from './state';
+import { state, isLearningActive, parseLanguageList } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getDisplayHash, registerSettingLinker } from './updater';
@@ -105,6 +105,57 @@ function createNativeButton(id: string, label: string, buttonText: string, onCli
 
     const button = row.querySelector('button') as HTMLButtonElement;
     button?.addEventListener('click', onClick);
+
+    return row;
+}
+
+function createNativeLanguageList(id: string, label: string, options: { value: string; text: string }[], currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'x-settings-row';
+    row.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div class="slt-native-langs" style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 320px;"></div>
+                <select class="main-dropDown-dropDown" id="${id}"></select>
+            </div>
+        </div>
+    `;
+
+    const chips = row.querySelector('.slt-native-langs') as HTMLElement;
+    const select = row.querySelector('select') as HTMLSelectElement;
+    let selected = parseLanguageList(currentValue);
+    const nameOf = (code: string) => options.find(option => option.value === code)?.text || code.toUpperCase();
+
+    const commit = (next: string[]) => {
+        selected = next;
+        render();
+        onChange(selected.join(','));
+    };
+
+    const render = () => {
+        chips.replaceChildren(...selected.map(code => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'encore-text-body-small e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary x-settings-button';
+            chip.textContent = `${nameOf(code)} ×`;
+            chip.title = `Remove ${nameOf(code)}`;
+            chip.addEventListener('click', () => commit(selected.filter(c => c !== code)));
+            return chip;
+        }));
+        select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + options
+            .filter(option => !selected.includes(option.value))
+            .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.text)}</option>`)
+            .join('');
+        select.value = '';
+    };
+
+    select.addEventListener('change', () => {
+        if (select.value) commit([...selected, select.value]);
+    });
+    render();
 
     return row;
 }
@@ -226,6 +277,8 @@ function createNativeFieldRow(field: SettingsField, root: ParentNode): HTMLEleme
 
     if (field.type === 'toggle') {
         row = createNativeToggle(id, field.label, Boolean(value), checked => handleSettingChange(field, checked, root));
+    } else if (field.type === 'languages') {
+        row = createNativeLanguageList(id, field.label, field.options || [], String(value), field.placeholder || '', selected => handleSettingChange(field, selected, root));
     } else if (field.type === 'select') {
         row = createNativeDropdown(id, field.label, field.options || [], String(value), selected => handleSettingChange(field, selected, root));
     } else {

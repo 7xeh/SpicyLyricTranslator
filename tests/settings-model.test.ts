@@ -113,7 +113,7 @@ test('the display mode setting exposes the none option to the UI', () => {
     assert.ok(field);
     assert.equal(field!.type, 'select');
     assert.ok(field!.options?.some(option => option.value === 'none'));
-    assert.equal(field!.defaultValue, 'replace');
+    assert.equal(field!.defaultValue, 'interleaved');
 });
 
 test('the none display mode is findable by the words a user would search', () => {

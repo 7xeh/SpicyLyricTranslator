@@ -1756,6 +1756,16 @@ var SpicyLyricTranslater = (() => {
       return true;
     return normalizedSource === "zh-hani" && normalizedTarget.startsWith("zh-");
   }
+  function isExcludedSourceLanguage(source, excluded) {
+    if (!source || excluded.length === 0)
+      return false;
+    return excluded.some((code) => isSameLanguage(source, code));
+  }
+  function isChineseScriptConversion(source, target) {
+    if (!source)
+      return false;
+    return normalizeLanguageCode(source).startsWith("zh-") && normalizeTargetLanguageCode(target).startsWith("zh-");
+  }
   function assessMixedLanguageContent(lines, targetLanguage) {
     let nonTargetCount = 0;
     let nonLatinNonTargetCount = 0;
@@ -5158,6 +5168,9 @@ ${text3}`
       storage.get("preferred-api") || "google"
     );
   }
+  function parseLanguageList(value) {
+    return Array.from(new Set((value || "").split(",").map((code) => code.trim()).filter(Boolean)));
+  }
   function resolveStoredNotificationLevel() {
     const stored = storage.get("notification-level");
     if (stored === "all" || stored === "errors" || stored === "off")
@@ -5201,6 +5214,8 @@ ${text3}`
     lastViewMode: null,
     translationAbortController: null,
     overlayMode: storage.get("overlay-mode") || "interleaved",
+    skipLanguages: parseLanguageList(storage.get("skip-languages")),
+    replaceScriptConversions: storage.get("replace-script-conversions") === "true",
     detectedLanguage: null,
     syncWordHighlight: storage.get("sync-word-highlight") !== "false",
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
@@ -10156,7 +10171,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"170c87645b1898b0ed0a2e8652d7c7cde1365202b9c63ac6455fdf3d9da3a518".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "170c87645b1898b0ed0a2e8652d7c7cde1365202b9c63ac6455fdf3d9da3a518" : "";
+    return !"ef4767fe77820406fe9268042a7d2157818b91600992489a40d33ad530182ab4".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ef4767fe77820406fe9268042a7d2157818b91600992489a40d33ad530182ab4" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -11446,8 +11461,8 @@ body.slt-update-waiting #TranslateToggle::after {
     { value: "deepl", text: "DeepL Compatible" }
   ];
   var OVERLAY_MODE_OPTIONS = [
-    { value: "replace", text: "Replace (default)" },
-    { value: "interleaved", text: "Below each line" },
+    { value: "replace", text: "Replace" },
+    { value: "interleaved", text: "Below each line (default)" },
     { value: "none", text: "None (original lyrics only)" }
   ];
   var SETTINGS_SCHEMA = [
@@ -11482,7 +11497,7 @@ body.slt-update-waiting #TranslateToggle::after {
       label: "Translation Display",
       type: "select",
       storageKey: "overlay-mode",
-      defaultValue: "replace",
+      defaultValue: "interleaved",
       options: OVERLAY_MODE_OPTIONS,
       description: "How translated lyrics are displayed. None still translates and caches, but leaves the lyrics untouched - pairs with Learning Mode, which shows the translation itself.",
       effects: ["reapplyTranslations"]
@@ -11497,6 +11512,31 @@ body.slt-update-waiting #TranslateToggle::after {
       defaultValue: false,
       description: "Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one",
       effects: ["romanizationDisplay"]
+    },
+    {
+      id: "skip-languages",
+      section: "Translation",
+      keywords: "skip exclude ignore never do not translate languages i read understand multilingual bilingual",
+      label: "Don't Translate",
+      type: "languages",
+      storageKey: "skip-languages",
+      defaultValue: "",
+      options: SUPPORTED_LANGUAGES.map((language) => ({ value: language.code, text: language.name })),
+      placeholder: "Add a language\u2026",
+      description: "Songs in these languages are left as they are. Add the languages you already read.",
+      effects: ["retranslate"]
+    },
+    {
+      id: "replace-script-conversions",
+      section: "Translation",
+      keywords: "chinese simplified traditional script convert conversion replace in place hanzi",
+      label: "Replace Lyrics When Only the Script Changes",
+      type: "toggle",
+      storageKey: "replace-script-conversions",
+      defaultValue: false,
+      description: "Between Simplified and Traditional Chinese, show the converted lyrics in place of the original instead of below it.",
+      visibleWhen: () => (storage.get("target-language") || "en").startsWith("zh"),
+      effects: ["reapplyTranslations"]
     },
     {
       id: "preferred-api",
@@ -11959,6 +11999,12 @@ body.slt-update-waiting #TranslateToggle::after {
         break;
       case "show-romanization":
         state.showRomanization = Boolean(value);
+        break;
+      case "skip-languages":
+        state.skipLanguages = parseLanguageList(String(value));
+        break;
+      case "replace-script-conversions":
+        state.replaceScriptConversions = Boolean(value);
         break;
       case "preferred-api":
         state.preferredApi = String(value);
@@ -12791,6 +12837,10 @@ body.slt-update-waiting #TranslateToggle::after {
         continue;
       }
       const trimmed = line.trim();
+      const detected = detectLanguageHeuristic(trimmed);
+      if (detected && detected.confidence >= 0.6 && isExcludedSourceLanguage(detected.code, state.skipLanguages)) {
+        continue;
+      }
       const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
       if (targetIsLatin && hasNonLatin) {
         indexes.push(i);
@@ -12807,7 +12857,6 @@ body.slt-update-waiting #TranslateToggle::after {
           continue;
         }
       }
-      const detected = detectLanguageHeuristic(trimmed);
       if (!detected) {
         if (isLikelyNonTargetLine(trimmed, targetLanguage)) {
           indexes.push(i);
@@ -13097,6 +13146,21 @@ body.slt-update-waiting #TranslateToggle::after {
       }
       if (skipCheck.detectedLanguage)
         state.detectedLanguage = skipCheck.detectedLanguage;
+      const sourceLanguage = skipCheck.detectedLanguage || state.detectedLanguage;
+      if (!skipCheck.skip && sourceLanguage && isExcludedSourceLanguage(sourceLanguage, state.skipLanguages)) {
+        removeTranslations();
+        state.lastTranslatedSongUri = currentTrackUri2;
+        lastTranslatedRomanizationState = romanizationOn;
+        if (shouldNotifySkip(currentTrackUri2, state.targetLanguage, romanizationOn)) {
+          notify({
+            kind: "info",
+            key: "slt-skip",
+            title: `Not translating ${getLanguageName(sourceLanguage)}`,
+            description: "It's on your Don't Translate list."
+          });
+        }
+        return;
+      }
       let translations;
       if (skipCheck.skip) {
         if (matchesSkippedTranslation(currentTrackUri2, state.targetLanguage, romanizationOn, sourceLyricsKey)) {
@@ -13503,6 +13567,12 @@ body.slt-update-waiting #TranslateToggle::after {
   function looseLatinSkeleton(text3) {
     return (text3 || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   }
+  function resolveOverlayMode() {
+    if (state.overlayMode === "interleaved" && state.replaceScriptConversions && isChineseScriptConversion(state.detectedLanguage, state.targetLanguage)) {
+      return "replace";
+    }
+    return state.overlayMode;
+  }
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
     lines.forEach((line, index) => {
@@ -13524,7 +13594,7 @@ body.slt-update-waiting #TranslateToggle::after {
       translationMapByIndex.set(index, translatedText);
     });
     const overlaySettings = {
-      mode: state.overlayMode,
+      mode: resolveOverlayMode(),
       syncWordHighlight: state.syncWordHighlight,
       showRomanization: state.showRomanization,
       learningMode: isLearningActive()
@@ -14443,6 +14513,10 @@ body.slt-update-waiting #TranslateToggle::after {
       const option = (field.options || []).find((o) => o.value === String(value));
       return option ? option.text : String(value || "\u2014");
     }
+    if (field.type === "languages") {
+      const names = parseLanguageList(String(value)).map(languageName);
+      return names.length ? names.join(", ") : "None";
+    }
     if (field.secret)
       return value ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "Not set";
     const str = String(value ?? "");
@@ -14498,6 +14572,7 @@ body.slt-update-waiting #TranslateToggle::after {
     );
     const control = el("div", { class: "slt-m-field-control" });
     let input;
+    let syncLanguages = null;
     if (field.type === "toggle") {
       input = el("input", { type: "checkbox", id });
       control.append(el("label", { class: "slt-m-toggle" }, input, el("span", { class: "slt-m-toggle-slider" })));
@@ -14506,6 +14581,27 @@ body.slt-update-waiting #TranslateToggle::after {
       (field.options || []).forEach((option) => select.append(el("option", { value: option.value, text: option.text })));
       input = select;
       control.append(select);
+    } else if (field.type === "languages") {
+      const chips = el("div", { class: "slt-m-langs" });
+      const add = el("select", { class: "slt-m-select", id });
+      input = add;
+      syncLanguages = (value) => {
+        const selected = parseLanguageList(value);
+        chips.replaceChildren(...selected.map((code) => {
+          const remove = el("button", { type: "button", class: "slt-m-lang-remove", title: "Remove", "aria-label": `Remove ${languageName(code)}`, html: CLOSE_SVG });
+          remove.addEventListener("click", () => {
+            applySettingsBatch([{ field, value: selected.filter((c) => c !== code).join(",") }]);
+            refreshAll();
+          });
+          return el("span", { class: "slt-m-lang" }, languageName(code), remove);
+        }));
+        add.replaceChildren(
+          el("option", { value: "", text: field.placeholder || "Add\u2026" }),
+          ...(field.options || []).filter((option) => !selected.includes(option.value)).map((option) => el("option", { value: option.value, text: option.text }))
+        );
+        add.value = "";
+      };
+      control.append(el("div", { class: "slt-m-langs-box" }, chips, add));
     } else {
       input = el("input", {
         class: "slt-m-text",
@@ -14532,7 +14628,9 @@ body.slt-update-waiting #TranslateToggle::after {
     row.append(labelBox, control);
     const sync = () => {
       const value = readSettingValue(field);
-      if (field.type === "toggle") {
+      if (syncLanguages) {
+        syncLanguages(String(value));
+      } else if (field.type === "toggle") {
         input.checked = value === true;
       } else if (document.activeElement !== input || field.type === "select") {
         input.value = String(value);
@@ -14540,7 +14638,9 @@ body.slt-update-waiting #TranslateToggle::after {
       reset.classList.toggle("slt-m-field-reset-on", !isSettingAtDefault(field));
     };
     input.addEventListener("change", () => {
-      const value = field.type === "toggle" ? input.checked : input.value;
+      if (field.type === "languages" && !input.value)
+        return;
+      const value = field.type === "toggle" ? input.checked : field.type === "languages" ? [...parseLanguageList(String(readSettingValue(field))), input.value].join(",") : input.value;
       applySettingsBatch([{ field, value }]);
       refreshAll();
     });
@@ -15996,6 +16096,37 @@ body.slt-update-waiting #TranslateToggle::after {
     background-position: right 10px center;
 }
 .slt-modal-root .slt-m-select option { background-color: #1c1c1f; color: #fff; }
+.slt-modal-root .slt-m-field-languages { align-items: start; }
+.slt-modal-root .slt-m-langs-box { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.slt-modal-root .slt-m-langs { display: flex; flex-wrap: wrap; gap: 5px; }
+.slt-modal-root .slt-m-langs:empty { display: none; }
+.slt-modal-root .slt-m-lang {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 3px 2px 9px;
+    border-radius: 999px;
+    background: var(--slt-m-accent-soft);
+    color: var(--slt-m-text);
+    font-size: 12px;
+    line-height: 18px;
+}
+.slt-modal-root .slt-m-lang-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--slt-m-text-dim);
+    cursor: pointer;
+}
+.slt-modal-root .slt-m-lang-remove:hover,
+.slt-modal-root .slt-m-lang-remove:focus-visible { color: var(--slt-m-text); background: rgba(255, 255, 255, 0.12); }
+.slt-modal-root .slt-m-lang-remove svg { width: 10px; height: 10px; }
 .slt-modal-root .slt-m-select:focus,
 .slt-modal-root .slt-m-text:focus { border-color: var(--slt-m-accent); background-color: rgba(0, 0, 0, 0.45); }
 .slt-modal-root .slt-m-text::placeholder { color: var(--slt-m-text-faint); }
@@ -16276,6 +16407,49 @@ body.slt-update-waiting #TranslateToggle::after {
     button?.addEventListener("click", onClick);
     return row;
   }
+  function createNativeLanguageList(id, label, options, currentValue, placeholder, onChange) {
+    const row = document.createElement("div");
+    row.className = "x-settings-row";
+    row.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div class="slt-native-langs" style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 320px;"></div>
+                <select class="main-dropDown-dropDown" id="${id}"></select>
+            </div>
+        </div>
+    `;
+    const chips = row.querySelector(".slt-native-langs");
+    const select = row.querySelector("select");
+    let selected = parseLanguageList(currentValue);
+    const nameOf = (code) => options.find((option) => option.value === code)?.text || code.toUpperCase();
+    const commit = (next) => {
+      selected = next;
+      render();
+      onChange(selected.join(","));
+    };
+    const render = () => {
+      chips.replaceChildren(...selected.map((code) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "encore-text-body-small e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary x-settings-button";
+        chip.textContent = `${nameOf(code)} \xD7`;
+        chip.title = `Remove ${nameOf(code)}`;
+        chip.addEventListener("click", () => commit(selected.filter((c) => c !== code)));
+        return chip;
+      }));
+      select.innerHTML = `<option value="">${escapeHtml3(placeholder)}</option>` + options.filter((option) => !selected.includes(option.value)).map((option) => `<option value="${escapeHtml3(option.value)}">${escapeHtml3(option.text)}</option>`).join("");
+      select.value = "";
+    };
+    select.addEventListener("change", () => {
+      if (select.value)
+        commit([...selected, select.value]);
+    });
+    render();
+    return row;
+  }
   function createNativeInput(id, label, type, currentValue, placeholder, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
@@ -16388,6 +16562,8 @@ body.slt-update-waiting #TranslateToggle::after {
     let row;
     if (field.type === "toggle") {
       row = createNativeToggle(id, field.label, Boolean(value), (checked) => handleSettingChange(field, checked, root));
+    } else if (field.type === "languages") {
+      row = createNativeLanguageList(id, field.label, field.options || [], String(value), field.placeholder || "", (selected) => handleSettingChange(field, selected, root));
     } else if (field.type === "select") {
       row = createNativeDropdown(id, field.label, field.options || [], String(value), (selected) => handleSettingChange(field, selected, root));
     } else {

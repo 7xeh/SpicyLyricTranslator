@@ -31,7 +31,8 @@ import {
     CINEMA_CONTAINER_SELECTOR,
     CINEMA_LYRICS_CONTENT_SELECTOR
 } from './translationOverlay';
-import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine, getLanguageName } from './languageDetection';
+import type { OverlayMode } from './translationOverlay';
+import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine, getLanguageName, isExcludedSourceLanguage, isChineseScriptConversion } from './languageDetection';
 import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
@@ -584,6 +585,11 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
         }
 
         const trimmed = line.trim();
+        const detected = detectLanguageHeuristic(trimmed);
+        if (detected && detected.confidence >= 0.6 && isExcludedSourceLanguage(detected.code, state.skipLanguages)) {
+            continue;
+        }
+
         const hasNonLatin = /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u0E00-\u0E7F\u0900-\u097F\u0370-\u03FF]/.test(trimmed);
 
         if (targetIsLatin && hasNonLatin) {
@@ -604,7 +610,6 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
             }
         }
 
-        const detected = detectLanguageHeuristic(trimmed);
         if (!detected) {
             if (isLikelyNonTargetLine(trimmed, targetLanguage)) {
                 indexes.push(i);
@@ -956,6 +961,22 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
 
         if (skipCheck.detectedLanguage) state.detectedLanguage = skipCheck.detectedLanguage;
+
+        const sourceLanguage = skipCheck.detectedLanguage || state.detectedLanguage;
+        if (!skipCheck.skip && sourceLanguage && isExcludedSourceLanguage(sourceLanguage, state.skipLanguages)) {
+            removeTranslations();
+            state.lastTranslatedSongUri = currentTrackUri;
+            lastTranslatedRomanizationState = romanizationOn;
+            if (shouldNotifySkip(currentTrackUri, state.targetLanguage, romanizationOn)) {
+                notify({
+                    kind: 'info',
+                    key: 'slt-skip',
+                    title: `Not translating ${getLanguageName(sourceLanguage)}`,
+                    description: "It's on your Don't Translate list."
+                });
+            }
+            return;
+        }
 
         let translations;
 
@@ -1384,6 +1405,17 @@ function looseLatinSkeleton(text: string): string {
     return (text || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+function resolveOverlayMode(): OverlayMode {
+    if (
+        state.overlayMode === 'interleaved' &&
+        state.replaceScriptConversions &&
+        isChineseScriptConversion(state.detectedLanguage, state.targetLanguage)
+    ) {
+        return 'replace';
+    }
+    return state.overlayMode;
+}
+
 function applyTranslations(lines: NodeListOf<Element>): number {
     const translationMapByIndex = new Map<number, string>();
     lines.forEach((line, index) => {
@@ -1404,7 +1436,7 @@ function applyTranslations(lines: NodeListOf<Element>): number {
     });
 
     const overlaySettings = {
-        mode: state.overlayMode,
+        mode: resolveOverlayMode(),
         syncWordHighlight: state.syncWordHighlight,
         showRomanization: state.showRomanization,
         learningMode: isLearningActive()

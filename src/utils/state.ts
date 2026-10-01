@@ -14,6 +14,10 @@ function resolveStoredTargetLanguage(): string {
     );
 }
 
+export function parseLanguageList(value: string | null | undefined): string[] {
+    return Array.from(new Set((value || '').split(',').map(code => code.trim()).filter(Boolean)));
+}
+
 export type NotificationLevel = 'all' | 'errors' | 'off';
 
 function resolveStoredNotificationLevel(): NotificationLevel {
@@ -62,6 +66,8 @@ export interface ExtensionState {
     lastViewMode: string | null;
     translationAbortController: AbortController | null;
     overlayMode: OverlayMode;
+    skipLanguages: string[];
+    replaceScriptConversions: boolean;
     detectedLanguage: string | null;
     syncWordHighlight: boolean;
     showQualityIndicator: boolean;
@@ -110,6 +116,8 @@ export const state: ExtensionState = {
     lastViewMode: null,
     translationAbortController: null,
     overlayMode: (storage.get('overlay-mode') as OverlayMode) || 'interleaved',
+    skipLanguages: parseLanguageList(storage.get('skip-languages')),
+    replaceScriptConversions: storage.get('replace-script-conversions') === 'true',
     detectedLanguage: null,
     syncWordHighlight: storage.get('sync-word-highlight') !== 'false',
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',

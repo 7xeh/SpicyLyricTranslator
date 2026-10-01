@@ -647,6 +647,16 @@ export function isSameLanguage(source: string, target: string): boolean {
     return normalizedSource === 'zh-hani' && normalizedTarget.startsWith('zh-');
 }
 
+export function isExcludedSourceLanguage(source: string | null | undefined, excluded: string[]): boolean {
+    if (!source || excluded.length === 0) return false;
+    return excluded.some(code => isSameLanguage(source, code));
+}
+
+export function isChineseScriptConversion(source: string | null | undefined, target: string): boolean {
+    if (!source) return false;
+    return normalizeLanguageCode(source).startsWith('zh-') && normalizeTargetLanguageCode(target).startsWith('zh-');
+}
+
 export function assessMixedLanguageContent(
     lines: string[],
     targetLanguage: string
@@ -846,6 +856,8 @@ export default {
     normalizeTargetLanguageCode,
     scanCorpusForCjk,
     isSameLanguage,
+    isExcludedSourceLanguage,
+    isChineseScriptConversion,
     isLikelyNonTargetLine,
     assessMixedLanguageContent,
     shouldSkipTranslation,

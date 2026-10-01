@@ -1,4 +1,4 @@
-import { state } from './state';
+import { state, parseLanguageList } from './state';
 import type { NotificationLevel } from './state';
 import { storage } from './storage';
 import { notify } from './notify';
@@ -8,7 +8,7 @@ import type { ApiPreference, CustomApiFormat } from './translator';
 import { getModelOptions, refreshModelCatalog, resolveModelId, MODEL_PROVIDERS } from './modelCatalog';
 import type { ModelProvider } from './modelCatalog';
 
-export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password';
+export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages';
 export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'learningModeClass';
 
 export interface SettingsOption {
@@ -85,8 +85,8 @@ export const CUSTOM_API_FORMAT_OPTIONS: SettingsOption[] = [
 ];
 
 export const OVERLAY_MODE_OPTIONS: SettingsOption[] = [
-    { value: 'replace', text: 'Replace (default)' },
-    { value: 'interleaved', text: 'Below each line' },
+    { value: 'replace', text: 'Replace' },
+    { value: 'interleaved', text: 'Below each line (default)' },
     { value: 'none', text: 'None (original lyrics only)' }
 ];
 
@@ -122,7 +122,7 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         label: 'Translation Display',
         type: 'select',
         storageKey: 'overlay-mode',
-        defaultValue: 'replace',
+        defaultValue: 'interleaved',
         options: OVERLAY_MODE_OPTIONS,
         description: 'How translated lyrics are displayed. None still translates and caches, but leaves the lyrics untouched - pairs with Learning Mode, which shows the translation itself.',
         effects: ['reapplyTranslations']
@@ -137,6 +137,31 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         defaultValue: false,
         description: 'Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one',
         effects: ['romanizationDisplay']
+    },
+    {
+        id: 'skip-languages',
+        section: 'Translation',
+        keywords: 'skip exclude ignore never do not translate languages i read understand multilingual bilingual',
+        label: "Don't Translate",
+        type: 'languages',
+        storageKey: 'skip-languages',
+        defaultValue: '',
+        options: SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name })),
+        placeholder: 'Add a language…',
+        description: 'Songs in these languages are left as they are. Add the languages you already read.',
+        effects: ['retranslate']
+    },
+    {
+        id: 'replace-script-conversions',
+        section: 'Translation',
+        keywords: 'chinese simplified traditional script convert conversion replace in place hanzi',
+        label: 'Replace Lyrics When Only the Script Changes',
+        type: 'toggle',
+        storageKey: 'replace-script-conversions',
+        defaultValue: false,
+        description: 'Between Simplified and Traditional Chinese, show the converted lyrics in place of the original instead of below it.',
+        visibleWhen: () => (storage.get('target-language') || 'en').startsWith('zh'),
+        effects: ['reapplyTranslations']
     },
     {
         id: 'preferred-api',
@@ -616,6 +641,12 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'show-romanization':
             state.showRomanization = Boolean(value);
+            break;
+        case 'skip-languages':
+            state.skipLanguages = parseLanguageList(String(value));
+            break;
+        case 'replace-script-conversions':
+            state.replaceScriptConversions = Boolean(value);
             break;
         case 'preferred-api':
             state.preferredApi = String(value) as ApiPreference;

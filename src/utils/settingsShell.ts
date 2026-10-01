@@ -1,6 +1,6 @@
 import { el, text, openDialog, openSurfaces, prefersReducedMotion, paintTone, CLOSE_SVG, SurfaceHandle, Tone } from './surface';
 import { toast, getInbox, markInboxRead, clearInbox, onInboxChange, unreadCount, runInboxAction, InboxEntry } from './toast';
-import { state } from './state';
+import { state, parseLanguageList } from './state';
 import { storage } from './storage';
 import { Icons } from './icons';
 import { SUPPORTED_LANGUAGES } from './translator';
@@ -86,6 +86,10 @@ function describeValue(field: SettingsField, value: string | boolean): string {
         const option = (field.options || []).find(o => o.value === String(value));
         return option ? option.text : String(value || '—');
     }
+    if (field.type === 'languages') {
+        const names = parseLanguageList(String(value)).map(languageName);
+        return names.length ? names.join(', ') : 'None';
+    }
     if (field.secret) return value ? '••••••••' : 'Not set';
     const str = String(value ?? '');
     return str ? (str.length > 32 ? `${str.slice(0, 31)}…` : str) : '—';
@@ -142,6 +146,7 @@ function buildField(field: SettingsField): FieldHandle {
 
     const control = el('div', { class: 'slt-m-field-control' });
     let input: HTMLInputElement | HTMLSelectElement;
+    let syncLanguages: ((value: string) => void) | null = null;
 
     if (field.type === 'toggle') {
         input = el('input', { type: 'checkbox', id });
@@ -151,6 +156,27 @@ function buildField(field: SettingsField): FieldHandle {
         (field.options || []).forEach(option => select.append(el('option', { value: option.value, text: option.text })));
         input = select;
         control.append(select);
+    } else if (field.type === 'languages') {
+        const chips = el('div', { class: 'slt-m-langs' });
+        const add = el('select', { class: 'slt-m-select', id });
+        input = add;
+        syncLanguages = (value: string) => {
+            const selected = parseLanguageList(value);
+            chips.replaceChildren(...selected.map(code => {
+                const remove = el('button', { type: 'button', class: 'slt-m-lang-remove', title: 'Remove', 'aria-label': `Remove ${languageName(code)}`, html: CLOSE_SVG });
+                remove.addEventListener('click', () => {
+                    applySettingsBatch([{ field, value: selected.filter(c => c !== code).join(',') }]);
+                    refreshAll();
+                });
+                return el('span', { class: 'slt-m-lang' }, languageName(code), remove);
+            }));
+            add.replaceChildren(
+                el('option', { value: '', text: field.placeholder || 'Add…' }),
+                ...(field.options || []).filter(option => !selected.includes(option.value)).map(option => el('option', { value: option.value, text: option.text }))
+            );
+            add.value = '';
+        };
+        control.append(el('div', { class: 'slt-m-langs-box' }, chips, add));
     } else {
         input = el('input', {
             class: 'slt-m-text',
@@ -179,7 +205,9 @@ function buildField(field: SettingsField): FieldHandle {
 
     const sync = () => {
         const value = readSettingValue(field);
-        if (field.type === 'toggle') {
+        if (syncLanguages) {
+            syncLanguages(String(value));
+        } else if (field.type === 'toggle') {
             (input as HTMLInputElement).checked = value === true;
         } else if (document.activeElement !== input || field.type === 'select') {
             input.value = String(value);
@@ -188,7 +216,12 @@ function buildField(field: SettingsField): FieldHandle {
     };
 
     input.addEventListener('change', () => {
-        const value = field.type === 'toggle' ? (input as HTMLInputElement).checked : input.value;
+        if (field.type === 'languages' && !input.value) return;
+        const value = field.type === 'toggle'
+            ? (input as HTMLInputElement).checked
+            : field.type === 'languages'
+                ? [...parseLanguageList(String(readSettingValue(field))), input.value].join(',')
+                : input.value;
         applySettingsBatch([{ field, value }]);
         refreshAll();
     });
@@ -1544,6 +1577,37 @@ const SHELL_STYLES = `
     background-position: right 10px center;
 }
 .slt-modal-root .slt-m-select option { background-color: #1c1c1f; color: #fff; }
+.slt-modal-root .slt-m-field-languages { align-items: start; }
+.slt-modal-root .slt-m-langs-box { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.slt-modal-root .slt-m-langs { display: flex; flex-wrap: wrap; gap: 5px; }
+.slt-modal-root .slt-m-langs:empty { display: none; }
+.slt-modal-root .slt-m-lang {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 3px 2px 9px;
+    border-radius: 999px;
+    background: var(--slt-m-accent-soft);
+    color: var(--slt-m-text);
+    font-size: 12px;
+    line-height: 18px;
+}
+.slt-modal-root .slt-m-lang-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--slt-m-text-dim);
+    cursor: pointer;
+}
+.slt-modal-root .slt-m-lang-remove:hover,
+.slt-modal-root .slt-m-lang-remove:focus-visible { color: var(--slt-m-text); background: rgba(255, 255, 255, 0.12); }
+.slt-modal-root .slt-m-lang-remove svg { width: 10px; height: 10px; }
 .slt-modal-root .slt-m-select:focus,
 .slt-modal-root .slt-m-text:focus { border-color: var(--slt-m-accent); background-color: rgba(0, 0, 0, 0.45); }
 .slt-modal-root .slt-m-text::placeholder { color: var(--slt-m-text-faint); }
