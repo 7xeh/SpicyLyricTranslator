@@ -19,6 +19,7 @@ export function parseLanguageList(value: string | null | undefined): string[] {
 }
 
 export type NotificationLevel = 'all' | 'errors' | 'off';
+export type LearningBreakdownMode = 'auto' | 'on-demand';
 
 function resolveStoredNotificationLevel(): NotificationLevel {
     const stored = storage.get('notification-level');
@@ -75,6 +76,10 @@ export interface ExtensionState {
     showRomanization: boolean;
     learningMode: boolean;
     learningVisible: boolean;
+    learningBreakdownMode: LearningBreakdownMode;
+    translateHotkey: string;
+    learningHotkey: string;
+    breakdownHotkey: string;
     _translationsByIndex?: Map<number, string>;
     _qualityByIndex?: Map<number, TranslationQualityMeta>;
 }
@@ -125,6 +130,10 @@ export const state: ExtensionState = {
     showRomanization: storage.get('show-romanization') === 'true',
     learningMode: storage.get('learning-mode') === 'true',
     learningVisible: storage.get('learning-visible') !== 'false',
+    learningBreakdownMode: storage.get('learning-breakdown-mode') === 'on-demand' ? 'on-demand' : 'auto',
+    translateHotkey: storage.get('translate-hotkey') ?? 'Alt+T',
+    learningHotkey: storage.get('learning-hotkey') ?? 'Alt+L',
+    breakdownHotkey: storage.get('breakdown-hotkey') ?? 'Alt+B',
     _qualityByIndex: undefined
 };
 

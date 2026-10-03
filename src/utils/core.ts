@@ -1,4 +1,5 @@
 import { state, TranslationQualityMeta, isLearningActive } from './state';
+import { normalizeHotkey } from './hotkeys';
 import { Icons } from './icons';
 import { storage } from './storage';
 import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES } from './translator';
@@ -24,6 +25,8 @@ import {
     resumeActiveSync,
     setBreakdownLookup,
     setBreakdownPrefetch,
+    setBreakdownRequest,
+    setLearningOnDemand,
     setOverlayLearningMode,
     invalidateLearningRow,
     setLearningTargetLanguage,
@@ -1800,31 +1803,49 @@ const requestedBreakdowns = new Set<string>();
 const failedBreakdowns = new Map<string, number>();
 const BREAKDOWN_RETRY_MS = 60000;
 
-function requestBreakdown(sourceText: string, onReady?: () => void): void {
-    const key = `${state.targetLanguage}:${sourceText}`;
-    if (requestedBreakdowns.has(key)) return;
+const BREAKDOWN_PREFETCH_TRIGGER = 3;
 
+function breakdownRequestKey(sourceText: string): string {
+    return `${state.targetLanguage}:${sourceText}`;
+}
+
+function needsBreakdown(sourceText: string): boolean {
+    if (getCachedWordBreakdown(sourceText, state.targetLanguage)) return false;
+    const key = breakdownRequestKey(sourceText);
+    if (requestedBreakdowns.has(key)) return false;
     const failedAt = failedBreakdowns.get(key);
-    if (failedAt && Date.now() - failedAt < BREAKDOWN_RETRY_MS) return;
+    return !failedAt || Date.now() - failedAt >= BREAKDOWN_RETRY_MS;
+}
+
+function requestBreakdown(sourceText: string, force: boolean = false): Promise<boolean> {
+    if (getCachedWordBreakdown(sourceText, state.targetLanguage)) return Promise.resolve(true);
+    const key = breakdownRequestKey(sourceText);
+    if (!force && !needsBreakdown(sourceText)) return Promise.resolve(false);
 
     requestedBreakdowns.add(key);
     const trackUri = getCurrentTrackUri();
 
-    void fetchWordBreakdown(sourceText, state.detectedLanguage || undefined, state.targetLanguage)
+    return fetchWordBreakdown(sourceText, state.detectedLanguage || undefined, state.targetLanguage)
         .then(tokens => {
             if (!tokens) {
                 failedBreakdowns.set(key, Date.now());
-                return;
+                return false;
             }
             failedBreakdowns.delete(key);
-            if (onReady && getCurrentTrackUri() === trackUri) onReady();
+            if (getCurrentTrackUri() === trackUri) invalidateLearningRow();
+            return true;
         })
         .catch(() => {
             failedBreakdowns.set(key, Date.now());
+            return false;
         })
         .finally(() => {
             requestedBreakdowns.delete(key);
         });
+}
+
+function isBreakdownOnDemand(): boolean {
+    return state.learningBreakdownMode === 'on-demand';
 }
 
 function registerBreakdownLookup(): void {
@@ -1832,22 +1853,29 @@ function registerBreakdownLookup(): void {
         if (!isLearningActive()) return null;
         setLearningTargetLanguage(state.targetLanguage);
         setLearningSourceLanguage(state.detectedLanguage || '');
+        setLearningOnDemand(isBreakdownOnDemand() && providerSupportsWordBreakdown(), normalizeHotkey(state.breakdownHotkey));
 
         const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
         if (cached) return cached;
 
-        if (!providerSupportsWordBreakdown()) return null;
+        if (!providerSupportsWordBreakdown() || isBreakdownOnDemand()) return null;
 
-        requestBreakdown(sourceText, invalidateLearningRow);
+        void requestBreakdown(sourceText);
         return null;
     });
 
     setBreakdownPrefetch((sourceTexts: string[]) => {
-        if (!isLearningActive() || !providerSupportsWordBreakdown()) return;
+        if (!isLearningActive() || isBreakdownOnDemand() || !providerSupportsWordBreakdown()) return;
+        const dueSoon = sourceTexts.slice(0, BREAKDOWN_PREFETCH_TRIGGER).some(needsBreakdown);
+        if (!dueSoon) return;
         for (const sourceText of sourceTexts) {
-            if (getCachedWordBreakdown(sourceText, state.targetLanguage)) continue;
-            requestBreakdown(sourceText);
+            if (needsBreakdown(sourceText)) void requestBreakdown(sourceText);
         }
+    });
+
+    setBreakdownRequest((sourceText: string) => {
+        if (!isLearningActive() || !providerSupportsWordBreakdown()) return Promise.resolve(false);
+        return requestBreakdown(sourceText, true);
     });
 }
 
@@ -1906,14 +1934,4 @@ export function setupViewModeObserver(): void {
             if (pipWindow) syncLearningButtonInDocument(pipWindow.document);
         }
     }, 2000);
-}
-
-export function setupKeyboardShortcut(): void {
-    document.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 't') {
-            e.preventDefault();
-            e.stopPropagation();
-            if (isSpicyLyricsOpen()) handleTranslateToggle();
-        }
-    });
 }

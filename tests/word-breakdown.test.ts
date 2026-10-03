@@ -6,6 +6,8 @@ import {
     similarity,
     buildHeuristicBreakdown,
     parseModelBreakdown,
+    parseModelBreakdownBatch,
+    buildBatchBreakdownPrompt,
     breakdownCacheKey,
     hasCjk,
     chunkTargetSpan,
@@ -225,4 +227,31 @@ test('heuristic breakdown never slices by position across word orders', () => {
 test('heuristic breakdown keeps shared anchors across word orders without guessing the rest', () => {
     const result = buildHeuristicBreakdown('東京 で 君 を 待つ', 'I wait for you in Tokyo', 'en', 'ja');
     assert.ok(result.tokens.every(token => !token.target || token.confidence === 'high'), JSON.stringify(result.tokens));
+});
+
+test('parseModelBreakdownBatch maps numbered keys back to each line', () => {
+    const raw = '```json\n{"1":[{"source":"I","target":"나"}],"2":[{"source":"love","target":"사랑해"},{"source":"you","target":"너를"}]}\n```';
+    const results = parseModelBreakdownBatch(raw, 3);
+    assert.equal(results.length, 3);
+    assert.equal(results[0]?.[0].target, '나');
+    assert.equal(results[1]?.length, 2);
+    assert.equal(results[2], null);
+});
+
+test('parseModelBreakdownBatch accepts an array of per-line arrays', () => {
+    const raw = '[[{"source":"a","target":"b"}],[{"source":"c","target":"d"}]]';
+    const results = parseModelBreakdownBatch(raw, 2);
+    assert.equal(results[0]?.[0].source, 'a');
+    assert.equal(results[1]?.[0].target, 'd');
+});
+
+test('parseModelBreakdownBatch returns all nulls on garbage or mismatched arrays', () => {
+    assert.deepEqual(parseModelBreakdownBatch('not json', 2), [null, null]);
+    assert.deepEqual(parseModelBreakdownBatch('[[{"source":"a","target":"b"}]]', 2), [null, null]);
+});
+
+test('buildBatchBreakdownPrompt numbers every line', () => {
+    const prompt = buildBatchBreakdownPrompt(['first line', 'second line'], 'English', 'Korean');
+    assert.match(prompt, /\n1\. first line\n2\. second line$/);
+    assert.match(prompt, /"1" to "2"/);
 });

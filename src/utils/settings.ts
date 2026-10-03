@@ -11,6 +11,7 @@ import { createSettingsShell, destroySettingsShell, isSettingsOpen, revealSettin
 import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { setConnectionIndicatorHidden } from './connectivity';
 import { setOverlayRomanization, setOverlayLearningMode } from './translationOverlay';
+import { attachHotkeyCapture } from './hotkeys';
 import {
     SETTINGS_SCHEMA,
     SETTINGS_CATEGORIES,
@@ -350,6 +351,8 @@ function createNativeFieldRow(field: SettingsField, root: ParentNode): HTMLEleme
         row = createNativeDropdown(id, field.label, field.options || [], String(value), selected => handleSettingChange(field, selected, root));
     } else {
         row = createNativeInput(id, field.label, field.type === 'password' ? 'password' : 'text', String(value), field.placeholder || '', inputValue => handleSettingChange(field, inputValue, root));
+        const input = row.querySelector('input');
+        if (field.type === 'hotkey' && input) attachHotkeyCapture(input);
     }
 
     row.dataset.sltSettingField = field.id;
@@ -447,16 +450,6 @@ function createNativeSettingsSection(): HTMLElement {
         </div>
     `;
     sectionContent.appendChild(githubRow);
-
-    const shortcutRow = document.createElement('div');
-    shortcutRow.className = 'x-settings-row';
-    shortcutRow.dataset.settingsRow = 'true';
-    shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
-        </div>
-    `;
-    sectionContent.appendChild(shortcutRow);
 
     return section;
 }

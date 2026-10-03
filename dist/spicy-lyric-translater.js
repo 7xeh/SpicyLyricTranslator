@@ -2304,21 +2304,21 @@ var SpicyLyricTranslater = (() => {
     const text3 = coerceString(value);
     return text3 ? text3 : void 0;
   }
-  function parseModelBreakdown(raw) {
-    const text3 = (raw || "").trim();
-    if (!text3)
-      return null;
-    const withoutFences = text3.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    const start = withoutFences.indexOf("[");
-    const end = withoutFences.lastIndexOf("]");
+  function stripCodeFences(raw) {
+    return (raw || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  }
+  function parseJsonSlice(text3, open, close) {
+    const start = text3.indexOf(open);
+    const end = text3.lastIndexOf(close);
     if (start === -1 || end === -1 || end <= start)
-      return null;
-    let parsed;
+      return void 0;
     try {
-      parsed = JSON.parse(withoutFences.slice(start, end + 1));
+      return JSON.parse(text3.slice(start, end + 1));
     } catch {
-      return null;
+      return void 0;
     }
+  }
+  function parseTokenArray(parsed) {
     if (!Array.isArray(parsed))
       return null;
     const tokens = [];
@@ -2341,19 +2341,64 @@ var SpicyLyricTranslater = (() => {
     }
     return tokens.length > 0 ? tokens : null;
   }
+  function parseModelBreakdown(raw) {
+    const text3 = stripCodeFences(raw);
+    if (!text3)
+      return null;
+    return parseTokenArray(parseJsonSlice(text3, "[", "]"));
+  }
+  function parseModelBreakdownBatch(raw, count) {
+    const results = new Array(count).fill(null);
+    const text3 = stripCodeFences(raw);
+    if (!text3)
+      return results;
+    const objectFirst = text3.indexOf("{") !== -1 && (text3.indexOf("[") === -1 || text3.indexOf("{") < text3.indexOf("["));
+    const parsedObject = objectFirst ? parseJsonSlice(text3, "{", "}") : void 0;
+    if (parsedObject && typeof parsedObject === "object" && !Array.isArray(parsedObject)) {
+      const record2 = parsedObject;
+      for (let i = 0; i < count; i++) {
+        results[i] = parseTokenArray(record2[String(i + 1)]);
+      }
+      return results;
+    }
+    const parsedArray = parseJsonSlice(text3, "[", "]");
+    if (Array.isArray(parsedArray) && parsedArray.length === count && parsedArray.every(Array.isArray)) {
+      for (let i = 0; i < count; i++) {
+        results[i] = parseTokenArray(parsedArray[i]);
+      }
+    }
+    return results;
+  }
+  function breakdownTokenSchema(targetLangName) {
+    return [
+      '"source" (the token exactly as it appears in the lyric, in order),',
+      `"target" (its meaning in ${targetLangName} in this context),`,
+      '"lemma" (the dictionary form of the source token),',
+      '"pos" (a short part-of-speech tag such as noun, verb, adj, adv, pron, prep, conj, part, num),',
+      '"note" (a short note only when the token is idiomatic, slang, or grammatically notable; otherwise omit).'
+    ];
+  }
   function buildBreakdownPrompt(sourceText, sourceLangName, targetLangName) {
     return [
       `Break this ${sourceLangName} song lyric down word by word for a learner whose target language is ${targetLangName}.`,
       "Return ONLY a JSON array, no prose and no code fences.",
       "Each element must be an object with these keys:",
-      '"source" (the token exactly as it appears in the lyric, in order),',
-      `"target" (its meaning in ${targetLangName} in this context),`,
-      '"lemma" (the dictionary form of the source token),',
-      '"pos" (a short part-of-speech tag such as noun, verb, adj, adv, pron, prep, conj, part, num),',
-      '"note" (a short note only when the token is idiomatic, slang, or grammatically notable; otherwise omit).',
+      ...breakdownTokenSchema(targetLangName),
       "Cover every meaningful token in order. Merge tokens only when they form one fixed expression.",
       "",
       sourceText
+    ].join("\n");
+  }
+  function buildBatchBreakdownPrompt(lines, sourceLangName, targetLangName) {
+    return [
+      `Break each of these ${sourceLangName} song lyric lines down word by word for a learner whose target language is ${targetLangName}.`,
+      "Return ONLY a JSON object, no prose and no code fences.",
+      `Its keys are the line numbers as strings ("1" to "${lines.length}"), each line number exactly once.`,
+      "Each value is a JSON array for that line only, and each element of the array is an object with these keys:",
+      ...breakdownTokenSchema(targetLangName),
+      "Cover every meaningful token of each line in order. Merge tokens only when they form one fixed expression. Never mix tokens between lines.",
+      "",
+      ...lines.map((line, index) => `${index + 1}. ${line}`)
     ].join("\n");
   }
   function breakdownCacheKey(sourceText, targetLang) {
@@ -5085,9 +5130,15 @@ ${text3}`
     throw new Error(`Word breakdown is not supported by the ${preferredApi} provider`);
   }
   var BREAKDOWN_CACHE_KEY = "breakdown-cache";
-  var BREAKDOWN_CACHE_LIMIT = 400;
+  var BREAKDOWN_CACHE_LIMIT = 1e3;
+  var BREAKDOWN_BATCH_WINDOW_MS = 300;
+  var BREAKDOWN_BATCH_MAX_LINES = 10;
+  var BREAKDOWN_BATCH_MAX_TOKENS = 8192;
   var inFlightBreakdowns = /* @__PURE__ */ new Map();
   var breakdownMemo = null;
+  var breakdownQueue = [];
+  var breakdownFlushTimer = null;
+  var breakdownChain = Promise.resolve();
   function loadBreakdownCache() {
     if (!breakdownMemo)
       breakdownMemo = storage_default.getJSON(BREAKDOWN_CACHE_KEY, {});
@@ -5099,9 +5150,14 @@ ${text3}`
       return null;
     return (entry.kind || "model") === breakdownKindFor() ? entry.tokens : null;
   }
-  function storeWordBreakdown(sourceText, targetLang, tokens) {
+  function storeWordBreakdowns(entries, kind) {
+    if (entries.length === 0)
+      return;
     const cache = loadBreakdownCache();
-    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now(), kind: breakdownKindFor() };
+    const now = Date.now();
+    for (const entry of entries) {
+      cache[breakdownCacheKey(entry.sourceText, entry.targetLang)] = { tokens: entry.tokens, timestamp: now, kind };
+    }
     const keys = Object.keys(cache);
     if (keys.length > BREAKDOWN_CACHE_LIMIT) {
       keys.sort((a, b) => (cache[a].timestamp || 0) - (cache[b].timestamp || 0)).slice(0, keys.length - BREAKDOWN_CACHE_LIMIT).forEach((key) => delete cache[key]);
@@ -5111,6 +5167,74 @@ ${text3}`
   function clearWordBreakdownCache() {
     breakdownMemo = null;
     storage_default.remove(BREAKDOWN_CACHE_KEY);
+  }
+  function enqueueModelBreakdown(text3, sourceLang, targetLang) {
+    return new Promise((resolve) => {
+      breakdownQueue.push({ text: text3, sourceLang, targetLang, resolve });
+      if (breakdownQueue.length >= BREAKDOWN_BATCH_MAX_LINES) {
+        flushBreakdownQueue();
+        return;
+      }
+      if (!breakdownFlushTimer)
+        breakdownFlushTimer = setTimeout(flushBreakdownQueue, BREAKDOWN_BATCH_WINDOW_MS);
+    });
+  }
+  function flushBreakdownQueue() {
+    if (breakdownFlushTimer) {
+      clearTimeout(breakdownFlushTimer);
+      breakdownFlushTimer = null;
+    }
+    const queued = breakdownQueue;
+    breakdownQueue = [];
+    if (queued.length === 0)
+      return;
+    const groups = /* @__PURE__ */ new Map();
+    for (const item of queued) {
+      const groupKey = `${item.sourceLang || "auto"}|${item.targetLang}`;
+      const group = groups.get(groupKey);
+      if (group)
+        group.push(item);
+      else
+        groups.set(groupKey, [item]);
+    }
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.length; i += BREAKDOWN_BATCH_MAX_LINES) {
+        const chunk = group.slice(i, i + BREAKDOWN_BATCH_MAX_LINES);
+        breakdownChain = breakdownChain.then(() => runBreakdownBatch(chunk));
+      }
+    }
+  }
+  async function runBreakdownBatch(chunk) {
+    const kind = breakdownKindFor();
+    const { sourceLang, targetLang } = chunk[0];
+    const sourceName = getTranslationLanguageName(sourceLang || "auto");
+    const targetName = getTranslationLanguageName(targetLang);
+    let results;
+    try {
+      if (chunk.length === 1) {
+        const text3 = chunk[0].text;
+        const raw = await requestModelCompletion(buildBreakdownPrompt(text3, sourceName, targetName), Math.max(600, text3.length * 12));
+        results = [parseModelBreakdown(raw)];
+      } else {
+        const lines = chunk.map((item) => item.text);
+        const totalChars = lines.reduce((sum, line) => sum + line.length, 0);
+        const maxTokens = Math.min(BREAKDOWN_BATCH_MAX_TOKENS, Math.max(1200, totalChars * 14));
+        const raw = await requestModelCompletion(buildBatchBreakdownPrompt(lines, sourceName, targetName), maxTokens);
+        results = parseModelBreakdownBatch(raw, lines.length);
+      }
+    } catch (breakdownError) {
+      warn("Word breakdown request failed:", breakdownError);
+      results = chunk.map(() => null);
+    }
+    const stored = [];
+    chunk.forEach((item, index) => {
+      const tokens = results[index];
+      if (tokens)
+        stored.push({ sourceText: item.text, targetLang: item.targetLang, tokens });
+    });
+    if (kind === breakdownKindFor())
+      storeWordBreakdowns(stored, kind);
+    chunk.forEach((item, index) => item.resolve(results[index] || null));
   }
   async function fetchWordBreakdown(sourceText, sourceLang, targetLang) {
     const trimmed = (sourceText || "").trim();
@@ -5123,28 +5247,20 @@ ${text3}`
     const cached = getCachedWordBreakdown(trimmed, targetLang);
     if (cached)
       return cached;
-    const key = `${breakdownKindFor()}:${breakdownCacheKey(trimmed, targetLang)}`;
+    const kind = breakdownKindFor();
+    const key = `${kind}:${breakdownCacheKey(trimmed, targetLang)}`;
     const pending = inFlightBreakdowns.get(key);
     if (pending)
       return pending;
     const request = (async () => {
       try {
-        if (breakdownKindFor() === "machine") {
+        if (kind === "machine") {
           const machineTokens = await requestMachineBreakdown(trimmed, targetLang, sourceLang);
           if (machineTokens)
-            storeWordBreakdown(trimmed, targetLang, machineTokens);
+            storeWordBreakdowns([{ sourceText: trimmed, targetLang, tokens: machineTokens }], kind);
           return machineTokens;
         }
-        const prompt = buildBreakdownPrompt(
-          trimmed,
-          getTranslationLanguageName(sourceLang || "auto"),
-          getTranslationLanguageName(targetLang)
-        );
-        const raw = await requestModelCompletion(prompt, Math.max(600, trimmed.length * 12));
-        const tokens = parseModelBreakdown(raw);
-        if (tokens)
-          storeWordBreakdown(trimmed, targetLang, tokens);
-        return tokens;
+        return await enqueueModelBreakdown(trimmed, sourceLang, targetLang);
       } catch (breakdownError) {
         warn("Word breakdown request failed:", breakdownError);
         return null;
@@ -5223,6 +5339,10 @@ ${text3}`
     showRomanization: storage.get("show-romanization") === "true",
     learningMode: storage.get("learning-mode") === "true",
     learningVisible: storage.get("learning-visible") !== "false",
+    learningBreakdownMode: storage.get("learning-breakdown-mode") === "on-demand" ? "on-demand" : "auto",
+    translateHotkey: storage.get("translate-hotkey") ?? "Alt+T",
+    learningHotkey: storage.get("learning-hotkey") ?? "Alt+L",
+    breakdownHotkey: storage.get("breakdown-hotkey") ?? "Alt+B",
     _qualityByIndex: void 0
   };
   function isLearningActive() {
@@ -6832,6 +6952,12 @@ ${text3}`
   }
   var breakdownLookup = null;
   var breakdownPrefetch = null;
+  var breakdownRequest = null;
+  var learningOnDemand = false;
+  var learningHotkeyLabel = "";
+  var pendingBreakdowns = /* @__PURE__ */ new Set();
+  var failedBreakdowns = /* @__PURE__ */ new Set();
+  var lastLearningSource = "";
   var lastLearningKey = "";
   var lastLearningLine = null;
   var lastPrefetchLine = null;
@@ -6839,7 +6965,7 @@ ${text3}`
   var currentSourceLanguage = "";
   var lastLearningCheck = 0;
   var LEARNING_THROTTLE_MS = 120;
-  var LEARNING_PREFETCH_AHEAD = 3;
+  var LEARNING_PREFETCH_AHEAD = 10;
   function setBreakdownLookup(lookup) {
     breakdownLookup = lookup;
     lastLearningKey = "";
@@ -6847,6 +6973,41 @@ ${text3}`
   function setBreakdownPrefetch(prefetch) {
     breakdownPrefetch = prefetch;
     lastPrefetchLine = null;
+  }
+  function setBreakdownRequest(request) {
+    breakdownRequest = request;
+    invalidateLearningRow();
+  }
+  function setLearningOnDemand(onDemand, hotkeyLabel) {
+    if (learningOnDemand === onDemand && learningHotkeyLabel === hotkeyLabel)
+      return;
+    learningOnDemand = onDemand;
+    learningHotkeyLabel = hotkeyLabel;
+    invalidateLearningRow();
+  }
+  function triggerLearningBreakdown(sourceText) {
+    if (!breakdownRequest || !sourceText)
+      return false;
+    if (pendingBreakdowns.has(sourceText))
+      return true;
+    pendingBreakdowns.add(sourceText);
+    failedBreakdowns.delete(sourceText);
+    invalidateLearningRow();
+    breakdownRequest(sourceText).then((ok2) => {
+      if (!ok2)
+        failedBreakdowns.add(sourceText);
+    }).catch(() => {
+      failedBreakdowns.add(sourceText);
+    }).finally(() => {
+      pendingBreakdowns.delete(sourceText);
+      invalidateLearningRow();
+    });
+    return true;
+  }
+  function requestCurrentLearningBreakdown() {
+    if (!currentConfig.learningMode)
+      return false;
+    return triggerLearningBreakdown(lastLearningSource);
   }
   function prefetchUpcomingBreakdowns(doc, fromLine) {
     if (!breakdownPrefetch || lastPrefetchLine === fromLine)
@@ -6861,7 +7022,7 @@ ${text3}`
       if (lines[i].classList.contains("musical-line") || lines[i].classList.contains("bg-line"))
         continue;
       const text3 = extractLineText(lines[i]);
-      if (text3)
+      if (text3 && !texts.includes(text3))
         texts.push(text3);
     }
     if (texts.length > 0)
@@ -6876,6 +7037,7 @@ ${text3}`
     removeLearningRows(doc);
     lastLearningKey = "";
     lastLearningLine = null;
+    lastLearningSource = "";
   }
   function setLearningTargetLanguage(lang) {
     if (currentTargetLanguage === lang)
@@ -6924,10 +7086,31 @@ ${text3}`
       node = node.nextElementSibling;
     }
   }
-  function buildLearningRow(doc, tokens, origin, translated) {
+  function learningHintText(hint) {
+    if (hint === "pending")
+      return "Breaking this line down\u2026";
+    const shortcut = learningHotkeyLabel ? ` or press ${learningHotkeyLabel}` : "";
+    if (hint === "failed")
+      return `Breakdown failed - click${shortcut} to try again`;
+    return `Click${shortcut} for a word-by-word breakdown`;
+  }
+  function buildLearningRow(doc, tokens, origin, translated, sourceText, hint) {
     const row = doc.createElement("div");
     row.className = "slt-learning-row";
     row.dataset.origin = origin;
+    if (hint) {
+      row.dataset.hint = hint;
+      if (hint !== "pending") {
+        row.title = "Get a word-by-word breakdown of this line";
+        row.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const selection = doc.getSelection?.();
+          if (selection && !selection.isCollapsed)
+            return;
+          triggerLearningBreakdown(sourceText);
+        });
+      }
+    }
     if (translated && absorbsTranslation()) {
       const sentence = doc.createElement("div");
       sentence.className = "slt-learning-translation";
@@ -6971,6 +7154,12 @@ ${text3}`
         cell.title = tip;
       row.appendChild(cell);
     }
+    if (hint) {
+      const note = doc.createElement("div");
+      note.className = "slt-learning-hint";
+      note.textContent = learningHintText(hint);
+      row.appendChild(note);
+    }
     return row;
   }
   function updateLearningRow(doc) {
@@ -7011,12 +7200,14 @@ ${text3}`
     const translated = (index >= 0 ? translationMap.get(index) : void 0) || lookupByContent(translationByContent, sourceText) || "";
     if (!translated)
       return;
+    lastLearningSource = sourceText;
     const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
     const origin = modelTokens ? "model" : "heuristic";
     const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage, currentSourceLanguage).tokens;
-    if (tokens.length === 0 && !absorbsTranslation())
+    const hint = modelTokens || !learningOnDemand || !breakdownRequest ? null : pendingBreakdowns.has(sourceText) ? "pending" : failedBreakdowns.has(sourceText) ? "failed" : "idle";
+    if (tokens.length === 0 && !absorbsTranslation() && !hint)
       return;
-    const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const key = `${currentConfig.mode}:${origin}:${hint || ""}:${learningHotkeyLabel}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);
     if (!anchor || !anchor.parentNode)
       return;
@@ -7027,7 +7218,7 @@ ${text3}`
       return;
     }
     removeLearningRows(doc);
-    const row = buildLearningRow(doc, tokens, origin, translated);
+    const row = buildLearningRow(doc, tokens, origin, translated, sourceText, hint);
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
     absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
@@ -7659,6 +7850,40 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
 
 .slt-learning-row[data-origin="heuristic"] .slt-learning-token {
     border-style: dashed;
+}
+
+.slt-learning-row[data-hint="idle"],
+.slt-learning-row[data-hint="failed"] {
+    cursor: pointer;
+}
+
+.slt-learning-hint {
+    flex-basis: 100%;
+    font-size: calc(0.26em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.3;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 120ms ease;
+}
+
+.slt-learning-row[data-hint="idle"]:hover .slt-learning-hint,
+.slt-learning-row[data-hint="failed"]:hover .slt-learning-hint {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.slt-learning-row[data-hint="pending"] .slt-learning-hint {
+    animation: slt-learning-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes slt-learning-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-hint,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
+#SpicyLyricsPage.CardMode .slt-learning-hint {
+    font-size: calc(0.38em * var(--slt-overlay-font-scale, 1));
 }
 
 .slt-learning-source {
@@ -10219,7 +10444,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"96299bb9dcd6081555f722c40a120a654d2a6cb1a88c9b3a401b14f8b1712121".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "96299bb9dcd6081555f722c40a120a654d2a6cb1a88c9b3a401b14f8b1712121" : "";
+    return !"b84c64515ad6b7f5ea11513120d5ce11b6c7a18449b1daa69be9dff8ef8d5271".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "b84c64515ad6b7f5ea11513120d5ce11b6c7a18449b1daa69be9dff8ef8d5271" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -11429,6 +11654,120 @@ body.slt-update-waiting #TranslateToggle::after {
   var VERSION = CURRENT_VERSION;
   var REPO_URL = RELEASES_URL;
 
+  // src/utils/hotkeys.ts
+  var MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Meta"];
+  var MODIFIER_CODES = /* @__PURE__ */ new Set(["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight", "OSLeft", "OSRight"]);
+  var CODE_LABELS = {
+    Space: "Space",
+    Minus: "-",
+    Equal: "=",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Backslash: "\\",
+    Semicolon: ";",
+    Quote: "'",
+    Comma: ",",
+    Period: ".",
+    Slash: "/",
+    Backquote: "`",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right"
+  };
+  function keyLabelFromCode(code) {
+    if (!code || MODIFIER_CODES.has(code))
+      return null;
+    if (/^Key[A-Z]$/.test(code))
+      return code.slice(3);
+    if (/^Digit[0-9]$/.test(code))
+      return code.slice(5);
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code))
+      return code;
+    return CODE_LABELS[code] || null;
+  }
+  function isFunctionKey(key) {
+    return /^F([1-9]|1[0-9]|2[0-4])$/.test(key);
+  }
+  function hotkeyFromEvent(event) {
+    const key = keyLabelFromCode(event.code);
+    if (!key)
+      return null;
+    const modifiers = [];
+    if (event.ctrlKey)
+      modifiers.push("Ctrl");
+    if (event.altKey)
+      modifiers.push("Alt");
+    if (event.shiftKey)
+      modifiers.push("Shift");
+    if (event.metaKey)
+      modifiers.push("Meta");
+    if (modifiers.length === 0 && !isFunctionKey(key))
+      return null;
+    if (modifiers.length === 1 && modifiers[0] === "Shift" && !isFunctionKey(key))
+      return null;
+    return [...modifiers, key].join("+");
+  }
+  function normalizeHotkey(value) {
+    const parts = (value || "").split("+").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0)
+      return "";
+    const key = parts[parts.length - 1];
+    const modifiers = new Set(parts.slice(0, -1).map((part) => {
+      const lower = part.toLowerCase();
+      if (lower === "control" || lower === "ctrl")
+        return "Ctrl";
+      if (lower === "option" || lower === "alt")
+        return "Alt";
+      if (lower === "cmd" || lower === "command" || lower === "meta" || lower === "win")
+        return "Meta";
+      if (lower === "shift")
+        return "Shift";
+      return part;
+    }));
+    const ordered = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier));
+    return [...ordered, key.length === 1 ? key.toUpperCase() : key].join("+");
+  }
+  function matchesHotkey(event, hotkey) {
+    const wanted = normalizeHotkey(hotkey);
+    if (!wanted)
+      return false;
+    const pressed = hotkeyFromEvent(event);
+    return pressed !== null && pressed === wanted;
+  }
+  function describeHotkey(hotkey) {
+    return normalizeHotkey(hotkey) || "Off";
+  }
+  function isEditableTarget(target) {
+    const element = target;
+    if (!element || typeof element.closest !== "function")
+      return false;
+    if (element.isContentEditable)
+      return true;
+    return Boolean(element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+  }
+  function attachHotkeyCapture(input) {
+    input.readOnly = true;
+    input.dataset.sltHotkeyCapture = "true";
+    const commit = (value) => {
+      input.value = value;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Tab" || event.key === "Escape")
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && (event.key === "Backspace" || event.key === "Delete")) {
+        commit("");
+        return;
+      }
+      const hotkey = hotkeyFromEvent(event);
+      if (hotkey)
+        commit(hotkey);
+    });
+  }
+
   // src/utils/notify.ts
   function canRenderToasts() {
     try {
@@ -11487,8 +11826,8 @@ body.slt-update-waiting #TranslateToggle::after {
       id: "slt-cat-interface",
       label: "Interface",
       icon: "\u25D0",
-      description: "Notifications and the badges shown around the lyrics.",
-      sections: ["Interface"]
+      description: "Notifications, keyboard shortcuts, and the badges shown around the lyrics.",
+      sections: ["Interface", "Shortcuts"]
     }
   ];
   var API_OPTIONS = [
@@ -11874,7 +12213,23 @@ body.slt-update-waiting #TranslateToggle::after {
       type: "toggle",
       storageKey: "learning-mode",
       defaultValue: false,
-      effects: ["learningModeClass", "reapplyTranslations"]
+      effects: ["learningModeClass", "reapplyTranslations", "fieldVisibility"]
+    },
+    {
+      id: "learning-breakdown-mode",
+      section: "Behaviour",
+      keywords: "learning breakdown on demand manual automatic batch rate limit quota rpm rpd requests api usage cost",
+      label: "Learning Mode Breakdowns",
+      type: "select",
+      storageKey: "learning-breakdown-mode",
+      defaultValue: "auto",
+      options: [
+        { value: "auto", text: "Automatic (default)" },
+        { value: "on-demand", text: "On demand only" }
+      ],
+      description: "Automatic breaks lines down ahead of playback, about ten lines per request. On demand only asks the provider when you click a card or press the breakdown shortcut, which keeps AI providers well inside their rate limits.",
+      visibleWhen: () => storage.get("learning-mode") === "true",
+      effects: ["learningModeClass"]
     },
     {
       id: "show-quality-indicator",
@@ -11895,6 +12250,40 @@ body.slt-update-waiting #TranslateToggle::after {
       storageKey: "hide-connection-indicator",
       defaultValue: false,
       effects: ["connectionIndicatorClass"]
+    },
+    {
+      id: "translate-hotkey",
+      section: "Shortcuts",
+      keywords: "shortcut hotkey keyboard key binding toggle translation alt t",
+      label: "Toggle Translation",
+      type: "hotkey",
+      storageKey: "translate-hotkey",
+      defaultValue: "Alt+T",
+      placeholder: "Press a shortcut",
+      description: "Click the box and press a key combination. Backspace turns the shortcut off."
+    },
+    {
+      id: "learning-hotkey",
+      section: "Shortcuts",
+      keywords: "shortcut hotkey keyboard key binding learning mode cards show hide toggle",
+      label: "Toggle Learning Mode",
+      type: "hotkey",
+      storageKey: "learning-hotkey",
+      defaultValue: "Alt+L",
+      placeholder: "Press a shortcut",
+      description: "Shows or hides the Learning Mode cards. Turns Learning Mode on if it is off."
+    },
+    {
+      id: "breakdown-hotkey",
+      section: "Shortcuts",
+      keywords: "shortcut hotkey keyboard key binding breakdown current line on demand word by word",
+      label: "Break Down Current Line",
+      type: "hotkey",
+      storageKey: "breakdown-hotkey",
+      defaultValue: "Alt+B",
+      placeholder: "Press a shortcut",
+      description: "Requests the word-by-word breakdown for the line playing now, in either breakdown mode.",
+      effects: ["learningModeClass"]
     }
   ];
   function getSettingField(id) {
@@ -12028,6 +12417,8 @@ body.slt-update-waiting #TranslateToggle::after {
     return [];
   }
   function writeSettingValue(field, value) {
+    if (field.type === "hotkey")
+      value = normalizeHotkey(String(value));
     if (field.type === "toggle") {
       storage.set(field.storageKey, String(Boolean(value)));
     } else if (field.secret) {
@@ -12146,6 +12537,18 @@ body.slt-update-waiting #TranslateToggle::after {
         state.learningMode = Boolean(value);
         if (state.learningMode)
           showLearningCards();
+        break;
+      case "learning-breakdown-mode":
+        state.learningBreakdownMode = String(value) === "on-demand" ? "on-demand" : "auto";
+        break;
+      case "translate-hotkey":
+        state.translateHotkey = String(value);
+        break;
+      case "learning-hotkey":
+        state.learningHotkey = String(value);
+        break;
+      case "breakdown-hotkey":
+        state.breakdownHotkey = String(value);
         break;
       case "hide-connection-indicator":
         state.hideConnectionIndicator = Boolean(value);
@@ -13960,30 +14363,47 @@ body.slt-update-waiting #TranslateToggle::after {
     }
   }
   var requestedBreakdowns = /* @__PURE__ */ new Set();
-  var failedBreakdowns = /* @__PURE__ */ new Map();
+  var failedBreakdowns2 = /* @__PURE__ */ new Map();
   var BREAKDOWN_RETRY_MS = 6e4;
-  function requestBreakdown(sourceText, onReady) {
-    const key = `${state.targetLanguage}:${sourceText}`;
+  var BREAKDOWN_PREFETCH_TRIGGER = 3;
+  function breakdownRequestKey(sourceText) {
+    return `${state.targetLanguage}:${sourceText}`;
+  }
+  function needsBreakdown(sourceText) {
+    if (getCachedWordBreakdown(sourceText, state.targetLanguage))
+      return false;
+    const key = breakdownRequestKey(sourceText);
     if (requestedBreakdowns.has(key))
-      return;
-    const failedAt = failedBreakdowns.get(key);
-    if (failedAt && Date.now() - failedAt < BREAKDOWN_RETRY_MS)
-      return;
+      return false;
+    const failedAt = failedBreakdowns2.get(key);
+    return !failedAt || Date.now() - failedAt >= BREAKDOWN_RETRY_MS;
+  }
+  function requestBreakdown(sourceText, force = false) {
+    if (getCachedWordBreakdown(sourceText, state.targetLanguage))
+      return Promise.resolve(true);
+    const key = breakdownRequestKey(sourceText);
+    if (!force && !needsBreakdown(sourceText))
+      return Promise.resolve(false);
     requestedBreakdowns.add(key);
     const trackUri = getCurrentTrackUri();
-    void fetchWordBreakdown(sourceText, state.detectedLanguage || void 0, state.targetLanguage).then((tokens) => {
+    return fetchWordBreakdown(sourceText, state.detectedLanguage || void 0, state.targetLanguage).then((tokens) => {
       if (!tokens) {
-        failedBreakdowns.set(key, Date.now());
-        return;
+        failedBreakdowns2.set(key, Date.now());
+        return false;
       }
-      failedBreakdowns.delete(key);
-      if (onReady && getCurrentTrackUri() === trackUri)
-        onReady();
+      failedBreakdowns2.delete(key);
+      if (getCurrentTrackUri() === trackUri)
+        invalidateLearningRow();
+      return true;
     }).catch(() => {
-      failedBreakdowns.set(key, Date.now());
+      failedBreakdowns2.set(key, Date.now());
+      return false;
     }).finally(() => {
       requestedBreakdowns.delete(key);
     });
+  }
+  function isBreakdownOnDemand() {
+    return state.learningBreakdownMode === "on-demand";
   }
   function registerBreakdownLookup() {
     setBreakdownLookup((sourceText) => {
@@ -13991,22 +14411,30 @@ body.slt-update-waiting #TranslateToggle::after {
         return null;
       setLearningTargetLanguage(state.targetLanguage);
       setLearningSourceLanguage(state.detectedLanguage || "");
+      setLearningOnDemand(isBreakdownOnDemand() && providerSupportsWordBreakdown(), normalizeHotkey(state.breakdownHotkey));
       const cached = getCachedWordBreakdown(sourceText, state.targetLanguage);
       if (cached)
         return cached;
-      if (!providerSupportsWordBreakdown())
+      if (!providerSupportsWordBreakdown() || isBreakdownOnDemand())
         return null;
-      requestBreakdown(sourceText, invalidateLearningRow);
+      void requestBreakdown(sourceText);
       return null;
     });
     setBreakdownPrefetch((sourceTexts) => {
-      if (!isLearningActive() || !providerSupportsWordBreakdown())
+      if (!isLearningActive() || isBreakdownOnDemand() || !providerSupportsWordBreakdown())
+        return;
+      const dueSoon = sourceTexts.slice(0, BREAKDOWN_PREFETCH_TRIGGER).some(needsBreakdown);
+      if (!dueSoon)
         return;
       for (const sourceText of sourceTexts) {
-        if (getCachedWordBreakdown(sourceText, state.targetLanguage))
-          continue;
-        requestBreakdown(sourceText);
+        if (needsBreakdown(sourceText))
+          void requestBreakdown(sourceText);
       }
+    });
+    setBreakdownRequest((sourceText) => {
+      if (!isLearningActive() || !providerSupportsWordBreakdown())
+        return Promise.resolve(false);
+      return requestBreakdown(sourceText, true);
     });
   }
   function setupViewModeObserver() {
@@ -14061,16 +14489,6 @@ body.slt-update-waiting #TranslateToggle::after {
           syncLearningButtonInDocument(pipWindow.document);
       }
     }, 2e3);
-  }
-  function setupKeyboardShortcut() {
-    document.addEventListener("keydown", (e) => {
-      if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "t") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (isSpicyLyricsOpen())
-          handleTranslateToggle();
-      }
-    });
   }
 
   // src/utils/modal.ts
@@ -14567,6 +14985,8 @@ body.slt-update-waiting #TranslateToggle::after {
       const names = parseLanguageList(String(value)).map(languageName);
       return names.length ? names.join(", ") : "None";
     }
+    if (field.type === "hotkey")
+      return describeHotkey(String(value));
     if (field.secret)
       return value ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "Not set";
     const str = String(value ?? "");
@@ -14663,6 +15083,8 @@ body.slt-update-waiting #TranslateToggle::after {
         "data-form-type": "other"
       });
       control.append(input);
+      if (field.type === "hotkey")
+        attachHotkeyCapture(input);
       if (field.type === "password") {
         const reveal = el("button", { class: "slt-m-reveal", type: "button", title: "Show or hide", "aria-label": `Show ${field.label}`, html: REVEAL_SVG });
         reveal.addEventListener("click", () => {
@@ -15072,10 +15494,12 @@ body.slt-update-waiting #TranslateToggle::after {
       "div",
       { class: "slt-m-enabled-bar" },
       el("div", { class: "slt-m-enabled-text" }, title, sub),
-      el("label", { class: "slt-m-toggle", title: "Alt+T" }, input, el("span", { class: "slt-m-toggle-slider" }))
+      el("label", { class: "slt-m-toggle" }, input, el("span", { class: "slt-m-toggle-slider" }))
     );
+    const toggleLabel = bar.querySelector(".slt-m-toggle");
     const sync = () => {
       input.checked = state.isEnabled;
+      toggleLabel.title = state.translateHotkey ? describeHotkey(state.translateHotkey) : "";
       bar.classList.toggle("slt-m-enabled-off", !state.isEnabled);
       title.textContent = state.isEnabled ? "Translation on" : "Translation off";
       const parts = summaryParts();
@@ -16680,6 +17104,9 @@ body.slt-update-waiting #TranslateToggle::after {
       row = createNativeDropdown(id, field.label, field.options || [], String(value), (selected) => handleSettingChange(field, selected, root));
     } else {
       row = createNativeInput(id, field.label, field.type === "password" ? "password" : "text", String(value), field.placeholder || "", (inputValue) => handleSettingChange(field, inputValue, root));
+      const input = row.querySelector("input");
+      if (field.type === "hotkey" && input)
+        attachHotkeyCapture(input);
     }
     row.dataset.sltSettingField = field.id;
     row.style.display = isSettingFieldVisible(field) ? "" : "none";
@@ -16766,15 +17193,6 @@ body.slt-update-waiting #TranslateToggle::after {
         </div>
     `;
     sectionContent.appendChild(githubRow);
-    const shortcutRow = document.createElement("div");
-    shortcutRow.className = "x-settings-row";
-    shortcutRow.dataset.settingsRow = "true";
-    shortcutRow.innerHTML = `
-        <div class="x-settings-firstColumn">
-            <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
-        </div>
-    `;
-    sectionContent.appendChild(shortcutRow);
     return section;
   }
   function injectSettingsIntoPage() {
@@ -18487,6 +18905,54 @@ body.slt-update-waiting #TranslateToggle::after {
     }
   }
 
+  // src/utils/shortcuts.ts
+  var SHORTCUT_TOAST_KEY = "slt-shortcut";
+  function toggleLearningFromShortcut() {
+    if (!state.learningMode) {
+      applySettingById("learning-mode", true);
+      notify({ kind: "info", title: "Learning Mode on", key: SHORTCUT_TOAST_KEY });
+      return;
+    }
+    handleLearningToggle();
+    notify({ kind: "info", title: state.learningVisible ? "Learning Mode cards shown" : "Learning Mode cards hidden", key: SHORTCUT_TOAST_KEY });
+  }
+  function breakDownCurrentLine() {
+    if (!isSpicyLyricsOpen())
+      return;
+    if (!state.learningMode || !state.learningVisible) {
+      notify({ kind: "info", title: "Show Learning Mode to break lines down", key: SHORTCUT_TOAST_KEY });
+      return;
+    }
+    if (!requestCurrentLearningBreakdown()) {
+      notify({ kind: "info", title: "No line to break down yet", key: SHORTCUT_TOAST_KEY });
+    }
+  }
+  function onShortcutKeydown(event) {
+    if (event.repeat || isEditableTarget(event.target))
+      return;
+    const actions = [
+      [state.translateHotkey, () => {
+        if (isSpicyLyricsOpen())
+          handleTranslateToggle();
+      }],
+      [state.learningHotkey, toggleLearningFromShortcut],
+      [state.breakdownHotkey, breakDownCurrentLine]
+    ];
+    const match = actions.find(([hotkey]) => matchesHotkey(event, hotkey));
+    if (!match)
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    match[1]();
+  }
+  var attachedDocuments = /* @__PURE__ */ new WeakSet();
+  function attachShortcuts(doc = document) {
+    if (attachedDocuments.has(doc))
+      return;
+    attachedDocuments.add(doc);
+    doc.addEventListener("keydown", onShortcutKeydown);
+  }
+
   // src/utils/initialize.ts
   var initialized = false;
   async function initialize() {
@@ -18519,7 +18985,7 @@ body.slt-update-waiting #TranslateToggle::after {
     initConnectionIndicator();
     await registerSettings();
     startUpdateChecker(30 * 60 * 1e3);
-    setupKeyboardShortcut();
+    attachShortcuts();
     showPostUpdateChangelog().catch(() => {
     });
     let wasSpicyLyricsOpen = false;

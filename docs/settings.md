@@ -38,6 +38,8 @@ Only the fields for your selected provider are shown. See [Providers](providers.
 | Setting | What it does |
 | --- | --- |
 | **Auto-Translate on Song Change** | Translates each new track automatically as it starts |
+| **Learning Mode** | Word-by-word breakdown card under the line that is playing |
+| **Learning Mode Breakdowns** | *Automatic* breaks lines down ahead of playback, about ten lines per request, and reuses cached breakdowns for repeated lines. *On demand only* sends nothing until you click a card or press the breakdown shortcut, which keeps AI providers inside free-tier rate limits |
 | **Show Notifications** | Surfaces status and error notifications |
 
 ## Interface
@@ -59,6 +61,12 @@ Only the fields for your selected provider are shown. See [Providers](providers.
 
 The cache actions are also available from the Spicetify menu. If a track is showing stale or wrong lyrics, see [Repairing a bad cache](troubleshooting.md#repairing-a-bad-cache).
 
-## Keyboard shortcut
+## Keyboard shortcuts
 
-`Alt+T` toggles translation on and off.
+Change these under **Interface · Shortcuts**: click the box and press the new combination, or press Backspace to turn a shortcut off.
+
+| Default | What it does |
+| --- | --- |
+| `Alt+T` | Toggles translation on and off |
+| `Alt+L` | Shows or hides the Learning Mode cards, and turns Learning Mode on if it is off |
+| `Alt+B` | Breaks down the line playing now, in either breakdown mode |

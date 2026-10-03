@@ -31,7 +31,7 @@ Translate any song as it plays — replace the lines or stack translations under
 - **Smart language detection** — skips translation when lyrics are already in your target language
 - **Fast on repeats** — track-aware caching, plus 1–6 parallel requests on LLM providers
 - **Editable cached translations** — fix a bad line by hand in the cached lyrics viewer; the edit sticks and reapplies live
-- **`Alt+T`** to toggle, auto-translate on song change, and a built-in update checker
+- **`Alt+T`** to toggle (configurable, plus Learning Mode shortcuts), auto-translate on song change, and a built-in update checker
 
 Full feature list: [docs/features.md](docs/features.md)
 

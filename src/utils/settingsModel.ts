@@ -7,8 +7,9 @@ import { SUPPORTED_LANGUAGES, setPreferredApi, getLanguageVariantForBase, resolv
 import type { ApiPreference, CustomApiFormat } from './translator';
 import { getModelOptions, refreshModelCatalog, resolveModelId, MODEL_PROVIDERS } from './modelCatalog';
 import type { ModelProvider } from './modelCatalog';
+import { normalizeHotkey } from './hotkeys';
 
-export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages';
+export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages' | 'hotkey';
 export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'learningModeClass';
 
 export interface SettingsOption {
@@ -60,8 +61,8 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
         id: 'slt-cat-interface',
         label: 'Interface',
         icon: '◐',
-        description: 'Notifications and the badges shown around the lyrics.',
-        sections: ['Interface']
+        description: 'Notifications, keyboard shortcuts, and the badges shown around the lyrics.',
+        sections: ['Interface', 'Shortcuts']
     }
 ];
 
@@ -451,7 +452,23 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'toggle',
         storageKey: 'learning-mode',
         defaultValue: false,
-        effects: ['learningModeClass', 'reapplyTranslations']
+        effects: ['learningModeClass', 'reapplyTranslations', 'fieldVisibility']
+    },
+    {
+        id: 'learning-breakdown-mode',
+        section: 'Behaviour',
+        keywords: 'learning breakdown on demand manual automatic batch rate limit quota rpm rpd requests api usage cost',
+        label: 'Learning Mode Breakdowns',
+        type: 'select',
+        storageKey: 'learning-breakdown-mode',
+        defaultValue: 'auto',
+        options: [
+            { value: 'auto', text: 'Automatic (default)' },
+            { value: 'on-demand', text: 'On demand only' }
+        ],
+        description: 'Automatic breaks lines down ahead of playback, about ten lines per request. On demand only asks the provider when you click a card or press the breakdown shortcut, which keeps AI providers well inside their rate limits.',
+        visibleWhen: () => storage.get('learning-mode') === 'true',
+        effects: ['learningModeClass']
     },
     {
         id: 'show-quality-indicator',
@@ -472,6 +489,40 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         storageKey: 'hide-connection-indicator',
         defaultValue: false,
         effects: ['connectionIndicatorClass']
+    },
+    {
+        id: 'translate-hotkey',
+        section: 'Shortcuts',
+        keywords: 'shortcut hotkey keyboard key binding toggle translation alt t',
+        label: 'Toggle Translation',
+        type: 'hotkey',
+        storageKey: 'translate-hotkey',
+        defaultValue: 'Alt+T',
+        placeholder: 'Press a shortcut',
+        description: 'Click the box and press a key combination. Backspace turns the shortcut off.'
+    },
+    {
+        id: 'learning-hotkey',
+        section: 'Shortcuts',
+        keywords: 'shortcut hotkey keyboard key binding learning mode cards show hide toggle',
+        label: 'Toggle Learning Mode',
+        type: 'hotkey',
+        storageKey: 'learning-hotkey',
+        defaultValue: 'Alt+L',
+        placeholder: 'Press a shortcut',
+        description: 'Shows or hides the Learning Mode cards. Turns Learning Mode on if it is off.'
+    },
+    {
+        id: 'breakdown-hotkey',
+        section: 'Shortcuts',
+        keywords: 'shortcut hotkey keyboard key binding breakdown current line on demand word by word',
+        label: 'Break Down Current Line',
+        type: 'hotkey',
+        storageKey: 'breakdown-hotkey',
+        defaultValue: 'Alt+B',
+        placeholder: 'Press a shortcut',
+        description: 'Requests the word-by-word breakdown for the line playing now, in either breakdown mode.',
+        effects: ['learningModeClass']
     }
 ];
 
@@ -621,6 +672,8 @@ function enforceLearningCoupling(fieldId: string, value: string | boolean): Sett
 }
 
 export function writeSettingValue(field: SettingsField, value: string | boolean): SettingsEffect[] {
+    if (field.type === 'hotkey') value = normalizeHotkey(String(value));
+
     if (field.type === 'toggle') {
         storage.set(field.storageKey, String(Boolean(value)));
     } else if (field.secret) {
@@ -739,6 +792,18 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'learning-mode':
             state.learningMode = Boolean(value);
             if (state.learningMode) showLearningCards();
+            break;
+        case 'learning-breakdown-mode':
+            state.learningBreakdownMode = String(value) === 'on-demand' ? 'on-demand' : 'auto';
+            break;
+        case 'translate-hotkey':
+            state.translateHotkey = String(value);
+            break;
+        case 'learning-hotkey':
+            state.learningHotkey = String(value);
+            break;
+        case 'breakdown-hotkey':
+            state.breakdownHotkey = String(value);
             break;
         case 'hide-connection-indicator':
             state.hideConnectionIndicator = Boolean(value);

@@ -12,7 +12,7 @@ import {
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
 import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
-import { buildBreakdownPrompt, parseModelBreakdown, breakdownCacheKey, segmentSourceText, BreakdownToken } from './wordBreakdown';
+import { buildBreakdownPrompt, buildBatchBreakdownPrompt, parseModelBreakdown, parseModelBreakdownBatch, breakdownCacheKey, segmentSourceText, BreakdownToken } from './wordBreakdown';
 import { DEFAULT_MODELS, resolveModelId } from './modelCatalog';
 
 export interface TranslationResult {
@@ -3055,9 +3055,23 @@ interface BreakdownCacheEntry {
 type BreakdownCache = Record<string, BreakdownCacheEntry>;
 
 const BREAKDOWN_CACHE_KEY = 'breakdown-cache';
-const BREAKDOWN_CACHE_LIMIT = 400;
+const BREAKDOWN_CACHE_LIMIT = 1000;
+const BREAKDOWN_BATCH_WINDOW_MS = 300;
+const BREAKDOWN_BATCH_MAX_LINES = 10;
+const BREAKDOWN_BATCH_MAX_TOKENS = 8192;
 const inFlightBreakdowns = new Map<string, Promise<BreakdownToken[] | null>>();
 let breakdownMemo: BreakdownCache | null = null;
+
+interface QueuedBreakdown {
+    text: string;
+    sourceLang?: string;
+    targetLang: string;
+    resolve: (tokens: BreakdownToken[] | null) => void;
+}
+
+let breakdownQueue: QueuedBreakdown[] = [];
+let breakdownFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let breakdownChain: Promise<void> = Promise.resolve();
 
 function loadBreakdownCache(): BreakdownCache {
     if (!breakdownMemo) breakdownMemo = storage.getJSON<BreakdownCache>(BREAKDOWN_CACHE_KEY, {});
@@ -3070,9 +3084,13 @@ export function getCachedWordBreakdown(sourceText: string, targetLang: string): 
     return (entry.kind || 'model') === breakdownKindFor() ? entry.tokens : null;
 }
 
-function storeWordBreakdown(sourceText: string, targetLang: string, tokens: BreakdownToken[]): void {
+function storeWordBreakdowns(entries: { sourceText: string; targetLang: string; tokens: BreakdownToken[] }[], kind: BreakdownKind): void {
+    if (entries.length === 0) return;
     const cache = loadBreakdownCache();
-    cache[breakdownCacheKey(sourceText, targetLang)] = { tokens, timestamp: Date.now(), kind: breakdownKindFor() };
+    const now = Date.now();
+    for (const entry of entries) {
+        cache[breakdownCacheKey(entry.sourceText, entry.targetLang)] = { tokens: entry.tokens, timestamp: now, kind };
+    }
 
     const keys = Object.keys(cache);
     if (keys.length > BREAKDOWN_CACHE_LIMIT) {
@@ -3090,6 +3108,75 @@ export function clearWordBreakdownCache(): void {
     storage.remove(BREAKDOWN_CACHE_KEY);
 }
 
+function enqueueModelBreakdown(text: string, sourceLang: string | undefined, targetLang: string): Promise<BreakdownToken[] | null> {
+    return new Promise(resolve => {
+        breakdownQueue.push({ text, sourceLang, targetLang, resolve });
+        if (breakdownQueue.length >= BREAKDOWN_BATCH_MAX_LINES) {
+            flushBreakdownQueue();
+            return;
+        }
+        if (!breakdownFlushTimer) breakdownFlushTimer = setTimeout(flushBreakdownQueue, BREAKDOWN_BATCH_WINDOW_MS);
+    });
+}
+
+function flushBreakdownQueue(): void {
+    if (breakdownFlushTimer) {
+        clearTimeout(breakdownFlushTimer);
+        breakdownFlushTimer = null;
+    }
+    const queued = breakdownQueue;
+    breakdownQueue = [];
+    if (queued.length === 0) return;
+
+    const groups = new Map<string, QueuedBreakdown[]>();
+    for (const item of queued) {
+        const groupKey = `${item.sourceLang || 'auto'}|${item.targetLang}`;
+        const group = groups.get(groupKey);
+        if (group) group.push(item);
+        else groups.set(groupKey, [item]);
+    }
+
+    for (const group of groups.values()) {
+        for (let i = 0; i < group.length; i += BREAKDOWN_BATCH_MAX_LINES) {
+            const chunk = group.slice(i, i + BREAKDOWN_BATCH_MAX_LINES);
+            breakdownChain = breakdownChain.then(() => runBreakdownBatch(chunk));
+        }
+    }
+}
+
+async function runBreakdownBatch(chunk: QueuedBreakdown[]): Promise<void> {
+    const kind = breakdownKindFor();
+    const { sourceLang, targetLang } = chunk[0];
+    const sourceName = getTranslationLanguageName(sourceLang || 'auto');
+    const targetName = getTranslationLanguageName(targetLang);
+
+    let results: (BreakdownToken[] | null)[];
+    try {
+        if (chunk.length === 1) {
+            const text = chunk[0].text;
+            const raw = await requestModelCompletion(buildBreakdownPrompt(text, sourceName, targetName), Math.max(600, text.length * 12));
+            results = [parseModelBreakdown(raw)];
+        } else {
+            const lines = chunk.map(item => item.text);
+            const totalChars = lines.reduce((sum, line) => sum + line.length, 0);
+            const maxTokens = Math.min(BREAKDOWN_BATCH_MAX_TOKENS, Math.max(1200, totalChars * 14));
+            const raw = await requestModelCompletion(buildBatchBreakdownPrompt(lines, sourceName, targetName), maxTokens);
+            results = parseModelBreakdownBatch(raw, lines.length);
+        }
+    } catch (breakdownError) {
+        warn('Word breakdown request failed:', breakdownError);
+        results = chunk.map(() => null);
+    }
+
+    const stored: { sourceText: string; targetLang: string; tokens: BreakdownToken[] }[] = [];
+    chunk.forEach((item, index) => {
+        const tokens = results[index];
+        if (tokens) stored.push({ sourceText: item.text, targetLang: item.targetLang, tokens });
+    });
+    if (kind === breakdownKindFor()) storeWordBreakdowns(stored, kind);
+    chunk.forEach((item, index) => item.resolve(results[index] || null));
+}
+
 export async function fetchWordBreakdown(
     sourceText: string,
     sourceLang: string | undefined,
@@ -3103,26 +3190,19 @@ export async function fetchWordBreakdown(
     const cached = getCachedWordBreakdown(trimmed, targetLang);
     if (cached) return cached;
 
-    const key = `${breakdownKindFor()}:${breakdownCacheKey(trimmed, targetLang)}`;
+    const kind = breakdownKindFor();
+    const key = `${kind}:${breakdownCacheKey(trimmed, targetLang)}`;
     const pending = inFlightBreakdowns.get(key);
     if (pending) return pending;
 
     const request = (async (): Promise<BreakdownToken[] | null> => {
         try {
-            if (breakdownKindFor() === 'machine') {
+            if (kind === 'machine') {
                 const machineTokens = await requestMachineBreakdown(trimmed, targetLang, sourceLang);
-                if (machineTokens) storeWordBreakdown(trimmed, targetLang, machineTokens);
+                if (machineTokens) storeWordBreakdowns([{ sourceText: trimmed, targetLang, tokens: machineTokens }], kind);
                 return machineTokens;
             }
-            const prompt = buildBreakdownPrompt(
-                trimmed,
-                getTranslationLanguageName(sourceLang || 'auto'),
-                getTranslationLanguageName(targetLang)
-            );
-            const raw = await requestModelCompletion(prompt, Math.max(600, trimmed.length * 12));
-            const tokens = parseModelBreakdown(raw);
-            if (tokens) storeWordBreakdown(trimmed, targetLang, tokens);
-            return tokens;
+            return await enqueueModelBreakdown(trimmed, sourceLang, targetLang);
         } catch (breakdownError) {
             warn('Word breakdown request failed:', breakdownError);
             return null;

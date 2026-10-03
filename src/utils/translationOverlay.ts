@@ -1482,9 +1482,17 @@ function syncBlurToTranslations(doc: Document): void {
 
 type BreakdownLookup = (sourceText: string, translatedText: string) => BreakdownToken[] | null;
 type BreakdownPrefetch = (sourceTexts: string[]) => void;
+type BreakdownRequest = (sourceText: string) => Promise<boolean>;
+type LearningHint = 'idle' | 'pending' | 'failed';
 
 let breakdownLookup: BreakdownLookup | null = null;
 let breakdownPrefetch: BreakdownPrefetch | null = null;
+let breakdownRequest: BreakdownRequest | null = null;
+let learningOnDemand = false;
+let learningHotkeyLabel = '';
+const pendingBreakdowns = new Set<string>();
+const failedBreakdowns = new Set<string>();
+let lastLearningSource = '';
 let lastLearningKey = '';
 let lastLearningLine: HTMLElement | null = null;
 let lastPrefetchLine: HTMLElement | null = null;
@@ -1492,7 +1500,7 @@ let currentTargetLanguage = '';
 let currentSourceLanguage = '';
 let lastLearningCheck = 0;
 const LEARNING_THROTTLE_MS = 120;
-const LEARNING_PREFETCH_AHEAD = 3;
+const LEARNING_PREFETCH_AHEAD = 10;
 
 export function setBreakdownLookup(lookup: BreakdownLookup | null): void {
     breakdownLookup = lookup;
@@ -1502,6 +1510,45 @@ export function setBreakdownLookup(lookup: BreakdownLookup | null): void {
 export function setBreakdownPrefetch(prefetch: BreakdownPrefetch | null): void {
     breakdownPrefetch = prefetch;
     lastPrefetchLine = null;
+}
+
+export function setBreakdownRequest(request: BreakdownRequest | null): void {
+    breakdownRequest = request;
+    invalidateLearningRow();
+}
+
+export function setLearningOnDemand(onDemand: boolean, hotkeyLabel: string): void {
+    if (learningOnDemand === onDemand && learningHotkeyLabel === hotkeyLabel) return;
+    learningOnDemand = onDemand;
+    learningHotkeyLabel = hotkeyLabel;
+    invalidateLearningRow();
+}
+
+function triggerLearningBreakdown(sourceText: string): boolean {
+    if (!breakdownRequest || !sourceText) return false;
+    if (pendingBreakdowns.has(sourceText)) return true;
+
+    pendingBreakdowns.add(sourceText);
+    failedBreakdowns.delete(sourceText);
+    invalidateLearningRow();
+
+    breakdownRequest(sourceText)
+        .then(ok => {
+            if (!ok) failedBreakdowns.add(sourceText);
+        })
+        .catch(() => {
+            failedBreakdowns.add(sourceText);
+        })
+        .finally(() => {
+            pendingBreakdowns.delete(sourceText);
+            invalidateLearningRow();
+        });
+    return true;
+}
+
+export function requestCurrentLearningBreakdown(): boolean {
+    if (!currentConfig.learningMode) return false;
+    return triggerLearningBreakdown(lastLearningSource);
 }
 
 function prefetchUpcomingBreakdowns(doc: Document, fromLine: HTMLElement): void {
@@ -1516,7 +1563,7 @@ function prefetchUpcomingBreakdowns(doc: Document, fromLine: HTMLElement): void 
     for (let i = start + 1; i < lines.length && texts.length < LEARNING_PREFETCH_AHEAD; i++) {
         if (lines[i].classList.contains('musical-line') || lines[i].classList.contains('bg-line')) continue;
         const text = extractLineText(lines[i]);
-        if (text) texts.push(text);
+        if (text && !texts.includes(text)) texts.push(text);
     }
     if (texts.length > 0) breakdownPrefetch(texts);
 }
@@ -1530,6 +1577,7 @@ function clearLearningRow(doc: Document): void {
     removeLearningRows(doc);
     lastLearningKey = '';
     lastLearningLine = null;
+    lastLearningSource = '';
 }
 
 export function setLearningTargetLanguage(lang: string): void {
@@ -1583,10 +1631,30 @@ function absorbInterleavedTranslation(line: HTMLElement): void {
     }
 }
 
-function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heuristic' | 'model', translated: string): HTMLElement {
+function learningHintText(hint: LearningHint): string {
+    if (hint === 'pending') return 'Breaking this line down…';
+    const shortcut = learningHotkeyLabel ? ` or press ${learningHotkeyLabel}` : '';
+    if (hint === 'failed') return `Breakdown failed - click${shortcut} to try again`;
+    return `Click${shortcut} for a word-by-word breakdown`;
+}
+
+function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heuristic' | 'model', translated: string, sourceText: string, hint: LearningHint | null): HTMLElement {
     const row = doc.createElement('div');
     row.className = 'slt-learning-row';
     row.dataset.origin = origin;
+
+    if (hint) {
+        row.dataset.hint = hint;
+        if (hint !== 'pending') {
+            row.title = 'Get a word-by-word breakdown of this line';
+            row.addEventListener('click', event => {
+                event.stopPropagation();
+                const selection = doc.getSelection?.();
+                if (selection && !selection.isCollapsed) return;
+                triggerLearningBreakdown(sourceText);
+            });
+        }
+    }
 
     if (translated && absorbsTranslation()) {
         const sentence = doc.createElement('div');
@@ -1642,6 +1710,13 @@ function buildLearningRow(doc: Document, tokens: BreakdownToken[], origin: 'heur
         row.appendChild(cell);
     }
 
+    if (hint) {
+        const note = doc.createElement('div');
+        note.className = 'slt-learning-hint';
+        note.textContent = learningHintText(hint);
+        row.appendChild(note);
+    }
+
     return row;
 }
 
@@ -1691,12 +1766,16 @@ function updateLearningRow(doc: Document): void {
         || '';
     if (!translated) return;
 
+    lastLearningSource = sourceText;
     const modelTokens = breakdownLookup ? breakdownLookup(sourceText, translated) : null;
     const origin: 'heuristic' | 'model' = modelTokens ? 'model' : 'heuristic';
     const tokens = modelTokens || buildHeuristicBreakdown(sourceText, translated, currentTargetLanguage, currentSourceLanguage).tokens;
-    if (tokens.length === 0 && !absorbsTranslation()) return;
+    const hint: LearningHint | null = modelTokens || !learningOnDemand || !breakdownRequest
+        ? null
+        : pendingBreakdowns.has(sourceText) ? 'pending' : failedBreakdowns.has(sourceText) ? 'failed' : 'idle';
+    if (tokens.length === 0 && !absorbsTranslation() && !hint) return;
 
-    const key = `${currentConfig.mode}:${origin}:${sourceText}:${translated}:${tokens.length}`;
+    const key = `${currentConfig.mode}:${origin}:${hint || ''}:${learningHotkeyLabel}:${sourceText}:${translated}:${tokens.length}`;
     const anchor = learningAnchorFor(activeLine);
     if (!anchor || !anchor.parentNode) return;
 
@@ -1709,7 +1788,7 @@ function updateLearningRow(doc: Document): void {
 
     removeLearningRows(doc);
 
-    const row = buildLearningRow(doc, tokens, origin, translated);
+    const row = buildLearningRow(doc, tokens, origin, translated, sourceText, hint);
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
     absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
@@ -2513,6 +2592,40 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
 
 .slt-learning-row[data-origin="heuristic"] .slt-learning-token {
     border-style: dashed;
+}
+
+.slt-learning-row[data-hint="idle"],
+.slt-learning-row[data-hint="failed"] {
+    cursor: pointer;
+}
+
+.slt-learning-hint {
+    flex-basis: 100%;
+    font-size: calc(0.26em * var(--slt-overlay-font-scale, 1));
+    line-height: 1.3;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 120ms ease;
+}
+
+.slt-learning-row[data-hint="idle"]:hover .slt-learning-hint,
+.slt-learning-row[data-hint="failed"]:hover .slt-learning-hint {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.slt-learning-row[data-hint="pending"] .slt-learning-hint {
+    animation: slt-learning-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes slt-learning-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+}
+
+#SpicyLyricsPage.SidebarMode .slt-learning-hint,
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
+#SpicyLyricsPage.CardMode .slt-learning-hint {
+    font-size: calc(0.38em * var(--slt-overlay-font-scale, 1));
 }
 
 .slt-learning-source {

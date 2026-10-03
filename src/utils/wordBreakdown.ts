@@ -432,22 +432,22 @@ function optionalString(value: unknown): string | undefined {
     return text ? text : undefined;
 }
 
-export function parseModelBreakdown(raw: string): BreakdownToken[] | null {
-    const text = (raw || '').trim();
-    if (!text) return null;
+function stripCodeFences(raw: string): string {
+    return (raw || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+}
 
-    const withoutFences = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-    const start = withoutFences.indexOf('[');
-    const end = withoutFences.lastIndexOf(']');
-    if (start === -1 || end === -1 || end <= start) return null;
-
-    let parsed: unknown;
+function parseJsonSlice(text: string, open: string, close: string): unknown {
+    const start = text.indexOf(open);
+    const end = text.lastIndexOf(close);
+    if (start === -1 || end === -1 || end <= start) return undefined;
     try {
-        parsed = JSON.parse(withoutFences.slice(start, end + 1));
+        return JSON.parse(text.slice(start, end + 1));
     } catch {
-        return null;
+        return undefined;
     }
+}
 
+function parseTokenArray(parsed: unknown): BreakdownToken[] | null {
     if (!Array.isArray(parsed)) return null;
 
     const tokens: BreakdownToken[] = [];
@@ -470,19 +470,68 @@ export function parseModelBreakdown(raw: string): BreakdownToken[] | null {
     return tokens.length > 0 ? tokens : null;
 }
 
+export function parseModelBreakdown(raw: string): BreakdownToken[] | null {
+    const text = stripCodeFences(raw);
+    if (!text) return null;
+    return parseTokenArray(parseJsonSlice(text, '[', ']'));
+}
+
+export function parseModelBreakdownBatch(raw: string, count: number): (BreakdownToken[] | null)[] {
+    const results: (BreakdownToken[] | null)[] = new Array(count).fill(null);
+    const text = stripCodeFences(raw);
+    if (!text) return results;
+
+    const objectFirst = text.indexOf('{') !== -1 && (text.indexOf('[') === -1 || text.indexOf('{') < text.indexOf('['));
+    const parsedObject = objectFirst ? parseJsonSlice(text, '{', '}') : undefined;
+    if (parsedObject && typeof parsedObject === 'object' && !Array.isArray(parsedObject)) {
+        const record = parsedObject as Record<string, unknown>;
+        for (let i = 0; i < count; i++) {
+            results[i] = parseTokenArray(record[String(i + 1)]);
+        }
+        return results;
+    }
+
+    const parsedArray = parseJsonSlice(text, '[', ']');
+    if (Array.isArray(parsedArray) && parsedArray.length === count && parsedArray.every(Array.isArray)) {
+        for (let i = 0; i < count; i++) {
+            results[i] = parseTokenArray(parsedArray[i]);
+        }
+    }
+    return results;
+}
+
+function breakdownTokenSchema(targetLangName: string): string[] {
+    return [
+        '"source" (the token exactly as it appears in the lyric, in order),',
+        `"target" (its meaning in ${targetLangName} in this context),`,
+        '"lemma" (the dictionary form of the source token),',
+        '"pos" (a short part-of-speech tag such as noun, verb, adj, adv, pron, prep, conj, part, num),',
+        '"note" (a short note only when the token is idiomatic, slang, or grammatically notable; otherwise omit).'
+    ];
+}
+
 export function buildBreakdownPrompt(sourceText: string, sourceLangName: string, targetLangName: string): string {
     return [
         `Break this ${sourceLangName} song lyric down word by word for a learner whose target language is ${targetLangName}.`,
         'Return ONLY a JSON array, no prose and no code fences.',
         'Each element must be an object with these keys:',
-        '"source" (the token exactly as it appears in the lyric, in order),',
-        `"target" (its meaning in ${targetLangName} in this context),`,
-        '"lemma" (the dictionary form of the source token),',
-        '"pos" (a short part-of-speech tag such as noun, verb, adj, adv, pron, prep, conj, part, num),',
-        '"note" (a short note only when the token is idiomatic, slang, or grammatically notable; otherwise omit).',
+        ...breakdownTokenSchema(targetLangName),
         'Cover every meaningful token in order. Merge tokens only when they form one fixed expression.',
         '',
         sourceText
+    ].join('\n');
+}
+
+export function buildBatchBreakdownPrompt(lines: string[], sourceLangName: string, targetLangName: string): string {
+    return [
+        `Break each of these ${sourceLangName} song lyric lines down word by word for a learner whose target language is ${targetLangName}.`,
+        'Return ONLY a JSON object, no prose and no code fences.',
+        `Its keys are the line numbers as strings ("1" to "${lines.length}"), each line number exactly once.`,
+        'Each value is a JSON array for that line only, and each element of the array is an object with these keys:',
+        ...breakdownTokenSchema(targetLangName),
+        'Cover every meaningful token of each line in order. Merge tokens only when they form one fixed expression. Never mix tokens between lines.',
+        '',
+        ...lines.map((line, index) => `${index + 1}. ${line}`)
     ].join('\n');
 }
 

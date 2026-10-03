@@ -42,7 +42,7 @@ Turn on **Auto-Translate on Song Change** and the extension translates each new 
 
 ## Keyboard shortcut
 
-Press `Alt+T` at any time to toggle translation on and off.
+Press `Alt+T` at any time to toggle translation on and off. Shortcuts can be changed in Settings under Interface · Shortcuts.
 
 ## Where it works
 

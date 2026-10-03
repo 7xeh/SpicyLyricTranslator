@@ -20,9 +20,9 @@ import {
     waitForLyricsAndTranslate,
     getLyricsFirstLineText,
     updateButtonState,
-    setupKeyboardShortcut,
     setupViewModeObserver
 } from './core';
+import { attachShortcuts } from './shortcuts';
 
 let initialized = false;
 
@@ -58,7 +58,7 @@ export async function initialize(): Promise<void> {
     await registerSettings();
 
     startUpdateChecker(30 * 60 * 1000);
-    setupKeyboardShortcut();
+    attachShortcuts();
 
     showPostUpdateChangelog().catch(() => {});
 

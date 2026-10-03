@@ -37,6 +37,6 @@ Each translated line can show a quality indicator, so you can tell at a glance w
 - **Track-aware caching** for fast reloads and better offline behavior — see [Caching and data](how-it-works.md#caching-and-data)
 - **Parallel requests** — split long songs across 1–6 concurrent requests on LLM providers
 - **Native Spotify settings integration**, plus a quick popup on right-click of the translate button
-- **`Alt+T`** toggles translation on and off
+- **`Alt+T`** toggles translation on and off, **`Alt+L`** shows or hides Learning Mode, and **`Alt+B`** breaks down the current line (all configurable)
 - **Built-in update checker** with hotfix support and a one-click update flow
 - **Connection indicator** with latency and total installed users

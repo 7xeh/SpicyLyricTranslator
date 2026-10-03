@@ -23,6 +23,7 @@ import { VERSION, REPO_URL, getDisplayHash, runManualUpdateCheck, showCurrentCha
 import { getConnectionState } from './connectivity';
 import { getTrackCacheStats } from './trackCache';
 import { handleTranslateToggle, forceRetranslate } from './core';
+import { attachHotkeyCapture, describeHotkey } from './hotkeys';
 import {
     applySettingsBatch,
     syncModelLists,
@@ -90,6 +91,7 @@ function describeValue(field: SettingsField, value: string | boolean): string {
         const names = parseLanguageList(String(value)).map(languageName);
         return names.length ? names.join(', ') : 'None';
     }
+    if (field.type === 'hotkey') return describeHotkey(String(value));
     if (field.secret) return value ? '••••••••' : 'Not set';
     const str = String(value ?? '');
     return str ? (str.length > 32 ? `${str.slice(0, 31)}…` : str) : '—';
@@ -188,6 +190,7 @@ function buildField(field: SettingsField): FieldHandle {
             'data-form-type': 'other',
         });
         control.append(input);
+        if (field.type === 'hotkey') attachHotkeyCapture(input as HTMLInputElement);
         if (field.type === 'password') {
             const reveal = el('button', { class: 'slt-m-reveal', type: 'button', title: 'Show or hide', 'aria-label': `Show ${field.label}`, html: REVEAL_SVG });
             reveal.addEventListener('click', () => {
@@ -566,11 +569,13 @@ function buildMasterBar(): HTMLElement {
     const sub = el('div', { class: 'slt-m-enabled-sub' });
     const bar = el('div', { class: 'slt-m-enabled-bar' },
         el('div', { class: 'slt-m-enabled-text' }, title, sub),
-        el('label', { class: 'slt-m-toggle', title: 'Alt+T' }, input, el('span', { class: 'slt-m-toggle-slider' })),
+        el('label', { class: 'slt-m-toggle' }, input, el('span', { class: 'slt-m-toggle-slider' })),
     );
+    const toggleLabel = bar.querySelector('.slt-m-toggle') as HTMLElement;
 
     const sync = () => {
         input.checked = state.isEnabled;
+        toggleLabel.title = state.translateHotkey ? describeHotkey(state.translateHotkey) : '';
         bar.classList.toggle('slt-m-enabled-off', !state.isEnabled);
         title.textContent = state.isEnabled ? 'Translation on' : 'Translation off';
         const parts = summaryParts();
