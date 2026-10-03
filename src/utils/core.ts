@@ -377,10 +377,11 @@ function createTranslateButton(): HTMLButtonElement {
 
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy) {
         try {
-            Spicetify.Tippy(button, {
+            const tooltip = Spicetify.Tippy(button, {
                 ...Spicetify.TippyProps,
                 content: state.isEnabled ? 'Disable Translation' : 'Enable Translation'
             });
+            tooltip?.popper?.classList.add('SpicyLyrics_Tooltip');
         } catch (e) {
             warn('Failed to create tooltip:', e);
         }
@@ -477,10 +478,11 @@ function createLearningButton(): HTMLButtonElement {
 
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy) {
         try {
-            Spicetify.Tippy(button, {
+            const tooltip = Spicetify.Tippy(button, {
                 ...Spicetify.TippyProps,
                 content: learningButtonTooltip()
             });
+            tooltip?.popper?.classList.add('SpicyLyrics_Tooltip');
         } catch (e) {
             warn('Failed to create tooltip:', e);
         }
@@ -1707,7 +1709,7 @@ export function setupLyricsObserver(): void {
 export async function onSpicyLyricsOpen(): Promise<void> {
     let viewControls = await waitForElement('#SpicyLyricsPage .ViewControls', 3000);
     if (!viewControls && isSidebarLyricsActive()) {
-        viewControls = await waitForElement('#SpicyLyricsNPVCard #SpicyLyricsPage .ViewControls, .Root__right-sidebar #SpicyLyricsPage .ViewControls', 2000);
+        viewControls = await waitForElement('#SpicyLyricsNPVCard #SpicyLyricsPage .ViewControls, :is(.Root__right-sidebar, #Desktop_PanelContainer_Id) #SpicyLyricsPage .ViewControls', 2000);
     }
     if (!viewControls) viewControls = await waitForElement('.ViewControls', 2000);
 

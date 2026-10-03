@@ -615,7 +615,9 @@ let observedBar: HTMLElement | null = null;
 
 function placeRegion(): void {
     if (!region) return;
-    const bar = document.querySelector<HTMLElement>('.Root__now-playing-bar');
+    const bar = document.querySelector<HTMLElement>('.Root__now-playing-bar')
+        ?? document.querySelector<HTMLElement>('[data-testid="now-playing-bar"]')?.parentElement
+        ?? null;
     let bottom = 16;
     if (bar) {
         const rect = bar.getBoundingClientRect();

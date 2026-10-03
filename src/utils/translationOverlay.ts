@@ -16,7 +16,7 @@ export function isSidebarLyricsActive(doc: Document = document): boolean {
 export function findSidebarLyricsPage(doc: Document = document): HTMLElement | null {
     return doc.querySelector('#SpicyLyricsNPVCard #SpicyLyricsPage') ||
            doc.querySelector('#SpicyLyricsPage.CardMode') ||
-           doc.querySelector('.Root__right-sidebar #SpicyLyricsPage');
+           doc.querySelector(':is(.Root__right-sidebar, #Desktop_PanelContainer_Id) #SpicyLyricsPage');
 }
 
 export type OverlayMode = 'replace' | 'interleaved' | 'none';
@@ -1894,9 +1894,49 @@ const activeLineObservers = new Map<Document, MutationObserver>();
 let activeSyncIntervalId: ReturnType<typeof setInterval> | null = null;
 let activeSyncRafId: number | null = null;
 
-function syncLoop(): void {
+const SPICY_LYRICS_SETTINGS_KEY = 'SL:settings';
+const FRAME_CAP_REFRESH_MS = 1000;
+const FRAME_CAP_SLACK_MS = 1;
+let frameCapIntervalMs = 0;
+let frameCapCheckedAt = -Infinity;
+let lastSyncFrameAt = -Infinity;
+
+function readSpicyLyricsFrameInterval(): number {
+    try {
+        const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
+        const raw = spicetifyStorage?.get?.(SPICY_LYRICS_SETTINGS_KEY) ?? localStorage.getItem(SPICY_LYRICS_SETTINGS_KEY);
+        const settings = raw ? JSON.parse(raw) : null;
+        if (!settings?.animationFpsCapEnabled) return 0;
+        const saved = Number(settings.animationFpsCap);
+        const fps = Number.isFinite(saved) ? Math.min(240, Math.max(15, saved)) : 60;
+        return 1000 / fps;
+    } catch {
+        return 0;
+    }
+}
+
+function shouldRunSyncFrame(timestamp: number): boolean {
+    if (timestamp - frameCapCheckedAt >= FRAME_CAP_REFRESH_MS) {
+        frameCapIntervalMs = readSpicyLyricsFrameInterval();
+        frameCapCheckedAt = timestamp;
+    }
+    if (frameCapIntervalMs === 0) return true;
+    const elapsed = timestamp - lastSyncFrameAt;
+    if (elapsed < frameCapIntervalMs - FRAME_CAP_SLACK_MS) return false;
+    lastSyncFrameAt = elapsed >= frameCapIntervalMs && elapsed < frameCapIntervalMs * 2
+        ? timestamp - (elapsed % frameCapIntervalMs)
+        : timestamp;
+    return true;
+}
+
+function syncLoop(timestamp: number = performance.now()): void {
     if (!isOverlayEnabled) {
         activeSyncRafId = null;
+        return;
+    }
+
+    if (!shouldRunSyncFrame(timestamp)) {
+        activeSyncRafId = requestAnimationFrame(syncLoop);
         return;
     }
 

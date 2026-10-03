@@ -34,6 +34,10 @@ export const styles = `
     color: #e74c3c;
 }
 
+#SpicyLyricsNPVCard .CardControl:is(#TranslateToggle, #LearningToggle) svg {
+    fill: currentColor !important;
+}
+
 #TranslateToggle.error {
     animation: spicy-translate-shake 0.5s ease-in-out;
 }
@@ -197,7 +201,14 @@ export const styles = `
     text-shadow: none;
 }
 
-.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
+.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word) {
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    text-shadow: none;
+}
 
 .slt-replace-word {
     display: inline;

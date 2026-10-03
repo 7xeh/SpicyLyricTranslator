@@ -27,6 +27,67 @@ import {
 
 const SETTINGS_ID = 'spicy-lyric-translator-settings';
 const SPICY_LYRICS_CACHE_NAMES = ['SpicyLyrics_LyricsStore_g1', 'SpicyLyrics_LyricsStore'];
+const LEGACY_ENCORE_PREFIX = 'e-10310-';
+
+let nativeClassMap: Map<string, string[]> = new Map();
+let nativeEncorePrefix: string | null = null;
+
+function classTokens(element: Element | null | undefined): string[] {
+    return element ? Array.from(element.classList) : [];
+}
+
+function readNativeSettingsClasses(page: Element): void {
+    const own = document.getElementById(SETTINGS_ID);
+    const native = <T extends Element>(selector: string): T | null =>
+        Array.from(page.querySelectorAll<T>(selector)).find(element => !own?.contains(element)) ?? null;
+    const map = new Map<string, string[]>();
+    const set = (legacy: string, tokens: string[]) => {
+        const live = tokens.filter(token => token && token !== legacy);
+        if (live.length > 0) map.set(legacy, live);
+    };
+
+    const row = native('[data-settings-row]');
+    if (row) {
+        set('x-settings-row', classTokens(row));
+        set('x-settings-firstColumn', classTokens(row.children[0]).slice(0, 1));
+        set('x-settings-secondColumn', classTokens(row.children[1]).slice(0, 1));
+        if (row.parentElement?.parentElement === page) set('x-settings-section', classTokens(row.parentElement));
+    }
+
+    const toggle = native<HTMLInputElement>('[data-settings-row] input[type="checkbox"]');
+    if (toggle) {
+        const indicatorWrapper = toggle.nextElementSibling;
+        set('x-toggle-input', classTokens(toggle));
+        set('x-toggle-wrapper', classTokens(toggle.closest('label')));
+        set('x-toggle-indicatorWrapper', classTokens(indicatorWrapper));
+        set('x-toggle-indicator', classTokens(indicatorWrapper?.firstElementChild));
+    }
+
+    set('main-dropDown-dropDown', classTokens(native('[data-settings-row] select')));
+    set('x-settings-button', classTokens(native('[data-settings-row] button[data-encore-id="buttonSecondary"]'))
+        .filter(token => !/^(e-\d+-|encore-)/.test(token)));
+
+    const text = native('[data-encore-id="text"]');
+    const prefix = text?.className.match(/\b(e-\d+-)text\b/)?.[1] ?? null;
+    nativeEncorePrefix = prefix && prefix !== LEGACY_ENCORE_PREFIX ? prefix : null;
+    nativeClassMap = map;
+}
+
+function adoptNativeSettingsClasses(root: Element): void {
+    if (nativeClassMap.size === 0 && !nativeEncorePrefix) return;
+    const elements = [root, ...Array.from(root.querySelectorAll('[class]'))];
+    for (const element of elements) {
+        const additions: string[] = [];
+        for (const token of Array.from(element.classList)) {
+            const mapped = nativeClassMap.get(token);
+            if (mapped) additions.push(...mapped);
+            if (nativeEncorePrefix && token.startsWith(LEGACY_ENCORE_PREFIX)) {
+                additions.push(nativeEncorePrefix + token.slice(LEGACY_ENCORE_PREFIX.length));
+            }
+        }
+        if (additions.length > 0) element.classList.add(...additions);
+    }
+}
 
 export function clearAllCachedTranslations(): void {
     clearTranslationCache();
@@ -49,6 +110,7 @@ export async function clearSpicyLyricsCachedLyrics(): Promise<void> {
 function createNativeToggle(id: string, label: string, checked: boolean, onChange: (checked: boolean) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -72,6 +134,7 @@ function createNativeToggle(id: string, label: string, checked: boolean, onChang
 function createNativeDropdown(id: string, label: string, options: { value: string; text: string }[], currentValue: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -94,6 +157,7 @@ function createNativeDropdown(id: string, label: string, options: { value: strin
 function createNativeButton(id: string, label: string, buttonText: string, onClick: () => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -112,6 +176,7 @@ function createNativeButton(id: string, label: string, buttonText: string, onCli
 function createNativeLanguageList(id: string, label: string, options: { value: string; text: string }[], currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -150,6 +215,7 @@ function createNativeLanguageList(id: string, label: string, options: { value: s
             .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.text)}</option>`)
             .join('');
         select.value = '';
+        adoptNativeSettingsClasses(chips);
     };
 
     select.addEventListener('change', () => {
@@ -163,6 +229,7 @@ function createNativeLanguageList(id: string, label: string, options: { value: s
 function createNativeInput(id: string, label: string, type: string, currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -370,6 +437,7 @@ function createNativeSettingsSection(): HTMLElement {
 
     const githubRow = document.createElement('div');
     githubRow.className = 'x-settings-row';
+    githubRow.dataset.settingsRow = 'true';
     githubRow.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
@@ -382,6 +450,7 @@ function createNativeSettingsSection(): HTMLElement {
 
     const shortcutRow = document.createElement('div');
     shortcutRow.className = 'x-settings-row';
+    shortcutRow.dataset.settingsRow = 'true';
     shortcutRow.innerHTML = `
         <div class="x-settings-firstColumn">
             <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
@@ -406,7 +475,9 @@ function injectSettingsIntoPage(): void {
         return;
     }
 
+    readNativeSettingsClasses(settingsContainer);
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
+    adoptNativeSettingsClasses(settingsSection);
 
     const spicyLyricsSettings = document.getElementById('spicy-lyrics-settings');
     const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');

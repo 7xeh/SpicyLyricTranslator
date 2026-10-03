@@ -5654,7 +5654,7 @@ ${text3}`
     return Boolean(doc.querySelector("#SpicyLyricsNPVCard #SpicyLyricsPage, #SpicyLyricsPage.CardMode"));
   }
   function findSidebarLyricsPage(doc = document) {
-    return doc.querySelector("#SpicyLyricsNPVCard #SpicyLyricsPage") || doc.querySelector("#SpicyLyricsPage.CardMode") || doc.querySelector(".Root__right-sidebar #SpicyLyricsPage");
+    return doc.querySelector("#SpicyLyricsNPVCard #SpicyLyricsPage") || doc.querySelector("#SpicyLyricsPage.CardMode") || doc.querySelector(":is(.Root__right-sidebar, #Desktop_PanelContainer_Id) #SpicyLyricsPage");
   }
   var currentConfig = {
     mode: "replace",
@@ -7187,9 +7187,46 @@ ${text3}`
   var activeLineObservers = /* @__PURE__ */ new Map();
   var activeSyncIntervalId = null;
   var activeSyncRafId = null;
-  function syncLoop() {
+  var SPICY_LYRICS_SETTINGS_KEY = "SL:settings";
+  var FRAME_CAP_REFRESH_MS = 1e3;
+  var FRAME_CAP_SLACK_MS = 1;
+  var frameCapIntervalMs = 0;
+  var frameCapCheckedAt = -Infinity;
+  var lastSyncFrameAt = -Infinity;
+  function readSpicyLyricsFrameInterval() {
+    try {
+      const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
+      const raw = spicetifyStorage?.get?.(SPICY_LYRICS_SETTINGS_KEY) ?? localStorage.getItem(SPICY_LYRICS_SETTINGS_KEY);
+      const settings = raw ? JSON.parse(raw) : null;
+      if (!settings?.animationFpsCapEnabled)
+        return 0;
+      const saved = Number(settings.animationFpsCap);
+      const fps = Number.isFinite(saved) ? Math.min(240, Math.max(15, saved)) : 60;
+      return 1e3 / fps;
+    } catch {
+      return 0;
+    }
+  }
+  function shouldRunSyncFrame(timestamp) {
+    if (timestamp - frameCapCheckedAt >= FRAME_CAP_REFRESH_MS) {
+      frameCapIntervalMs = readSpicyLyricsFrameInterval();
+      frameCapCheckedAt = timestamp;
+    }
+    if (frameCapIntervalMs === 0)
+      return true;
+    const elapsed = timestamp - lastSyncFrameAt;
+    if (elapsed < frameCapIntervalMs - FRAME_CAP_SLACK_MS)
+      return false;
+    lastSyncFrameAt = elapsed >= frameCapIntervalMs && elapsed < frameCapIntervalMs * 2 ? timestamp - elapsed % frameCapIntervalMs : timestamp;
+    return true;
+  }
+  function syncLoop(timestamp = performance.now()) {
     if (!isOverlayEnabled) {
       activeSyncRafId = null;
+      return;
+    }
+    if (!shouldRunSyncFrame(timestamp)) {
+      activeSyncRafId = requestAnimationFrame(syncLoop);
       return;
     }
     if (translationMap.size === 0 && !hasContentData()) {
@@ -7703,6 +7740,10 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
     color: #e74c3c;
 }
 
+#SpicyLyricsNPVCard .CardControl:is(#TranslateToggle, #LearningToggle) svg {
+    fill: currentColor !important;
+}
+
 #TranslateToggle.error {
     animation: spicy-translate-shake 0.5s ease-in-out;
 }
@@ -7866,7 +7907,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
     text-shadow: none;
 }
 
-.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word),
+.slt-sync-translation.slt-interleaved-translation:has(.slt-sync-word) {
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+    text-shadow: none;
+}
 
 .slt-replace-word {
     display: inline;
@@ -9252,7 +9300,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function placeRegion() {
     if (!region)
       return;
-    const bar = document.querySelector(".Root__now-playing-bar");
+    const bar = document.querySelector(".Root__now-playing-bar") ?? document.querySelector('[data-testid="now-playing-bar"]')?.parentElement ?? null;
     let bottom = 16;
     if (bar) {
       const rect = bar.getBoundingClientRect();
@@ -10103,7 +10151,7 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.1" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.2" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -10171,7 +10219,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"ef4767fe77820406fe9268042a7d2157818b91600992489a40d33ad530182ab4".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ef4767fe77820406fe9268042a7d2157818b91600992489a40d33ad530182ab4" : "";
+    return !"96299bb9dcd6081555f722c40a120a654d2a6cb1a88c9b3a401b14f8b1712121".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "96299bb9dcd6081555f722c40a120a654d2a6cb1a88c9b3a401b14f8b1712121" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -12660,10 +12708,11 @@ body.slt-update-waiting #TranslateToggle::after {
       button.classList.add("active");
     if (typeof Spicetify !== "undefined" && Spicetify.Tippy) {
       try {
-        Spicetify.Tippy(button, {
+        const tooltip = Spicetify.Tippy(button, {
           ...Spicetify.TippyProps,
           content: state.isEnabled ? "Disable Translation" : "Enable Translation"
         });
+        tooltip?.popper?.classList.add("SpicyLyrics_Tooltip");
       } catch (e) {
         warn("Failed to create tooltip:", e);
       }
@@ -12746,10 +12795,11 @@ body.slt-update-waiting #TranslateToggle::after {
     button.classList.toggle("active", state.learningVisible);
     if (typeof Spicetify !== "undefined" && Spicetify.Tippy) {
       try {
-        Spicetify.Tippy(button, {
+        const tooltip = Spicetify.Tippy(button, {
           ...Spicetify.TippyProps,
           content: learningButtonTooltip()
         });
+        tooltip?.popper?.classList.add("SpicyLyrics_Tooltip");
       } catch (e) {
         warn("Failed to create tooltip:", e);
       }
@@ -13830,7 +13880,7 @@ body.slt-update-waiting #TranslateToggle::after {
   async function onSpicyLyricsOpen() {
     let viewControls = await waitForElement("#SpicyLyricsPage .ViewControls", 3e3);
     if (!viewControls && isSidebarLyricsActive()) {
-      viewControls = await waitForElement("#SpicyLyricsNPVCard #SpicyLyricsPage .ViewControls, .Root__right-sidebar #SpicyLyricsPage .ViewControls", 2e3);
+      viewControls = await waitForElement("#SpicyLyricsNPVCard #SpicyLyricsPage .ViewControls, :is(.Root__right-sidebar, #Desktop_PanelContainer_Id) #SpicyLyricsPage .ViewControls", 2e3);
     }
     if (!viewControls)
       viewControls = await waitForElement(".ViewControls", 2e3);
@@ -16337,6 +16387,62 @@ body.slt-update-waiting #TranslateToggle::after {
   // src/utils/settings.ts
   var SETTINGS_ID = "spicy-lyric-translator-settings";
   var SPICY_LYRICS_CACHE_NAMES2 = ["SpicyLyrics_LyricsStore_g1", "SpicyLyrics_LyricsStore"];
+  var LEGACY_ENCORE_PREFIX = "e-10310-";
+  var nativeClassMap = /* @__PURE__ */ new Map();
+  var nativeEncorePrefix = null;
+  function classTokens(element) {
+    return element ? Array.from(element.classList) : [];
+  }
+  function readNativeSettingsClasses(page) {
+    const own = document.getElementById(SETTINGS_ID);
+    const native = (selector) => Array.from(page.querySelectorAll(selector)).find((element) => !own?.contains(element)) ?? null;
+    const map = /* @__PURE__ */ new Map();
+    const set = (legacy2, tokens) => {
+      const live2 = tokens.filter((token) => token && token !== legacy2);
+      if (live2.length > 0)
+        map.set(legacy2, live2);
+    };
+    const row = native("[data-settings-row]");
+    if (row) {
+      set("x-settings-row", classTokens(row));
+      set("x-settings-firstColumn", classTokens(row.children[0]).slice(0, 1));
+      set("x-settings-secondColumn", classTokens(row.children[1]).slice(0, 1));
+      if (row.parentElement?.parentElement === page)
+        set("x-settings-section", classTokens(row.parentElement));
+    }
+    const toggle = native('[data-settings-row] input[type="checkbox"]');
+    if (toggle) {
+      const indicatorWrapper = toggle.nextElementSibling;
+      set("x-toggle-input", classTokens(toggle));
+      set("x-toggle-wrapper", classTokens(toggle.closest("label")));
+      set("x-toggle-indicatorWrapper", classTokens(indicatorWrapper));
+      set("x-toggle-indicator", classTokens(indicatorWrapper?.firstElementChild));
+    }
+    set("main-dropDown-dropDown", classTokens(native("[data-settings-row] select")));
+    set("x-settings-button", classTokens(native('[data-settings-row] button[data-encore-id="buttonSecondary"]')).filter((token) => !/^(e-\d+-|encore-)/.test(token)));
+    const text3 = native('[data-encore-id="text"]');
+    const prefix = text3?.className.match(/\b(e-\d+-)text\b/)?.[1] ?? null;
+    nativeEncorePrefix = prefix && prefix !== LEGACY_ENCORE_PREFIX ? prefix : null;
+    nativeClassMap = map;
+  }
+  function adoptNativeSettingsClasses(root) {
+    if (nativeClassMap.size === 0 && !nativeEncorePrefix)
+      return;
+    const elements = [root, ...Array.from(root.querySelectorAll("[class]"))];
+    for (const element of elements) {
+      const additions = [];
+      for (const token of Array.from(element.classList)) {
+        const mapped = nativeClassMap.get(token);
+        if (mapped)
+          additions.push(...mapped);
+        if (nativeEncorePrefix && token.startsWith(LEGACY_ENCORE_PREFIX)) {
+          additions.push(nativeEncorePrefix + token.slice(LEGACY_ENCORE_PREFIX.length));
+        }
+      }
+      if (additions.length > 0)
+        element.classList.add(...additions);
+    }
+  }
   function clearAllCachedTranslations() {
     clearTranslationCache();
     clearWordBreakdownCache();
@@ -16356,6 +16462,7 @@ body.slt-update-waiting #TranslateToggle::after {
   function createNativeToggle(id, label, checked, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
+    row.dataset.settingsRow = "true";
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -16376,6 +16483,7 @@ body.slt-update-waiting #TranslateToggle::after {
   function createNativeDropdown(id, label, options, currentValue, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
+    row.dataset.settingsRow = "true";
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -16395,6 +16503,7 @@ body.slt-update-waiting #TranslateToggle::after {
   function createNativeButton(id, label, buttonText, onClick) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
+    row.dataset.settingsRow = "true";
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -16410,6 +16519,7 @@ body.slt-update-waiting #TranslateToggle::after {
   function createNativeLanguageList(id, label, options, currentValue, placeholder, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
+    row.dataset.settingsRow = "true";
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -16442,6 +16552,7 @@ body.slt-update-waiting #TranslateToggle::after {
       }));
       select.innerHTML = `<option value="">${escapeHtml3(placeholder)}</option>` + options.filter((option) => !selected.includes(option.value)).map((option) => `<option value="${escapeHtml3(option.value)}">${escapeHtml3(option.text)}</option>`).join("");
       select.value = "";
+      adoptNativeSettingsClasses(chips);
     };
     select.addEventListener("change", () => {
       if (select.value)
@@ -16453,6 +16564,7 @@ body.slt-update-waiting #TranslateToggle::after {
   function createNativeInput(id, label, type, currentValue, placeholder, onChange) {
     const row = document.createElement("div");
     row.className = "x-settings-row";
+    row.dataset.settingsRow = "true";
     row.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
@@ -16644,6 +16756,7 @@ body.slt-update-waiting #TranslateToggle::after {
     ));
     const githubRow = document.createElement("div");
     githubRow.className = "x-settings-row";
+    githubRow.dataset.settingsRow = "true";
     githubRow.innerHTML = `
         <div class="x-settings-firstColumn">
             <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued">GitHub Repository</label>
@@ -16655,6 +16768,7 @@ body.slt-update-waiting #TranslateToggle::after {
     sectionContent.appendChild(githubRow);
     const shortcutRow = document.createElement("div");
     shortcutRow.className = "x-settings-row";
+    shortcutRow.dataset.settingsRow = "true";
     shortcutRow.innerHTML = `
         <div class="x-settings-firstColumn">
             <span class="e-10310-text encore-text-marginal encore-internal-color-text-subdued">Keyboard shortcut: Alt+T to toggle translation</span>
@@ -16673,7 +16787,9 @@ body.slt-update-waiting #TranslateToggle::after {
     if (sectionAlreadyInContainer) {
       return;
     }
+    readNativeSettingsClasses(settingsContainer);
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
+    adoptNativeSettingsClasses(settingsSection);
     const spicyLyricsSettings = document.getElementById("spicy-lyrics-settings");
     const spicyLyricsDevSettings = document.getElementById("spicy-lyrics-dev-settings");
     if (spicyLyricsDevSettings) {
