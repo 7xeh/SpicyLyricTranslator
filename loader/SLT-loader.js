@@ -111,7 +111,7 @@
         if (!isValidVersion(version)) throw new Error('GitHub API did not return a valid release tag');
 
         const jsAsset = Array.isArray(release.assets)
-            ? release.assets.find(asset => typeof asset?.name === 'string' && asset.name.endsWith('.js'))
+            ? release.assets.find(asset => asset?.name === BUNDLE_NAME)
             : null;
 
         return {
@@ -131,8 +131,25 @@
     };
 
     const loadExtension = async (version, preferredDownloadUrl = '', expectedHash = null) => {
+        // GitHub's release redirect does not allow browser fetches from Spotify.
+        // Only proxy the official release asset when its digest can be verified.
+        let proxyDownloadUrl = '';
+        const officialReleaseUrl = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${BUNDLE_NAME}`;
+        if (preferredDownloadUrl === officialReleaseUrl && normalizeHash(expectedHash)) {
+            const template = localStorage.getItem('spicetify:corsProxyTemplate')
+                ?? 'https://cors-proxy.spicetify.app/{url}';
+            try {
+                if (template.includes('{url}')) {
+                    const parsed = new URL(template.replace('{url}', officialReleaseUrl));
+                    if (parsed.protocol === 'https:') proxyDownloadUrl = parsed.href;
+                }
+            } catch {
+                log.warn('Ignoring invalid Spicetify CORS proxy template');
+            }
+        }
         const candidates = [
             preferredDownloadUrl,
+            proxyDownloadUrl,
             `${EXTENSION_BASE_URL}/versions/v${version}/${BUNDLE_NAME}`,
             `${EXTENSION_BASE_URL}/latest/${BUNDLE_NAME}`,
         ].filter(Boolean);
@@ -164,6 +181,10 @@
 
         const code = await response.text();
         const contentHash = await computeSHA256(code);
+
+        if (resolvedUrl === proxyDownloadUrl && !contentHash) {
+            throw new Error('Cannot verify integrity of proxied release asset');
+        }
 
         if (expectedHash && contentHash && expectedHash !== contentHash) {
             throw new Error(`Integrity check failed: expected ${expectedHash.substring(0, 12)}, got ${contentHash.substring(0, 12)}`);
