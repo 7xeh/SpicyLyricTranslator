@@ -2820,9 +2820,30 @@ var SpicyLyricTranslater = (() => {
     }
     return normalizedRepaired;
   }
+  var NON_LATIN_SCRIPT_LANGUAGES = /* @__PURE__ */ new Set(["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el", "fa", "ur", "bn", "ta", "te", "kn", "ml", "gu", "pa", "or", "si", "my", "km", "lo", "ka", "am", "yi", "ug", "mr", "ne", "sa", "as"]);
+  var NON_LATIN_LETTER_REGEX = /(?!\p{Script=Latin})\p{L}/u;
   function targetLangIsLatinScript(targetLang) {
     const base = (targetLang || "").toLowerCase().split(/[-_]/)[0];
-    return !["ja", "zh", "ko", "ar", "he", "ru", "th", "hi", "el", "fa", "ur", "bn", "ta", "te", "kn", "ml", "gu", "pa", "or", "si", "my", "km", "lo", "ka", "am", "yi", "ug"].includes(base);
+    return !NON_LATIN_SCRIPT_LANGUAGES.has(base);
+  }
+  function isLatinOnlyText(lines) {
+    const texts = Array.isArray(lines) ? lines : [lines];
+    return texts.some((text3) => /\p{Script=Latin}/u.test(text3 || "")) && !texts.some((text3) => NON_LATIN_LETTER_REGEX.test(text3 || ""));
+  }
+  function resolveGoogleSourceLang(text3, sourceLang) {
+    const sl = normalizeSourceLangHint(sourceLang);
+    if (sl !== "auto" && !targetLangIsLatinScript(sl) && isLatinOnlyText(text3)) {
+      return "auto";
+    }
+    return sl;
+  }
+  function isRomanizedTextUnderNonLatinLang(lang, lines) {
+    if (!lang || lang === "auto" || lang === "unknown" || lang === "mixed" || /-latn$/i.test(lang))
+      return false;
+    return !targetLangIsLatinScript(lang) && isLatinOnlyText(lines);
+  }
+  function markRomanizedTrackLang(lang, lines) {
+    return isRomanizedTextUnderNonLatinLang(lang, lines) ? `${lang.toLowerCase().split(/[-_]/)[0]}-latn` : lang;
   }
   function sourceHasNonLatinScript(text3) {
     if (!text3)
@@ -3509,7 +3530,7 @@ var SpicyLyricTranslater = (() => {
   }
   async function translateWithGoogle(text3, targetLang, sourceLang) {
     const encodedText = encodeURIComponent(text3);
-    const sl = normalizeSourceLangHint(sourceLang);
+    const sl = resolveGoogleSourceLang(text3, sourceLang);
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${getApiTargetLanguage(targetLang)}&dt=t&q=${encodedText}`;
     const response = await fetch(url);
     recordApiUsage(null);
@@ -4591,6 +4612,9 @@ ${text3}`
     } else {
       detectedSourceLang = refineChineseLanguageCode(detectedSourceLang, lines);
     }
+    if (isRomanizedTextUnderNonLatinLang(detectedSourceLang, lines)) {
+      detectedSourceLang = void 0;
+    }
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== "auto" && detectedSourceLang !== "unknown" && isSameLanguage(detectedSourceLang, targetLang);
     const confidentLineLangs = Array.from(lineLanguages);
     const NON_LATIN_SCRIPT_RE = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿЀ-ӿ؀-ۿ֐-׿฀-๿ऀ-ॿͰ-Ͽ]/;
@@ -4624,7 +4648,12 @@ ${text3}`
     }
     if (currentTrackUri && !skipTrackCache) {
       const trackCache = getTrackCache(currentTrackUri, targetLang);
-      if (trackCache && trackCache.lines.length === lines.length) {
+      if (trackCache && isRomanizedTextUnderNonLatinLang(trackCache.lang, lines)) {
+        deleteTrackCache(currentTrackUri, targetLang);
+        const lineCache = storage_default.getJSON("translation-cache", {});
+        lines.forEach((line) => delete lineCache[`${targetLang}:${line}`]);
+        storage_default.setJSON("translation-cache", lineCache);
+      } else if (trackCache && trackCache.lines.length === lines.length) {
         if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
           deleteTrackCache(currentTrackUri, targetLang);
         } else if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
@@ -4683,7 +4712,7 @@ ${text3}`
         setTrackCache(
           currentTrackUri,
           targetLang,
-          detectedSourceLang || "auto",
+          markRomanizedTrackLang(detectedSourceLang || "auto", lines),
           translatedLines,
           preferredApi,
           sourceFingerprint,
@@ -4881,7 +4910,7 @@ ${text3}`
       setTrackCache(
         currentTrackUri,
         targetLang,
-        detectedLang,
+        markRomanizedTrackLang(detectedLang, lines),
         translatedLines,
         preferredApi,
         sourceFingerprint,
@@ -5798,6 +5827,14 @@ ${text3}`
   function normalizeCompare(text3) {
     return normalizeLyricMatchKey(text3);
   }
+  function isEchoedTranslation(translation, originalText) {
+    if (!translation || !originalText)
+      return false;
+    if (translation === originalText)
+      return true;
+    const translationKey = normalizeCompare(translation);
+    return translationKey !== "" && translationKey === normalizeCompare(originalText);
+  }
   function buildContentLookupKeys(text3) {
     const nonLatinOnly = text3.replace(/[A-Za-z0-9]/g, " ").replace(/\s+/g, " ").trim();
     const latinOnly = text3.replace(/[^A-Za-z0-9\s'\-]/g, " ").replace(/\s+/g, " ").trim();
@@ -6213,7 +6250,7 @@ ${text3}`
       let existing = siblingSkippingRomanization(line, "next");
       if (existing && !existing.classList.contains("slt-replace-line"))
         existing = null;
-      const wants = !!translation && translation !== originalText && !!line.parentNode;
+      const wants = !!translation && !isEchoedTranslation(translation, originalText) && !!line.parentNode;
       if (!wants) {
         if (existing)
           existing.remove();
@@ -6472,7 +6509,7 @@ ${text3}`
           let existing = siblingSkippingRomanization(line, "next");
           if (existing && !existing.classList.contains("slt-interleaved-translation"))
             existing = null;
-          const wants = (!!translation || isBreak) && translation !== originalText && !!line.parentNode;
+          const wants = (!!translation || isBreak) && !isEchoedTranslation(translation, originalText) && !!line.parentNode;
           if (!wants) {
             if (existing)
               existing.remove();
@@ -10376,7 +10413,7 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.2" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.3" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -10444,7 +10481,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"b84c64515ad6b7f5ea11513120d5ce11b6c7a18449b1daa69be9dff8ef8d5271".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "b84c64515ad6b7f5ea11513120d5ce11b6c7a18449b1daa69be9dff8ef8d5271" : "";
+    return !"49f51c77d3171ee0495f72c1c89e2748b1cd44e3e4334036cae8643f62577ffa".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "49f51c77d3171ee0495f72c1c89e2748b1cd44e3e4334036cae8643f62577ffa" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)

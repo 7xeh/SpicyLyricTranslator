@@ -56,6 +56,13 @@ function normalizeCompare(text: string | undefined | null): string {
     return normalizeLyricMatchKey(text);
 }
 
+export function isEchoedTranslation(translation: string | undefined | null, originalText: string | undefined | null): boolean {
+    if (!translation || !originalText) return false;
+    if (translation === originalText) return true;
+    const translationKey = normalizeCompare(translation);
+    return translationKey !== '' && translationKey === normalizeCompare(originalText);
+}
+
 interface ContentLookupKeys {
     norm: string;
     nonLatinNorm: string;
@@ -532,7 +539,7 @@ function applyReplaceMode(doc: Document): void {
         let existing = siblingSkippingRomanization(line, 'next');
         if (existing && !existing.classList.contains('slt-replace-line')) existing = null;
 
-        const wants = !!translation && translation !== originalText && !!line.parentNode;
+        const wants = !!translation && !isEchoedTranslation(translation, originalText) && !!line.parentNode;
         if (!wants) {
             if (existing) existing.remove();
             const staleRom = line.nextElementSibling as HTMLElement | null;
@@ -915,7 +922,7 @@ function applyInterleavedMode(doc: Document): void {
 
                 let existing = siblingSkippingRomanization(line, 'next');
                 if (existing && !existing.classList.contains('slt-interleaved-translation')) existing = null;
-                const wants = (!!translation || isBreak) && translation !== originalText && !!line.parentNode;
+                const wants = (!!translation || isBreak) && !isEchoedTranslation(translation, originalText) && !!line.parentNode;
                 if (!wants) {
                     if (existing) existing.remove();
                     const staleRom = line.nextElementSibling as HTMLElement | null;

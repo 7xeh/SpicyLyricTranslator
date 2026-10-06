@@ -294,9 +294,34 @@ async function repairMixedLineTranslation(source: string, translated: string, ta
     return normalizedRepaired;
 }
 
+const NON_LATIN_SCRIPT_LANGUAGES = new Set(['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el', 'fa', 'ur', 'bn', 'ta', 'te', 'kn', 'ml', 'gu', 'pa', 'or', 'si', 'my', 'km', 'lo', 'ka', 'am', 'yi', 'ug', 'mr', 'ne', 'sa', 'as']);
+const NON_LATIN_LETTER_REGEX = /(?!\p{Script=Latin})\p{L}/u;
+
 function targetLangIsLatinScript(targetLang: string): boolean {
     const base = (targetLang || '').toLowerCase().split(/[-_]/)[0];
-    return !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el', 'fa', 'ur', 'bn', 'ta', 'te', 'kn', 'ml', 'gu', 'pa', 'or', 'si', 'my', 'km', 'lo', 'ka', 'am', 'yi', 'ug'].includes(base);
+    return !NON_LATIN_SCRIPT_LANGUAGES.has(base);
+}
+
+function isLatinOnlyText(lines: string | string[]): boolean {
+    const texts = Array.isArray(lines) ? lines : [lines];
+    return texts.some(text => /\p{Script=Latin}/u.test(text || '')) && !texts.some(text => NON_LATIN_LETTER_REGEX.test(text || ''));
+}
+
+export function resolveGoogleSourceLang(text: string, sourceLang?: string): string {
+    const sl = normalizeSourceLangHint(sourceLang);
+    if (sl !== 'auto' && !targetLangIsLatinScript(sl) && isLatinOnlyText(text)) {
+        return 'auto';
+    }
+    return sl;
+}
+
+function isRomanizedTextUnderNonLatinLang(lang: string | undefined, lines: string[]): boolean {
+    if (!lang || lang === 'auto' || lang === 'unknown' || lang === 'mixed' || /-latn$/i.test(lang)) return false;
+    return !targetLangIsLatinScript(lang) && isLatinOnlyText(lines);
+}
+
+function markRomanizedTrackLang(lang: string, lines: string[]): string {
+    return isRomanizedTextUnderNonLatinLang(lang, lines) ? `${lang.toLowerCase().split(/[-_]/)[0]}-latn` : lang;
 }
 
 function sourceHasNonLatinScript(text: string): boolean {
@@ -1128,7 +1153,7 @@ function normalizeSourceLangHint(raw?: string): string {
 
 async function translateWithGoogle(text: string, targetLang: string, sourceLang?: string): Promise<{ translation: string; detectedLang: string }> {
     const encodedText = encodeURIComponent(text);
-    const sl = normalizeSourceLangHint(sourceLang);
+    const sl = resolveGoogleSourceLang(text, sourceLang);
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${getApiTargetLanguage(targetLang)}&dt=t&q=${encodedText}`;
 
     const response = await fetch(url);
@@ -2440,6 +2465,10 @@ async function translateLyricsInner(
         detectedSourceLang = refineChineseLanguageCode(detectedSourceLang, lines);
     }
 
+    if (isRomanizedTextUnderNonLatinLang(detectedSourceLang, lines)) {
+        detectedSourceLang = undefined;
+    }
+
     const sameLangFromHint = detectedSourceLang && detectedSourceLang !== 'auto' && detectedSourceLang !== 'unknown' && isSameLanguage(detectedSourceLang, targetLang);
     const confidentLineLangs = Array.from(lineLanguages);
     const NON_LATIN_SCRIPT_RE = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿЀ-ӿ؀-ۿ֐-׿฀-๿ऀ-ॿͰ-Ͽ]/;
@@ -2475,7 +2504,12 @@ async function translateLyricsInner(
 
     if (currentTrackUri && !skipTrackCache) {
         const trackCache = getTrackCache(currentTrackUri, targetLang);
-        if (trackCache && trackCache.lines.length === lines.length) {
+        if (trackCache && isRomanizedTextUnderNonLatinLang(trackCache.lang, lines)) {
+            deleteTrackCache(currentTrackUri, targetLang);
+            const lineCache = storage.getJSON<TranslationCache>('translation-cache', {});
+            lines.forEach(line => delete lineCache[`${targetLang}:${line}`]);
+            storage.setJSON('translation-cache', lineCache);
+        } else if (trackCache && trackCache.lines.length === lines.length) {
             if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
                 deleteTrackCache(currentTrackUri, targetLang);
             } else if (trackCache.sourceFingerprint && trackCache.sourceFingerprint === sourceFingerprint) {
@@ -2539,7 +2573,7 @@ async function translateLyricsInner(
             setTrackCache(
                 currentTrackUri,
                 targetLang,
-                detectedSourceLang || 'auto',
+                markRomanizedTrackLang(detectedSourceLang || 'auto', lines),
                 translatedLines,
                 preferredApi,
                 sourceFingerprint,
@@ -2763,7 +2797,7 @@ async function translateLyricsInner(
         setTrackCache(
             currentTrackUri,
             targetLang,
-            detectedLang,
+            markRomanizedTrackLang(detectedLang, lines),
             translatedLines,
             preferredApi,
             sourceFingerprint,
