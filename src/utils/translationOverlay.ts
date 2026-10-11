@@ -5,9 +5,6 @@ import { storage } from './storage';
 import { buildHeuristicBreakdown, BreakdownToken } from './wordBreakdown';
 import { cleanLyricText, normalizeLyricMatchKey } from './text';
 
-export const CINEMA_CONTAINER_SELECTOR = '.Cinema--Container, .spicy-lyrics-cinema, .Root__cinema-view';
-export const CINEMA_LYRICS_CONTENT_SELECTOR = '.Cinema--Container .LyricsContent, .spicy-lyrics-cinema .LyricsContent, .Root__cinema-view .LyricsContent';
-
 export function isSidebarLyricsActive(doc: Document = document): boolean {
     if (doc.body?.classList?.contains('SpicySidebarLyrics__Active')) return true;
     return Boolean(doc.querySelector('#SpicyLyricsNPVCard #SpicyLyricsPage, #SpicyLyricsPage.CardMode'));
@@ -1796,6 +1793,8 @@ function updateLearningRow(doc: Document): void {
     removeLearningRows(doc);
 
     const row = buildLearningRow(doc, tokens, origin, translated, sourceText, hint);
+    row.classList.toggle('OppositeAligned', activeLine.classList.contains('OppositeAligned'));
+    row.classList.toggle('rtl', activeLine.classList.contains('rtl'));
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
     absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
@@ -2435,14 +2434,8 @@ body.slt-overlay-active .LyricsContent {}
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-translation {
     font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-interleaved-translation {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
@@ -2518,16 +2511,9 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     font-size: calc(0.7em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-romanization-line,
-.Root__cinema-view .slt-romanization-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-romanization-line {
     font-size: calc(0.75em * var(--slt-overlay-font-scale, 1));
     padding: 3px 0;
-}
-
-#SpicyLyricsPage.SidebarMode .slt-romanization-line {
-    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
-    padding: 1px 0;
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
@@ -2551,6 +2537,20 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     animation: slt-learning-in 180ms ease-out;
 }
 
+.slt-learning-row.OppositeAligned {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.slt-learning-row.rtl {
+    flex-direction: row-reverse;
+    text-align: right;
+}
+
+.slt-learning-row.rtl.OppositeAligned {
+    text-align: left;
+}
+
 .slt-interleaved-translation.slt-learning-absorbed {
     display: none !important;
 }
@@ -2564,7 +2564,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     margin-bottom: 2px;
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-translation,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
 #SpicyLyricsPage.CardMode .slt-learning-translation {
     font-size: calc(0.6em * var(--slt-overlay-font-scale, 1));
@@ -2589,6 +2588,15 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
     font-weight: 600;
     white-space: normal;
     max-width: 16em;
+}
+
+.slt-learning-row.OppositeAligned .slt-learning-token,
+.slt-learning-row.rtl .slt-learning-token {
+    align-items: flex-end;
+}
+
+.slt-learning-row.rtl.OppositeAligned .slt-learning-token {
+    align-items: flex-start;
 }
 
 .slt-learning-token[data-confidence="medium"] .slt-learning-target,
@@ -2629,7 +2637,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
     50% { opacity: 1; }
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-hint,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
 #SpicyLyricsPage.CardMode .slt-learning-hint {
     font-size: calc(0.38em * var(--slt-overlay-font-scale, 1));
@@ -2667,7 +2674,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
     letter-spacing: 0.04em;
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-token,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
 #SpicyLyricsPage.CardMode .slt-learning-token {
     font-size: calc(0.42em * var(--slt-overlay-font-scale, 1));

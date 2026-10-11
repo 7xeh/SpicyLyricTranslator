@@ -300,15 +300,8 @@ export const styles = `
     padding: 8px 0;
 }
 
-.Cinema--Container .slt-replace-line,
-.Root__cinema-view .slt-replace-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-replace-line {
     padding: 14px 0;
-}
-
-#SpicyLyricsPage.SidebarMode .slt-replace-line {
-    padding: 6px 0;
-    font-size: 0.9em;
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line,
@@ -612,18 +605,9 @@ body.slt-overlay-active .LyricsContent {}
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-interleaved-overlay .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-overlay .slt-interleaved-translation,
-.Cinema--Container .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-overlay .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-translation {
     font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-interleaved-overlay .slt-interleaved-translation,
-#SpicyLyricsPage.SidebarMode .slt-interleaved-translation {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
 }
 
 body.SpicySidebarLyrics__Active .slt-interleaved-overlay .slt-interleaved-translation,
@@ -775,21 +759,15 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
     font-size: 0.8em;
 }
 
-.Cinema--Container .slt-sync-line,
-.Root__cinema-view .slt-sync-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-line {
     margin: 12px 0;
 }
 
-.Cinema--Container .slt-sync-translation,
-.Root__cinema-view .slt-sync-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-translation {
     font-size: 0.85em;
     margin-top: 6px;
 }
 
-.Cinema--Container .slt-sync-word.slt-word-active,
-.Root__cinema-view .slt-sync-word.slt-word-active,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-word.slt-word-active {
     text-shadow:
         0 0 15px rgba(255, 255, 255, 0.6),
@@ -907,14 +885,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     padding: 1px 4px;
 }
 
-.Cinema--Container .LyricsContainer::before,
-.Root__cinema-view .LyricsContainer::before,
-.Cinema--Container .LyricsContainer::after,
-.Root__cinema-view .LyricsContainer::after,
-.Cinema--Container .simplebar-content::before,
-.Root__cinema-view .simplebar-content::before,
-.Cinema--Container .simplebar-content::after,
-.Root__cinema-view .simplebar-content::after,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::before,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::after,
 #SpicyLyricsPage.ForcedCompactMode .simplebar-content::before,

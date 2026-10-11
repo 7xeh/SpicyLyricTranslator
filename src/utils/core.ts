@@ -30,9 +30,7 @@ import {
     setOverlayLearningMode,
     invalidateLearningRow,
     setLearningTargetLanguage,
-    setLearningSourceLanguage,
-    CINEMA_CONTAINER_SELECTOR,
-    CINEMA_LYRICS_CONTENT_SELECTOR
+    setLearningSourceLanguage
 } from './translationOverlay';
 import type { OverlayMode } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine, getLanguageName, isExcludedSourceLanguage, isChineseScriptConversion } from './languageDetection';
@@ -257,7 +255,6 @@ export function isRomanizationActive(): boolean {
 export function isSpicyLyricsOpen(): boolean {
     if (document.querySelector('#SpicyLyricsPage') ||
         document.querySelector('.spicy-pip-wrapper #SpicyLyricsPage') ||
-        document.querySelector(CINEMA_CONTAINER_SELECTOR) ||
         isSidebarLyricsActive()) {
         return true;
     }
@@ -289,7 +286,6 @@ export function getLyricsContent(): HTMLElement | null {
     return document.querySelector('#SpicyLyricsPage .LyricsContainer .LyricsContent') ||
            document.querySelector('#SpicyLyricsPage .LyricsContent') ||
            document.querySelector('.spicy-pip-wrapper .LyricsContent') ||
-           document.querySelector(CINEMA_LYRICS_CONTENT_SELECTOR) ||
            document.querySelector('.LyricsContainer .LyricsContent');
 }
 

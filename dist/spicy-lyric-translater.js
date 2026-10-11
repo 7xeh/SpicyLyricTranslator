@@ -5795,8 +5795,6 @@ ${text3}`
   }
 
   // src/utils/translationOverlay.ts
-  var CINEMA_CONTAINER_SELECTOR = ".Cinema--Container, .spicy-lyrics-cinema, .Root__cinema-view";
-  var CINEMA_LYRICS_CONTENT_SELECTOR = ".Cinema--Container .LyricsContent, .spicy-lyrics-cinema .LyricsContent, .Root__cinema-view .LyricsContent";
   function isSidebarLyricsActive(doc = document) {
     if (doc.body?.classList?.contains("SpicySidebarLyrics__Active"))
       return true;
@@ -7256,6 +7254,8 @@ ${text3}`
     }
     removeLearningRows(doc);
     const row = buildLearningRow(doc, tokens, origin, translated, sourceText, hint);
+    row.classList.toggle("OppositeAligned", activeLine.classList.contains("OppositeAligned"));
+    row.classList.toggle("rtl", activeLine.classList.contains("rtl"));
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
     absorbInterleavedTranslation(activeLine);
     lastLearningKey = key;
@@ -7723,14 +7723,8 @@ body.slt-overlay-active .LyricsContent {}
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-translation {
     font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-interleaved-translation {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
@@ -7806,16 +7800,9 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     font-size: calc(0.7em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-romanization-line,
-.Root__cinema-view .slt-romanization-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-romanization-line {
     font-size: calc(0.75em * var(--slt-overlay-font-scale, 1));
     padding: 3px 0;
-}
-
-#SpicyLyricsPage.SidebarMode .slt-romanization-line {
-    font-size: calc(0.65em * var(--slt-overlay-font-scale, 1));
-    padding: 1px 0;
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
@@ -7839,6 +7826,20 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     animation: slt-learning-in 180ms ease-out;
 }
 
+.slt-learning-row.OppositeAligned {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.slt-learning-row.rtl {
+    flex-direction: row-reverse;
+    text-align: right;
+}
+
+.slt-learning-row.rtl.OppositeAligned {
+    text-align: left;
+}
+
 .slt-interleaved-translation.slt-learning-absorbed {
     display: none !important;
 }
@@ -7852,7 +7853,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-romanization-line,
     margin-bottom: 2px;
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-translation,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
 #SpicyLyricsPage.CardMode .slt-learning-translation {
     font-size: calc(0.6em * var(--slt-overlay-font-scale, 1));
@@ -7877,6 +7877,15 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
     font-weight: 600;
     white-space: normal;
     max-width: 16em;
+}
+
+.slt-learning-row.OppositeAligned .slt-learning-token,
+.slt-learning-row.rtl .slt-learning-token {
+    align-items: flex-end;
+}
+
+.slt-learning-row.rtl.OppositeAligned .slt-learning-token {
+    align-items: flex-start;
 }
 
 .slt-learning-token[data-confidence="medium"] .slt-learning-target,
@@ -7917,7 +7926,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-translation,
     50% { opacity: 1; }
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-hint,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
 #SpicyLyricsPage.CardMode .slt-learning-hint {
     font-size: calc(0.38em * var(--slt-overlay-font-scale, 1));
@@ -7955,7 +7963,6 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-hint,
     letter-spacing: 0.04em;
 }
 
-#SpicyLyricsPage.SidebarMode .slt-learning-token,
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
 #SpicyLyricsPage.CardMode .slt-learning-token {
     font-size: calc(0.42em * var(--slt-overlay-font-scale, 1));
@@ -8268,15 +8275,8 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
     padding: 8px 0;
 }
 
-.Cinema--Container .slt-replace-line,
-.Root__cinema-view .slt-replace-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-replace-line {
     padding: 14px 0;
-}
-
-#SpicyLyricsPage.SidebarMode .slt-replace-line {
-    padding: 6px 0;
-    font-size: 0.9em;
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-replace-line,
@@ -8580,18 +8580,9 @@ body.slt-overlay-active .LyricsContent {}
     font-size: calc(0.82em * var(--slt-overlay-font-scale, 1));
 }
 
-.Cinema--Container .slt-interleaved-overlay .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-overlay .slt-interleaved-translation,
-.Cinema--Container .slt-interleaved-translation,
-.Root__cinema-view .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-overlay .slt-interleaved-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-interleaved-translation {
     font-size: calc(0.88em * var(--slt-overlay-font-scale, 1));
-}
-
-#SpicyLyricsPage.SidebarMode .slt-interleaved-overlay .slt-interleaved-translation,
-#SpicyLyricsPage.SidebarMode .slt-interleaved-translation {
-    font-size: calc(0.78em * var(--slt-overlay-font-scale, 1));
 }
 
 body.SpicySidebarLyrics__Active .slt-interleaved-overlay .slt-interleaved-translation,
@@ -8743,21 +8734,15 @@ body.SpicySidebarLyrics__Active .slt-sync-word.slt-word-active,
     font-size: 0.8em;
 }
 
-.Cinema--Container .slt-sync-line,
-.Root__cinema-view .slt-sync-line,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-line {
     margin: 12px 0;
 }
 
-.Cinema--Container .slt-sync-translation,
-.Root__cinema-view .slt-sync-translation,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-translation {
     font-size: 0.85em;
     margin-top: 6px;
 }
 
-.Cinema--Container .slt-sync-word.slt-word-active,
-.Root__cinema-view .slt-sync-word.slt-word-active,
 #SpicyLyricsPage.ForcedCompactMode .slt-sync-word.slt-word-active {
     text-shadow:
         0 0 15px rgba(255, 255, 255, 0.6),
@@ -8875,14 +8860,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     padding: 1px 4px;
 }
 
-.Cinema--Container .LyricsContainer::before,
-.Root__cinema-view .LyricsContainer::before,
-.Cinema--Container .LyricsContainer::after,
-.Root__cinema-view .LyricsContainer::after,
-.Cinema--Container .simplebar-content::before,
-.Root__cinema-view .simplebar-content::before,
-.Cinema--Container .simplebar-content::after,
-.Root__cinema-view .simplebar-content::after,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::before,
 #SpicyLyricsPage.ForcedCompactMode .LyricsContainer::after,
 #SpicyLyricsPage.ForcedCompactMode .simplebar-content::before,
@@ -10413,7 +10390,7 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.3" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.4" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -10481,7 +10458,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"49f51c77d3171ee0495f72c1c89e2748b1cd44e3e4334036cae8643f62577ffa".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "49f51c77d3171ee0495f72c1c89e2748b1cd44e3e4334036cae8643f62577ffa" : "";
+    return !"4e458a5cfde021b5808753cc6235192948c9f5ed1638a7cee717a5fec9a85694".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "4e458a5cfde021b5808753cc6235192948c9f5ed1638a7cee717a5fec9a85694" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -13044,7 +13021,7 @@ body.slt-update-waiting #TranslateToggle::after {
     return false;
   }
   function isSpicyLyricsOpen() {
-    if (document.querySelector("#SpicyLyricsPage") || document.querySelector(".spicy-pip-wrapper #SpicyLyricsPage") || document.querySelector(CINEMA_CONTAINER_SELECTOR) || isSidebarLyricsActive()) {
+    if (document.querySelector("#SpicyLyricsPage") || document.querySelector(".spicy-pip-wrapper #SpicyLyricsPage") || isSidebarLyricsActive()) {
       return true;
     }
     const pipWindow = getPIPWindow2();
@@ -13066,7 +13043,7 @@ body.slt-update-waiting #TranslateToggle::after {
       if (sidebarContent)
         return sidebarContent;
     }
-    return document.querySelector("#SpicyLyricsPage .LyricsContainer .LyricsContent") || document.querySelector("#SpicyLyricsPage .LyricsContent") || document.querySelector(".spicy-pip-wrapper .LyricsContent") || document.querySelector(CINEMA_LYRICS_CONTENT_SELECTOR) || document.querySelector(".LyricsContainer .LyricsContent");
+    return document.querySelector("#SpicyLyricsPage .LyricsContainer .LyricsContent") || document.querySelector("#SpicyLyricsPage .LyricsContent") || document.querySelector(".spicy-pip-wrapper .LyricsContent") || document.querySelector(".LyricsContainer .LyricsContent");
   }
   function waitForElement(selector, timeout = 1e4) {
     return new Promise((resolve) => {
