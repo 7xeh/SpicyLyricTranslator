@@ -855,6 +855,16 @@ body.slt-hide-quality-indicator .slt-quality-indicator {
     box-shadow: 0 0 4px rgba(29, 185, 84, 0.35);
 }
 
+.slt-qi-dot.slt-qi-user {
+    background: #7aa7ff;
+    box-shadow: 0 0 4px rgba(122, 167, 255, 0.35);
+}
+
+.slt-qi-dot.slt-qi-file {
+    background: #c58cff;
+    box-shadow: 0 0 4px rgba(197, 140, 255, 0.35);
+}
+
 .slt-qi-label {
     max-width: 0;
     overflow: hidden;

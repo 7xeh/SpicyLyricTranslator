@@ -24,6 +24,7 @@ import { getConnectionState } from './connectivity';
 import { getTrackCacheStats } from './trackCache';
 import { handleTranslateToggle, forceRetranslate } from './core';
 import { attachHotkeyCapture, describeHotkey } from './hotkeys';
+import { parseLanguageRules, serializeLanguageRules, setLanguageRule, NO_TRANSLATION } from './languageRules';
 import {
     applySettingsBatch,
     syncModelLists,
@@ -71,6 +72,10 @@ function languageName(code: string): string {
     return SUPPORTED_LANGUAGES.find(l => l.code === code)?.name || code.toUpperCase();
 }
 
+function ruleTargetName(code: string): string {
+    return code === NO_TRANSLATION ? "Don't translate" : languageName(code);
+}
+
 function providerName(api: string): string {
     return API_OPTIONS.find(o => o.value === api)?.text || api;
 }
@@ -90,6 +95,10 @@ function describeValue(field: SettingsField, value: string | boolean): string {
     if (field.type === 'languages') {
         const names = parseLanguageList(String(value)).map(languageName);
         return names.length ? names.join(', ') : 'None';
+    }
+    if (field.type === 'languageRules') {
+        const rules = parseLanguageRules(String(value)).map(rule => `${languageName(rule.source)} → ${ruleTargetName(rule.target)}`);
+        return rules.length ? rules.join(', ') : 'None';
     }
     if (field.type === 'hotkey') return describeHotkey(String(value));
     if (field.secret) return value ? '••••••••' : 'Not set';
@@ -179,6 +188,40 @@ function buildField(field: SettingsField): FieldHandle {
             add.value = '';
         };
         control.append(el('div', { class: 'slt-m-langs-box' }, chips, add));
+    } else if (field.type === 'languageRules') {
+        const list = el('div', { class: 'slt-m-rules' });
+        const add = el('select', { class: 'slt-m-select', id });
+        input = add;
+        syncLanguages = (value: string) => {
+            const rules = parseLanguageRules(value);
+            const commit = (next: typeof rules) => {
+                applySettingsBatch([{ field, value: serializeLanguageRules(next) }]);
+                refreshAll();
+            };
+            list.replaceChildren(...rules.map(rule => {
+                const target = el('select', { class: 'slt-m-select', 'aria-label': `What to do with ${languageName(rule.source)} songs` });
+                target.append(
+                    el('option', { value: NO_TRANSLATION, text: ruleTargetName(NO_TRANSLATION) }),
+                    ...(field.options || []).filter(option => option.value !== rule.source).map(option => el('option', { value: option.value, text: `Translate to ${option.text}` }))
+                );
+                target.value = rule.target;
+                target.addEventListener('change', () => commit(setLanguageRule(rules, rule.source, target.value)));
+                const remove = el('button', { type: 'button', class: 'slt-m-lang-remove', title: 'Remove', 'aria-label': `Remove the rule for ${languageName(rule.source)}`, html: CLOSE_SVG });
+                remove.addEventListener('click', () => commit(setLanguageRule(rules, rule.source, null)));
+                return el('div', { class: 'slt-m-rule', 'data-slt-rule-source': rule.source },
+                    el('span', { class: 'slt-m-rule-source', text: languageName(rule.source), title: languageName(rule.source) }),
+                    el('span', { class: 'slt-m-rule-arrow', text: '→', 'aria-hidden': 'true' }),
+                    target,
+                    remove,
+                );
+            }));
+            add.replaceChildren(
+                el('option', { value: '', text: field.placeholder || 'Add…' }),
+                ...(field.options || []).filter(option => !rules.some(rule => rule.source === option.value)).map(option => el('option', { value: option.value, text: option.text }))
+            );
+            add.value = '';
+        };
+        control.append(el('div', { class: 'slt-m-langs-box' }, list, add));
     } else {
         input = el('input', {
             class: 'slt-m-text',
@@ -219,14 +262,20 @@ function buildField(field: SettingsField): FieldHandle {
     };
 
     input.addEventListener('change', () => {
-        if (field.type === 'languages' && !input.value) return;
+        const picked = input.value;
+        if ((field.type === 'languages' || field.type === 'languageRules') && !picked) return;
         const value = field.type === 'toggle'
             ? (input as HTMLInputElement).checked
             : field.type === 'languages'
-                ? [...parseLanguageList(String(readSettingValue(field))), input.value].join(',')
-                : input.value;
+                ? [...parseLanguageList(String(readSettingValue(field))), picked].join(',')
+                : field.type === 'languageRules'
+                    ? serializeLanguageRules(setLanguageRule(parseLanguageRules(String(readSettingValue(field))), picked, NO_TRANSLATION))
+                    : picked;
         applySettingsBatch([{ field, value }]);
         refreshAll();
+        if (field.type === 'languageRules') {
+            control.querySelector<HTMLSelectElement>(`[data-slt-rule-source="${CSS.escape(picked)}"] select`)?.focus();
+        }
     });
 
     reset.addEventListener('click', () => {
@@ -1613,6 +1662,28 @@ const SHELL_STYLES = `
 .slt-modal-root .slt-m-lang-remove:hover,
 .slt-modal-root .slt-m-lang-remove:focus-visible { color: var(--slt-m-text); background: rgba(255, 255, 255, 0.12); }
 .slt-modal-root .slt-m-lang-remove svg { width: 10px; height: 10px; }
+.slt-modal-root .slt-m-field-languageRules { grid-template-columns: 1fr; align-items: start; gap: 8px; }
+.slt-modal-root .slt-m-rules { display: flex; flex-direction: column; gap: 6px; }
+.slt-modal-root .slt-m-rules:empty { display: none; }
+.slt-modal-root .slt-m-rule {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.3fr) 18px;
+    align-items: center;
+    gap: 8px;
+}
+.slt-modal-root .slt-m-rule-source {
+    min-width: 0;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--slt-m-accent-soft);
+    color: var(--slt-m-text);
+    font-size: 12px;
+    line-height: 22px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.slt-modal-root .slt-m-rule-arrow { color: var(--slt-m-text-dim); font-size: 13px; }
 .slt-modal-root .slt-m-select:focus,
 .slt-modal-root .slt-m-text:focus { border-color: var(--slt-m-accent); background-color: rgba(0, 0, 0, 0.45); }
 .slt-modal-root .slt-m-text::placeholder { color: var(--slt-m-text-faint); }

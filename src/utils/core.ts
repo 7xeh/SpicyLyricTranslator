@@ -1,8 +1,12 @@
-import { state, TranslationQualityMeta, isLearningActive } from './state';
+import { state, TranslationQualityMeta, isLearningActive, getSourceLanguageOverride, setTrackSourceLanguage, refreshTargetLanguage, resolveTargetForSource, isUntranslatedLanguage } from './state';
+import { isNoTranslationRule } from './languageRules';
+import { scheduleFuriganaPass } from './furiganaOverlay';
+import { resolveFileTranslations, mergeTranslationLines } from './fileTranslations';
+import type { FileTranslationSet } from './fileTranslations';
 import { normalizeHotkey } from './hotkeys';
 import { Icons } from './icons';
 import { storage } from './storage';
-import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES } from './translator';
+import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES, forgetCachedTranslations } from './translator';
 import { getCurrentTrackUri, getTrackCache } from './trackCache';
 import {
     enableOverlay,
@@ -33,13 +37,14 @@ import {
     setLearningSourceLanguage
 } from './translationOverlay';
 import type { OverlayMode } from './translationOverlay';
-import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, isLikelyNonTargetLine, getLanguageName, isExcludedSourceLanguage, isChineseScriptConversion } from './languageDetection';
+import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, reconcileSourceLanguage, isLikelyNonTargetLine, getLanguageName, isExcludedSourceLanguage, isChineseScriptConversion } from './languageDetection';
 import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
 import { notify, dismissNotification } from './notify';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 import { cleanLyricText, normalizeLyricMatchKey } from './text';
+import { getUserTranslations, applyUserTranslations, coversAllLines } from './userTranslations';
 
 let viewControlsObserver: MutationObserver | null = null;
 let lyricsObserver: MutationObserver | null = null;
@@ -47,6 +52,8 @@ let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let rerenderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let reapplyTimers: ReturnType<typeof setTimeout>[] = [];
 let viewModeIntervalId: ReturnType<typeof setInterval> | null = null;
+let fileTranslationLines = new Map<string, string>();
+let fileTranslationUri: string | null = null;
 let romanizationToggleListener: (() => void) | null = null;
 let romanizationToggleButton: Element | null = null;
 let observedLyricsContent: Element | null = null;
@@ -57,6 +64,7 @@ let contentTranslation = new Map<string, string>();
 let contentQuality = new Map<string, TranslationQualityMeta>();
 let coveredKeys = new Set<string>();
 let fillGapsInFlight = false;
+let gapFillSuppressed = false;
 
 interface SkippedTranslationState {
     trackUri: string | null;
@@ -577,7 +585,7 @@ export function extractLineText(lineElement: Element): string {
 function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: string): number[] {
     const indexes: number[] = [];
     const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
-    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'uk', 'bg', 'sr', 'mk', 'be', 'th', 'hi', 'el'].includes(targetBase);
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -587,7 +595,7 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
 
         const trimmed = line.trim();
         const detected = detectLanguageHeuristic(trimmed);
-        if (detected && detected.confidence >= 0.6 && isExcludedSourceLanguage(detected.code, state.skipLanguages)) {
+        if (detected && detected.confidence >= 0.6 && isUntranslatedLanguage(detected.code)) {
             continue;
         }
 
@@ -726,6 +734,12 @@ export function resolveTranslationSourceLines(input: TranslationSourceSelectionI
     };
 }
 
+export function getVisibleLyricsLineTexts(): string[] {
+    return Array.from(getLyricsLines())
+        .map(line => extractLineText(line))
+        .filter(text => text.trim().length > 0);
+}
+
 export function getLyricsFirstLineText(): string | null {
     const lines = getLyricsLines();
     if (lines.length > 0) {
@@ -758,6 +772,19 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
         }
         await new Promise(resolve => setTimeout(resolve, delay));
     }
+}
+
+function applyLanguageRule(sourceLanguage: string | null | undefined): boolean {
+    const previous = state.targetLanguage;
+    refreshTargetLanguage(sourceLanguage);
+    return state.targetLanguage !== previous;
+}
+
+function buildSourceOverrideSkipCheck(sourceLanguage: string): { skip: boolean; reason?: string; detectedLanguage?: string } {
+    if (isSameLanguage(sourceLanguage, state.targetLanguage)) {
+        return { skip: true, reason: `Lyrics already in ${sourceLanguage.toUpperCase()}`, detectedLanguage: sourceLanguage };
+    }
+    return { skip: false, detectedLanguage: sourceLanguage };
 }
 
 export async function translateCurrentLyrics(): Promise<void> {
@@ -825,21 +852,36 @@ export async function translateCurrentLyrics(): Promise<void> {
         const currentTrackUri = getCurrentTrackUri();
         const romanizationOn = isRomanizationActive();
         const domLyricsKey = buildLyricsKey(nonEmptyDomTexts);
-        if (matchesSkippedTranslation(currentTrackUri, state.targetLanguage, romanizationOn, domLyricsKey)) {
+        const sourceOverride = getSourceLanguageOverride(currentTrackUri);
+        applyLanguageRule(sourceOverride);
+        let userLines = getUserTranslations(currentTrackUri, state.targetLanguage);
+        gapFillSuppressed = false;
+        if (userLines.size === 0 && matchesSkippedTranslation(currentTrackUri, state.targetLanguage, romanizationOn, domLyricsKey)) {
             removeTranslations();
             state.lastTranslatedSongUri = currentTrackUri;
             lastTranslatedRomanizationState = romanizationOn;
             return;
         }
         let preApiSkipCheck: { skip: boolean; reason?: string; detectedLanguage?: string } | null = null;
+        let preApiTarget: string | null = null;
 
         if (!romanizationOn) {
-            preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
+            preApiSkipCheck = sourceOverride
+                ? buildSourceOverrideSkipCheck(sourceOverride)
+                : await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
             if (preApiSkipCheck.detectedLanguage) {
                 state.detectedLanguage = preApiSkipCheck.detectedLanguage;
             }
+            if (!sourceOverride && applyLanguageRule(preApiSkipCheck.detectedLanguage)) {
+                userLines = getUserTranslations(currentTrackUri, state.targetLanguage);
+                preApiSkipCheck = await shouldSkipTranslation(nonEmptyDomTexts, state.targetLanguage, currentTrackUri || undefined);
+                if (preApiSkipCheck.detectedLanguage) {
+                    state.detectedLanguage = preApiSkipCheck.detectedLanguage;
+                }
+            }
+            preApiTarget = state.targetLanguage;
 
-            if (preApiSkipCheck.skip && getConfidentNonTargetLineIndexes(domLineTexts, state.targetLanguage).length === 0) {
+            if (preApiSkipCheck.skip && userLines.size === 0 && getConfidentNonTargetLineIndexes(domLineTexts, state.targetLanguage).length === 0) {
                 removeTranslations();
                 rememberSkippedTranslation(
                     currentTrackUri,
@@ -866,12 +908,14 @@ export async function translateCurrentLyrics(): Promise<void> {
         let apiLineData: LyricLineData[] | null = null;
         let cachedSourceLines: string[] | null = null;
         let cachedSourceLanguage: string | undefined;
+        let fileTranslationSets: FileTranslationSet[] = [];
         try {
             const apiResult = await fetchLyricsFromAPI();
             if (apiResult && apiResult.lines.length > 0) {
                 apiLineTexts = apiResult.lines;
                 apiLanguage = apiResult.language;
                 apiLineData = apiResult.lineData;
+                fileTranslationSets = apiResult.fileTranslations || [];
             }
         } catch (apiErr) {
             warn('SpicyLyrics API fetch failed, falling back to DOM:', apiErr);
@@ -936,35 +980,39 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
         const sourceLyricsKey = buildLyricsKey(nonEmptyTexts);
 
-        if (apiLanguage) {
-            apiLanguage = refineChineseLanguageCode(apiLanguage, nonEmptyTexts);
+        if (sourceOverride) {
+            apiLanguage = sourceOverride;
+        } else if (apiLanguage) {
+            apiLanguage = reconcileSourceLanguage(refineChineseLanguageCode(apiLanguage, nonEmptyTexts), nonEmptyTexts);
         }
 
         const detectedLang = apiLanguage || cachedSourceLanguage || state.detectedLanguage || undefined;
 
-        let skipCheck: { skip: boolean; reason?: string; detectedLanguage?: string };
-        if (romanizationOn && apiLanguage) {
-            const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
-            skipCheck = apiLangSame
-                ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
-                : { skip: false, detectedLanguage: apiLanguage };
-        } else if (romanizationOn) {
-            skipCheck = { skip: false, detectedLanguage: 'unknown' };
-        } else if (apiLanguage && apiLanguage !== 'unknown') {
-            const apiLangSame = isSameLanguage(apiLanguage, state.targetLanguage);
-            if (apiLangSame) {
-                skipCheck = { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage };
-            } else {
-                skipCheck = { skip: false, detectedLanguage: apiLanguage };
+        const computeSkipCheck = async (): Promise<{ skip: boolean; reason?: string; detectedLanguage?: string }> => {
+            if (romanizationOn && !apiLanguage) return { skip: false, detectedLanguage: 'unknown' };
+            if (apiLanguage && (romanizationOn || apiLanguage !== 'unknown')) {
+                return isSameLanguage(apiLanguage, state.targetLanguage)
+                    ? { skip: true, reason: `Lyrics already in ${apiLanguage.toUpperCase()}`, detectedLanguage: apiLanguage }
+                    : { skip: false, detectedLanguage: apiLanguage };
             }
-        } else {
-            skipCheck = preApiSkipCheck || await shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
-        }
+            if (preApiSkipCheck && preApiTarget === state.targetLanguage) return preApiSkipCheck;
+            return shouldSkipTranslation(nonEmptyTexts, state.targetLanguage, currentTrackUri || undefined);
+        };
 
+        let skipCheck = await computeSkipCheck();
         if (skipCheck.detectedLanguage) state.detectedLanguage = skipCheck.detectedLanguage;
 
-        const sourceLanguage = skipCheck.detectedLanguage || state.detectedLanguage;
-        if (!skipCheck.skip && sourceLanguage && isExcludedSourceLanguage(sourceLanguage, state.skipLanguages)) {
+        let sourceLanguage = skipCheck.detectedLanguage || state.detectedLanguage;
+        if (applyLanguageRule(sourceLanguage)) {
+            userLines = getUserTranslations(currentTrackUri, state.targetLanguage);
+            skipCheck = await computeSkipCheck();
+            if (skipCheck.detectedLanguage) state.detectedLanguage = skipCheck.detectedLanguage;
+            sourceLanguage = skipCheck.detectedLanguage || state.detectedLanguage;
+        }
+
+        const ruledOut = isNoTranslationRule(resolveTargetForSource(sourceLanguage).rule);
+        const excludedSource = Boolean(!skipCheck.skip && sourceLanguage && (ruledOut || isExcludedSourceLanguage(sourceLanguage, state.skipLanguages)));
+        if (excludedSource && userLines.size === 0 && sourceLanguage) {
             removeTranslations();
             state.lastTranslatedSongUri = currentTrackUri;
             lastTranslatedRomanizationState = romanizationOn;
@@ -973,16 +1021,30 @@ export async function translateCurrentLyrics(): Promise<void> {
                     kind: 'info',
                     key: 'slt-skip',
                     title: `Not translating ${getLanguageName(sourceLanguage)}`,
-                    description: "It's on your Don't Translate list."
+                    description: ruledOut ? 'Your Per-Language Targets leave it as it is.' : "It's on your Don't Translate list."
                 });
             }
             return;
         }
 
-        let translations;
+        const fileLines = resolveFileTranslations(fileTranslationSets, state.lyricsFileTranslations, state.targetLanguage);
+        fileTranslationLines = fileLines;
+        fileTranslationUri = currentTrackUri;
 
-        if (skipCheck.skip) {
-            if (matchesSkippedTranslation(currentTrackUri, state.targetLanguage, romanizationOn, sourceLyricsKey)) {
+        let translations;
+        const buildPassthrough = () => lineTexts.map(line => ({
+            originalText: line,
+            translatedText: line,
+            targetLanguage: state.targetLanguage,
+            wasTranslated: false,
+            detectedLanguage: state.detectedLanguage || undefined
+        }));
+
+        if (excludedSource || coversAllLines(lineTexts, mergeTranslationLines(fileLines, userLines))) {
+            translations = buildPassthrough();
+            gapFillSuppressed = true;
+        } else if (skipCheck.skip) {
+            if (userLines.size === 0 && matchesSkippedTranslation(currentTrackUri, state.targetLanguage, romanizationOn, sourceLyricsKey)) {
                 removeTranslations();
                 state.lastTranslatedSongUri = currentTrackUri;
                 lastTranslatedRomanizationState = romanizationOn;
@@ -1006,6 +1068,9 @@ export async function translateCurrentLyrics(): Promise<void> {
                     currentTrackUri || undefined,
                     undefined
                 );
+            } else if (nonTargetIndexes.length === 0 && userLines.size > 0) {
+                translations = buildPassthrough();
+                gapFillSuppressed = true;
             } else if (nonTargetIndexes.length === 0) {
                 removeTranslations();
                 state.isTranslating = false;
@@ -1031,7 +1096,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                     undefined
                 );
 
-                const translatedByIndex = new Map<number, { translatedText: string; source?: 'cache' | 'api'; apiProvider?: string }>();
+                const translatedByIndex = new Map<number, { translatedText: string; source?: 'cache' | 'api' | 'user' | 'file'; apiProvider?: string }>();
                 partialTranslations.forEach((result, idx) => {
                     translatedByIndex.set(nonTargetIndexes[idx], {
                         translatedText: result.translatedText,
@@ -1064,6 +1129,9 @@ export async function translateCurrentLyrics(): Promise<void> {
         }
 
         debug(`translate: provider done at ${sincePhaseStart()}`);
+
+        if (!excludedSource) translations = applyUserTranslations(translations, lineTexts, fileLines, 'file');
+        translations = applyUserTranslations(translations, lineTexts, userLines);
 
         const hasMeaningfulTranslation = translations.some(result =>
             result.wasTranslated &&
@@ -1369,12 +1437,14 @@ export function formatProviderWithModel(providerLabel: string, model: string | u
 }
 
 export function buildTranslationNotification(
-    translations: Array<{ wasTranslated?: boolean; source?: 'cache' | 'api'; apiProvider?: string; detectedLanguage?: string }>,
+    translations: Array<{ wasTranslated?: boolean; source?: 'cache' | 'api' | 'user' | 'file'; apiProvider?: string; detectedLanguage?: string }>,
     trackUri: string | null,
     targetLang: string
 ): string | null {
-    const someTranslated = translations.some(t => t.wasTranslated === true);
-    if (!someTranslated) return null;
+    const translatedLines = translations.filter(t => t.wasTranslated === true);
+    if (translatedLines.length === 0) return null;
+    const userLineCount = translatedLines.filter(t => t.source === 'user').length;
+    const fileLineCount = translatedLines.filter(t => t.source === 'file').length;
 
     const cacheEntry = trackUri ? getTrackCache(trackUri, targetLang) : null;
     const fromApi = translations.some(t => t.wasTranslated === true && t.source === 'api');
@@ -1382,6 +1452,22 @@ export function buildTranslationNotification(
     const detectedLanguage = translations.find(t => formatLanguageLabel(t.detectedLanguage))?.detectedLanguage;
 
     const parts: string[] = [formatLanguagePair(detectedLanguage || cacheEntry?.lang, targetLang)];
+
+    if (userLineCount === translatedLines.length) {
+        parts.push('Your translation');
+        return parts.join(' · ');
+    }
+    if (fileLineCount + userLineCount === translatedLines.length) {
+        parts.push('From the lyrics file');
+        if (userLineCount > 0) parts.push(`${userLineCount} line${userLineCount === 1 ? '' : 's'} yours`);
+        return parts.join(' · ');
+    }
+    if (fileLineCount > 0) {
+        parts.push(`${fileLineCount} line${fileLineCount === 1 ? '' : 's'} from the lyrics file`);
+    }
+    if (userLineCount > 0) {
+        parts.push(`${userLineCount} line${userLineCount === 1 ? '' : 's'} yours`);
+    }
 
     if (!fromApi) {
         parts.push('Cached');
@@ -1484,7 +1570,7 @@ function scheduleTranslationReapply(trackUri: string | null): void {
 }
 
 async function fillVisibleGaps(): Promise<void> {
-    if (!state.isEnabled || state.isTranslating || fillGapsInFlight) return;
+    if (!state.isEnabled || state.isTranslating || fillGapsInFlight || gapFillSuppressed) return;
     if (isRomanizationActive()) return;
     if (coveredKeys.size === 0 && contentTranslation.size === 0) return;
 
@@ -1511,7 +1597,17 @@ async function fillVisibleGaps(): Promise<void> {
     fillGapsInFlight = true;
     try {
         const currentTrackUri = getCurrentTrackUri();
-        const results = await translateLyrics(missing, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined, true);
+        const fileLinesForTrack = currentTrackUri && currentTrackUri === fileTranslationUri ? fileTranslationLines : new Map<string, string>();
+        const results = applyUserTranslations(
+            applyUserTranslations(
+                await translateLyrics(missing, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined, true),
+                missing,
+                fileLinesForTrack,
+                'file'
+            ),
+            missing,
+            getUserTranslations(currentTrackUri, state.targetLanguage)
+        );
         if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri) return;
 
         let added = false;
@@ -1545,6 +1641,24 @@ async function fillVisibleGaps(): Promise<void> {
     } finally {
         fillGapsInFlight = false;
     }
+}
+
+export function forgetCurrentTrackTranslations(): void {
+    const trackUri = getCurrentTrackUri();
+    const lines = new Set(state.translatedLyrics.keys());
+    if (trackUri) {
+        getTrackCache(trackUri, state.targetLanguage)?.sourceLines?.forEach(line => lines.add(line));
+    }
+    forgetCachedTranslations(trackUri, state.targetLanguage, Array.from(lines));
+}
+
+export function setCurrentTrackSourceLanguage(code: string | null): void {
+    const trackUri = getCurrentTrackUri();
+    if (!trackUri) return;
+    setTrackSourceLanguage(trackUri, code);
+    forgetCurrentTrackTranslations();
+    forceRetranslate();
+    scheduleFuriganaPass();
 }
 
 export function forceRetranslate(): void {

@@ -30,6 +30,9 @@ Each translated line can show a quality indicator, so you can tell at a glance w
 - **Romanization-safe** — when Spicy Lyrics romanization is on, the translator pulls original lyric text from Spicy Lyrics data instead of the romanized text on screen. See [How It Works](how-it-works.md#romanization-and-original-lyrics)
 - **Fallback source lookup** from the Spicy Lyrics cache, so already-loaded tracks still translate when Spicy Lyrics doesn't re-hit the lyrics API
 - **Smart language detection** skips translation when lyrics are already in your target language
+- **Translations from the lyrics file** — when a TTML file already includes a translation, SLT shows it (marked *Lyrics file*) instead of machine-translating
+- **Furigana** — hiragana readings above the kanji of Japanese lyrics, synced with Spicy Lyrics' word highlighting
+- **Per-language targets** send each song language somewhere different — Simplified Chinese to Traditional, English left alone, everything else to your Target Language
 - **Regional variants** — e.g. Valencian for Catalan, on LLM providers
 
 ## Speed and convenience

@@ -3,8 +3,9 @@ import { state, isLearningActive, parseLanguageList } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getDisplayHash, registerSettingLinker } from './updater';
-import { forceRetranslate, syncLearningButton } from './core';
+import { forceRetranslate, forgetCurrentTrackTranslations, syncLearningButton } from './core';
 import { displayModal, hideModal } from './modal';
+import { openUserTranslationEditor } from './userTranslationEditor';
 import { openDialog } from './surface';
 import { notify } from './notify';
 import { createSettingsShell, destroySettingsShell, isSettingsOpen, revealSetting, goToSettings, matchSettingInText, settingById, TabId } from './settingsShell';
@@ -12,6 +13,8 @@ import { clearLyricsCache, fetchLyricsForTrackUri } from './lyricsFetcher';
 import { setConnectionIndicatorHidden } from './connectivity';
 import { setOverlayRomanization, setOverlayLearningMode } from './translationOverlay';
 import { attachHotkeyCapture } from './hotkeys';
+import { setFuriganaEnabled } from './furiganaOverlay';
+import { parseLanguageRules, serializeLanguageRules, setLanguageRule, NO_TRANSLATION } from './languageRules';
 import {
     SETTINGS_SCHEMA,
     SETTINGS_CATEGORIES,
@@ -227,6 +230,68 @@ function createNativeLanguageList(id: string, label: string, options: { value: s
     return row;
 }
 
+function createNativeLanguageRules(id: string, label: string, options: { value: string; text: string }[], currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'x-settings-row';
+    row.dataset.settingsRow = 'true';
+    row.innerHTML = `
+        <div class="x-settings-firstColumn">
+            <label class="e-10310-text encore-text-body-small encore-internal-color-text-subdued" for="${id}">${label}</label>
+        </div>
+        <div class="x-settings-secondColumn">
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                <div class="slt-native-rules" style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;"></div>
+                <select class="main-dropDown-dropDown" id="${id}"></select>
+            </div>
+        </div>
+    `;
+
+    const list = row.querySelector('.slt-native-rules') as HTMLElement;
+    const add = row.querySelector('select') as HTMLSelectElement;
+    let rules = parseLanguageRules(currentValue);
+    const nameOf = (code: string) => code === NO_TRANSLATION ? "Don't translate" : options.find(option => option.value === code)?.text || code.toUpperCase();
+
+    const commit = (next: typeof rules) => {
+        rules = next;
+        render();
+        onChange(serializeLanguageRules(rules));
+    };
+
+    const render = () => {
+        list.replaceChildren(...rules.map(rule => {
+            const line = document.createElement('div');
+            line.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+            line.innerHTML = `
+                <span class="e-10310-text encore-text-body-small encore-internal-color-text-base">${escapeHtml(nameOf(rule.source))} →</span>
+                <select class="main-dropDown-dropDown" aria-label="What to do with ${escapeHtml(nameOf(rule.source))} songs"></select>
+                <button type="button" class="encore-text-body-small e-10310-legacy-button--small e-10310-legacy-button-secondary--text-base encore-internal-color-text-base e-10310-legacy-button e-10310-legacy-button-secondary x-settings-button" title="Remove">×</button>
+            `;
+            const target = line.querySelector('select') as HTMLSelectElement;
+            target.innerHTML = `<option value="${NO_TRANSLATION}">${escapeHtml(nameOf(NO_TRANSLATION))}</option>` + options
+                .filter(option => option.value !== rule.source)
+                .map(option => `<option value="${escapeHtml(option.value)}">Translate to ${escapeHtml(option.text)}</option>`)
+                .join('');
+            target.value = rule.target;
+            target.addEventListener('change', () => commit(setLanguageRule(rules, rule.source, target.value)));
+            line.querySelector('button')?.addEventListener('click', () => commit(setLanguageRule(rules, rule.source, null)));
+            return line;
+        }));
+        add.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + options
+            .filter(option => !rules.some(rule => rule.source === option.value))
+            .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.text)}</option>`)
+            .join('');
+        add.value = '';
+        adoptNativeSettingsClasses(list);
+    };
+
+    add.addEventListener('change', () => {
+        if (add.value) commit(setLanguageRule(rules, add.value, NO_TRANSLATION));
+    });
+    render();
+
+    return row;
+}
+
 function createNativeInput(id: string, label: string, type: string, currentValue: string, placeholder: string, onChange: (value: string) => void): HTMLElement {
     const row = document.createElement('div');
     row.className = 'x-settings-row';
@@ -257,9 +322,15 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean, d
     if (effects.includes('romanizationDisplay')) {
         setOverlayRomanization(Boolean(value));
     }
+    if (effects.includes('furiganaDisplay')) {
+        setFuriganaEnabled(state.showFurigana);
+    }
     if (effects.includes('learningModeClass')) {
         setOverlayLearningMode(isLearningActive());
         syncLearningButton();
+    }
+    if (effects.includes('forgetTrackTranslations')) {
+        forgetCurrentTrackTranslations();
     }
 
     const retranslate = effects.includes('romanizationDisplay') || effects.includes('reapplyTranslations') || effects.includes('retranslate');
@@ -345,6 +416,8 @@ function createNativeFieldRow(field: SettingsField, root: ParentNode): HTMLEleme
 
     if (field.type === 'toggle') {
         row = createNativeToggle(id, field.label, Boolean(value), checked => handleSettingChange(field, checked, root));
+    } else if (field.type === 'languageRules') {
+        row = createNativeLanguageRules(id, field.label, field.options || [], String(value), field.placeholder || '', next => handleSettingChange(field, next, root));
     } else if (field.type === 'languages') {
         row = createNativeLanguageList(id, field.label, field.options || [], String(value), field.placeholder || '', selected => handleSettingChange(field, selected, root));
     } else if (field.type === 'select') {
@@ -934,6 +1007,7 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
         <div class="slt-lyrics-toolbar">
             <span class="slt-lyrics-edit-hint">Click a translated line to edit it</span>
             <button id="slt-lyrics-save" class="slt-lyrics-copy slt-lyrics-save" type="button" disabled>Save Edits</button>
+            <button id="slt-lyrics-translate-yourself" class="slt-lyrics-copy" type="button">Translate Yourself</button>
             <button id="slt-lyrics-copy-all" class="slt-lyrics-copy" type="button">Copy Lyrics</button>
             <button id="slt-lyrics-back-to-cache" class="slt-lyrics-back" type="button">&lt; Back to Cache</button>
         </div>
@@ -970,6 +1044,12 @@ async function openCachedLyricsViewer(trackUri: string, targetLang: string, sour
             size: 'xl'
         });
     }
+
+    const translateYourselfBtn = content.querySelector('#slt-lyrics-translate-yourself') as HTMLButtonElement | null;
+    translateYourselfBtn?.addEventListener('click', () => {
+        hideModal();
+        setTimeout(() => { void openUserTranslationEditor({ trackUri, targetLang }); }, 120);
+    });
 
     const backToCacheBtn = content.querySelector('#slt-lyrics-back-to-cache') as HTMLButtonElement;
     backToCacheBtn?.addEventListener('click', () => {

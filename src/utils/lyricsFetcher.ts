@@ -1,6 +1,8 @@
 import { warn } from './debug';
 import { normalizeLanguageCode } from './languageDetection';
 import { cleanLyricText, hasLyricText, pickLyricDisplayText } from './text';
+import { collectLineTranslations, parseTtmlTranslations } from './fileTranslations';
+import type { FileTranslationSet } from './fileTranslations';
 
 const SPICY_API_HOST = 'api.spicylyrics.org';
 const SPICY_QUERY_PATH = '/query';
@@ -21,12 +23,14 @@ interface VocalGroup {
     OppositeAligned?: boolean;
     Text?: string;
     TransliteratedText?: string;
+    TranslatedText?: string;
     StartTime?: number;
     EndTime?: number;
     Lead?: {
         Syllables: SyllableData[];
         StartTime: number;
         EndTime: number;
+        TranslatedText?: string;
     };
     Background?: Array<{
         Syllables: SyllableData[];
@@ -38,6 +42,7 @@ interface VocalGroup {
 interface StaticLine {
     Text: string;
     TransliteratedText?: string;
+    TranslatedText?: string;
 }
 
 interface LyricsData {
@@ -63,8 +68,21 @@ export interface LyricLineData {
     endTime: number;
     isInstrumental: boolean;
     romanizedText?: string;
+    translatedText?: string;
 
     words?: WordTimingData[];
+}
+
+export interface LyricsFetchResult {
+    lines: string[];
+    lineData: LyricLineData[];
+    language?: string;
+    fileTranslations?: FileTranslationSet[];
+}
+
+interface LocalLyricsManager {
+    get?: (uri: string) => Promise<unknown>;
+    getRaw?: (uri: string) => Promise<string | null>;
 }
 
 interface QueryResult {
@@ -275,6 +293,37 @@ async function waitForCapture(trackId: string, timeoutMs: number = 8000, pollMs:
     return getStoredLyricsData(trackId);
 }
 
+function getLocalLyricsManager(): LocalLyricsManager | null {
+    try {
+        const manager = (globalThis as any).SpicyLyrics?.db?.objectStores?.lyricsStore?.manager;
+        return manager && typeof manager.get === 'function' ? manager : null;
+    } catch {
+        return null;
+    }
+}
+
+async function readLocalLyrics(trackUri: string): Promise<{ lyrics: LyricsData; raw: string | null } | null> {
+    const manager = getLocalLyricsManager();
+    if (!manager?.get || !trackUri) return null;
+    try {
+        const lyrics = await manager.get(trackUri);
+        if (!isLyricsData(lyrics)) return null;
+        const raw = typeof manager.getRaw === 'function' ? await manager.getRaw(trackUri).catch(() => null) : null;
+        return { lyrics, raw };
+    } catch (err) {
+        warn('Failed to read Spicy Lyrics local lyrics:', err);
+        return null;
+    }
+}
+
+function getCurrentTrackUri(): string | null {
+    try {
+        const uri = (globalThis as any).Spicetify?.Player?.data?.item?.uri;
+        return uri && typeof uri === 'string' ? uri : null;
+    } catch (e) {}
+    return null;
+}
+
 function getCurrentTrackId(): string | null {
     try {
         const uri = (globalThis as any).Spicetify?.Player?.data?.item?.uri;
@@ -350,6 +399,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 endTime: group.Lead.EndTime,
                 isInstrumental: false,
                 romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, ' ').trim() : undefined,
+                translatedText: group.Lead.TranslatedText ?? group.TranslatedText,
                 words: wordTimings,
             });
             continue;
@@ -367,6 +417,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 endTime: group.EndTime,
                 isInstrumental: false,
                 romanizedText: groupRoman,
+                translatedText: group.TranslatedText,
             });
             continue;
         }
@@ -403,7 +454,8 @@ function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
                 isInstrumental: false,
                 romanizedText: (line.TransliteratedText && line.TransliteratedText !== text)
                     ? line.TransliteratedText
-                    : undefined
+                    : undefined,
+                translatedText: line.TranslatedText
             };
         });
 }
@@ -427,6 +479,7 @@ function extractLinesData(lyrics: LyricsData): LyricLineData[] {
 let cachedTrackId: string | null = null;
 let cachedLineData: LyricLineData[] | null = null;
 let cachedLanguage: string | null = null;
+let cachedFileTranslations: FileTranslationSet[] = [];
 
 function getLyricsLanguage(lyrics: LyricsData): string | undefined {
     const iso = normalizeLanguageCode(lyrics.LanguageISO2);
@@ -442,71 +495,71 @@ export function getCachedLineData(): LyricLineData[] | null {
     return cachedLineData;
 }
 
-function cacheParsedLyrics(trackId: string, lyrics: LyricsData): { lines: string[]; lineData: LyricLineData[]; language?: string } | null {
+function cachedResult(): LyricsFetchResult | null {
+    if (!cachedLineData) return null;
+    return {
+        lines: cachedLineData.map(l => l.text),
+        lineData: cachedLineData,
+        language: cachedLanguage || undefined,
+        fileTranslations: cachedFileTranslations
+    };
+}
+
+function cacheParsedLyrics(trackId: string, lyrics: LyricsData, rawTtml: string | null = null): LyricsFetchResult | null {
     const lineData = extractLinesData(lyrics);
     if (lineData.length === 0) {
         return null;
     }
 
+    const fromRaw = parseTtmlTranslations(rawTtml);
+    const fromLines = collectLineTranslations(lineData);
+
     cachedTrackId = trackId;
     cachedLineData = lineData;
     cachedLanguage = getLyricsLanguage(lyrics) || null;
+    cachedFileTranslations = fromRaw.length > 0 ? fromRaw : fromLines ? [fromLines] : [];
 
-    return {
-        lines: lineData.map(l => l.text),
-        lineData,
-        language: cachedLanguage || undefined
-    };
+    return cachedResult();
 }
 
-export async function fetchLyricsFromAPI(): Promise<{ lines: string[]; lineData: LyricLineData[]; language?: string } | null> {
+async function loadLyrics(trackUri: string, trackId: string): Promise<LyricsFetchResult | null> {
+    const local = await readLocalLyrics(trackUri);
+    if (local) return cacheParsedLyrics(trackId, local.lyrics, local.raw);
+
+    const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
+    return lyrics ? cacheParsedLyrics(trackId, lyrics) : null;
+}
+
+export async function fetchLyricsFromAPI(): Promise<LyricsFetchResult | null> {
     const trackId = getCurrentTrackId();
     if (!trackId) {
         return null;
     }
 
     if (trackId === cachedTrackId && cachedLineData) {
-        return {
-            lines: cachedLineData.map(l => l.text),
-            lineData: cachedLineData,
-            language: cachedLanguage || undefined
-        };
+        return cachedResult();
     }
 
     try {
-        const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
-        if (!lyrics) {
-            return null;
-        }
-
-        return cacheParsedLyrics(trackId, lyrics);
+        return await loadLyrics(getCurrentTrackUri() || `spotify:track:${trackId}`, trackId);
     } catch (err) {
         warn('Failed to capture lyrics from Spicy Lyrics fetch:', err);
         return null;
     }
 }
 
-export async function fetchLyricsForTrackUri(trackUri: string): Promise<{ lines: string[]; lineData: LyricLineData[]; language?: string } | null> {
+export async function fetchLyricsForTrackUri(trackUri: string): Promise<LyricsFetchResult | null> {
     const trackId = getTrackIdFromUri(trackUri);
     if (!trackId) {
         return null;
     }
 
     if (trackId === cachedTrackId && cachedLineData) {
-        return {
-            lines: cachedLineData.map(l => l.text),
-            lineData: cachedLineData,
-            language: cachedLanguage || undefined
-        };
+        return cachedResult();
     }
 
     try {
-        const lyrics = await getStoredLyricsData(trackId) || await waitForCapture(trackId);
-        if (!lyrics) {
-            return null;
-        }
-
-        return cacheParsedLyrics(trackId, lyrics);
+        return await loadLyrics(trackUri, trackId);
     } catch (err) {
         warn('Failed to capture lyrics for track URI:', trackUri, err);
         return null;
@@ -517,6 +570,7 @@ export function clearLyricsCache(): void {
     cachedTrackId = null;
     cachedLineData = null;
     cachedLanguage = null;
+    cachedFileTranslations = [];
     captureCache.clear();
 }
 

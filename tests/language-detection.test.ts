@@ -11,7 +11,9 @@ import {
     assessMixedLanguageContent,
     detectRomanizedJapanese,
     isExcludedSourceLanguage,
-    isChineseScriptConversion
+    isChineseScriptConversion,
+    detectCyrillicLanguage,
+    reconcileSourceLanguage
 } from '../src/utils/languageDetection';
 
 test('normalizeLanguageCode folds English-based creoles/variants into "en"', () => {
@@ -335,4 +337,62 @@ test('isChineseScriptConversion only fires between Chinese orthographies', () =>
     assert.equal(isChineseScriptConversion('ja', 'zh'), false);
     assert.equal(isChineseScriptConversion('zh-hant', 'en'), false);
     assert.equal(isChineseScriptConversion(null, 'zh'), false);
+});
+
+const russianWithoutMarkerLetters = [
+    'Я помню как он говорил мне о любви',
+    'Но только ночь теперь со мной',
+    'И сердце плачет без тебя'
+];
+
+const bulgarianLyrics = [
+    'Аз съм тук и чакам те',
+    'Не мога да те забравя',
+    'Ти си моето сърце',
+    'Къде си сега'
+];
+
+test('Russian lyrics without э/ы/щ/ъ are detected as Russian, not Bulgarian', () => {
+    for (const line of russianWithoutMarkerLetters) {
+        assert.doesNotMatch(line, /[эыщъЭЫЩЪ]/);
+    }
+    assert.equal(detectCyrillicLanguage(russianWithoutMarkerLetters.join('\n'))?.code, 'ru');
+    assert.equal(detectLanguageHeuristic(russianWithoutMarkerLetters.join(' '))?.code, 'ru');
+});
+
+test('Bulgarian lyrics are told apart from Russian', () => {
+    assert.equal(detectCyrillicLanguage(bulgarianLyrics.join('\n'))?.code, 'bg');
+    assert.equal(detectLanguageHeuristic(bulgarianLyrics.join(' '))?.code, 'bg');
+});
+
+test('Ukrainian, Belarusian, Serbian and Macedonian letters pick their language', () => {
+    assert.equal(detectCyrillicLanguage('Я тебе кохаю і чекаю')?.code, 'uk');
+    assert.equal(detectCyrillicLanguage('Я цябе кахаю і ўсё')?.code, 'be');
+    assert.equal(detectCyrillicLanguage('Волим те више од живота, ћути')?.code, 'sr');
+    assert.equal(detectCyrillicLanguage('Ќе те чекам до крај')?.code, 'mk');
+});
+
+test('Cyrillic text without distinguishing evidence falls back to Russian', () => {
+    assert.equal(detectCyrillicLanguage('Я иду домой'), null);
+    assert.equal(detectLanguageHeuristic('Я иду домой на краю земли')?.code, 'ru');
+});
+
+test('a provider tagging Russian lyrics as Bulgarian is corrected from the lyrics', () => {
+    assert.equal(reconcileSourceLanguage('bg', russianWithoutMarkerLetters), 'ru');
+    assert.equal(reconcileSourceLanguage('ru', bulgarianLyrics), 'bg');
+    assert.equal(reconcileSourceLanguage('bg', ['Я иду домой']), 'bg');
+    assert.equal(reconcileSourceLanguage('ja', russianWithoutMarkerLetters), 'ja');
+    assert.equal(reconcileSourceLanguage(undefined, russianWithoutMarkerLetters), undefined);
+});
+
+test('Russian lyrics are not skipped when the target is Bulgarian', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async () => { throw new Error('no network'); };
+    try {
+        const result = await shouldSkipTranslation(russianWithoutMarkerLetters, 'bg');
+        assert.equal(result.skip, false);
+        assert.equal(result.detectedLanguage, 'ru');
+    } finally {
+        (globalThis as any).fetch = originalFetch;
+    }
 });

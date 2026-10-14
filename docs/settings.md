@@ -3,7 +3,7 @@
 Settings live in two places, with the same options in both:
 
 - **Spotify settings** — the full panel, grouped into Translation, Providers, and Interface
-- **Quick popup** — right-click the translate button in the Spicy Lyrics controls for display mode and romanization, without opening the full panel
+- **Quick popup** — right-click the translate button in the Spicy Lyrics controls for display mode, romanization, and furigana, without opening the full panel
 
 ## Translation
 
@@ -13,8 +13,11 @@ Settings live in two places, with the same options in both:
 | **Use Regional Variant** | Asks for a regional variant of the target language (currently Valencian for Catalan). Only shown when the language has a variant *and* the provider is OpenAI, Gemini, Grok, Claude, or Custom — code-based providers have no variant model, so the option hides rather than silently returning the standard language |
 | **Translation Display** | Below each line (default), Replace, or None (original lyrics only, pairs with Learning Mode) |
 | **Don't Translate** | Languages you already read. Songs detected in one of them are left untranslated, and lines in them are skipped inside songs that are otherwise in your target language |
-| **Replace Lyrics When Only the Script Changes** | Shown when the target is Chinese. Between Simplified and Traditional Chinese, the converted lyrics replace the original instead of appearing below it |
+| **Per-Language Targets** | A different target for songs in a specific language. Each rule is either *Translate to* another language or *Don't translate*, e.g. Chinese (Simplified) → Chinese (Traditional), English → Don't translate. Languages without a rule use Target Language. Lines in a *Don't translate* language are also skipped inside other songs |
+| **Translations From the Lyrics File** | Some TTML lyrics carry their own translation (inline `x-translation` spans, or Apple-style `<translations>` in the head). By default SLT shows it instead of a machine translation when it's in your target language. *Always use them* shows it whatever its language, *Ignore them* turns this off. Lines the file doesn't cover are still translated, and your own edits win over the file. Lyrics you uploaded to Spicy Lyrics yourself are read too, along with their romanization |
+| **Replace Lyrics When Only the Script Changes** | Shown when the target, or any Per-Language Target, is Chinese. Between Simplified and Traditional Chinese, the converted lyrics replace the original instead of appearing below it |
 | **Show Romanization** | Adds a pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one |
+| **Show Furigana** | Writes the hiragana reading above each kanji in Japanese lyrics, with or without translation. Readings light up with the words as they're sung. The Japanese dictionary (about 18 MB, from jsDelivr) downloads the first time and is cached after that. Also in the quick popup |
 | **Translation API** | Google, LibreTranslate, DeepL, OpenAI, Gemini, Grok, Claude, or Custom |
 | **Parallel Translation Requests** | 1–6 concurrent requests on LLM providers. Faster on long songs; higher values increase API usage and can hit free-tier rate limits |
 

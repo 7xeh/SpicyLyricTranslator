@@ -1,11 +1,18 @@
 import { getSettingField, readSettingValue } from './settingsModel';
 import type { SettingsField } from './settingsModel';
 import { applySettingById, openSettingsModal } from './settings';
+import { setCurrentTrackSourceLanguage } from './core';
+import { state, getTrackSourceLanguage, getSourceLanguageOverride } from './state';
+import { getCurrentTrackUri } from './trackCache';
+import { SUPPORTED_LANGUAGES } from './translator';
+import { getLanguageName } from './languageDetection';
+import { openUserTranslationEditor } from './userTranslationEditor';
+import { hasUserTranslations } from './userTranslations';
 import { warn } from './debug';
 
 const QUICK_MENU_ID = 'slt-quick-menu';
 
-const QUICK_FIELD_IDS = ['overlay-mode', 'learning-mode', 'show-romanization'];
+const QUICK_FIELD_IDS = ['overlay-mode', 'learning-mode', 'show-romanization', 'show-furigana'];
 
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -225,6 +232,41 @@ function buildSelectRow(field: SettingsField, onChange: () => void): HTMLElement
     return row;
 }
 
+function buildTrackSourceLanguageRow(trackUri: string): HTMLElement {
+    const current = getTrackSourceLanguage(trackUri) || 'auto';
+    const detected = !getSourceLanguageOverride(trackUri) && state.detectedLanguage && state.detectedLanguage !== 'unknown'
+        ? ` (${getLanguageName(state.detectedLanguage)})`
+        : '';
+
+    const row = document.createElement('div');
+    row.className = 'slt-qm-item';
+    row.style.cursor = 'default';
+
+    const label = document.createElement('span');
+    label.className = 'slt-qm-label';
+    label.textContent = 'This song is in';
+
+    const select = document.createElement('select');
+    select.className = 'slt-qm-select';
+    [{ code: 'auto', name: `Auto-detect${detected}` }, ...SUPPORTED_LANGUAGES].forEach(language => {
+        const opt = document.createElement('option');
+        opt.value = language.code;
+        opt.textContent = language.name;
+        if (language.code === current) opt.selected = true;
+        select.appendChild(opt);
+    });
+
+    select.addEventListener('change', () => {
+        setCurrentTrackSourceLanguage(select.value === 'auto' ? null : select.value);
+    });
+    select.addEventListener('mousedown', e => e.stopPropagation());
+    select.addEventListener('click', e => e.stopPropagation());
+
+    row.appendChild(label);
+    row.appendChild(select);
+    return row;
+}
+
 function positionMenu(menu: HTMLElement, x: number, y: number): void {
     menu.style.left = '0px';
     menu.style.top = '0px';
@@ -272,6 +314,25 @@ export function openQuickMenu(x: number, y: number): void {
                 menu.appendChild(buildSelectRow(field, refresh));
             }
         });
+
+        const trackUri = getCurrentTrackUri();
+        if (trackUri) {
+            addSeparator();
+            menu.appendChild(buildTrackSourceLanguageRow(trackUri));
+
+            const translateYourself = document.createElement('button');
+            translateYourself.type = 'button';
+            translateYourself.className = 'slt-qm-item';
+            translateYourself.innerHTML = `
+                <span class="slt-qm-check"></span>
+                <span class="slt-qm-label">${hasUserTranslations(trackUri, state.targetLanguage) ? 'Edit your translation…' : 'Translate this song yourself…'}</span>
+            `;
+            translateYourself.addEventListener('click', () => {
+                closeQuickMenu();
+                void openUserTranslationEditor({ trackUri });
+            });
+            menu.appendChild(translateYourself);
+        }
 
         addSeparator();
 

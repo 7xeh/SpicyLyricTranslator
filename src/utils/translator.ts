@@ -11,7 +11,7 @@ import {
     getCurrentTrackMeta
 } from './trackCache';
 import type { TrackCacheMetrics } from './trackCache';
-import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine } from './languageDetection';
+import { detectLanguageHeuristic, isSameLanguage, normalizeLanguageCode, detectChineseScript, refineChineseLanguageCode, isLikelyNonTargetLine, CYRILLIC_LANGUAGE_CODES } from './languageDetection';
 import { buildBreakdownPrompt, buildBatchBreakdownPrompt, parseModelBreakdown, parseModelBreakdownBatch, breakdownCacheKey, segmentSourceText, BreakdownToken } from './wordBreakdown';
 import { DEFAULT_MODELS, resolveModelId } from './modelCatalog';
 
@@ -21,7 +21,7 @@ export interface TranslationResult {
     detectedLanguage?: string;
     targetLanguage: string;
     wasTranslated?: boolean;
-    source?: 'cache' | 'api';
+    source?: 'cache' | 'api' | 'user' | 'file';
     apiProvider?: string;
 }
 
@@ -350,20 +350,36 @@ function getConfidentLineLanguage(text: string): string | undefined {
 
 function getConfidentLineLanguages(lines: string[]): Set<string> {
     const languages = new Set<string>();
+    const cyrillicCounts = new Map<string, number>();
 
     for (const line of lines) {
         const lang = getConfidentLineLanguage(line);
         if (!lang) continue;
         const normalized = normalizeLanguageCode(lang);
         if (normalized === 'zh-hani') continue;
+        if (CYRILLIC_LANGUAGE_CODES.has(normalized)) {
+            cyrillicCounts.set(normalized, (cyrillicCounts.get(normalized) || 0) + 1);
+            continue;
+        }
         languages.add(normalized);
     }
+
+    const dominantCyrillic = Array.from(cyrillicCounts.entries())
+        .sort((a, b) => Number(b[0] !== 'ru') - Number(a[0] !== 'ru') || b[1] - a[1])[0];
+    if (dominantCyrillic) languages.add(dominantCyrillic[0]);
 
     return languages;
 }
 
+function isCyrillicLanguage(code: string | undefined): boolean {
+    return Boolean(code) && CYRILLIC_LANGUAGE_CODES.has(normalizeLanguageCode(code));
+}
+
 function getLineSourceLangHint(text: string, targetLang: string, fallbackSourceLang?: string, mixedSourceTrack: boolean = false): string | undefined {
     const lineLang = getConfidentLineLanguage(text);
+    if (lineLang && isCyrillicLanguage(lineLang) && isCyrillicLanguage(fallbackSourceLang) && !isSameLanguage(fallbackSourceLang!, targetLang)) {
+        return fallbackSourceLang;
+    }
     if (lineLang) {
         return lineLang;
     }
@@ -1129,6 +1145,13 @@ function setCacheEntry(cache: TranslationCache, text: string, targetLang: string
         timestamp: Date.now(),
         api
     };
+}
+
+export function forgetCachedTranslations(trackUri: string | null | undefined, targetLang: string, lines: string[]): void {
+    if (trackUri) deleteTrackCache(trackUri, targetLang);
+    const lineCache = storage.getJSON<TranslationCache>('translation-cache', {});
+    lines.forEach(line => delete lineCache[`${targetLang}:${line}`]);
+    storage.setJSON('translation-cache', lineCache);
 }
 
 function cacheTranslation(text: string, targetLang: string, translation: string, api?: string): void {
@@ -2505,10 +2528,7 @@ async function translateLyricsInner(
     if (currentTrackUri && !skipTrackCache) {
         const trackCache = getTrackCache(currentTrackUri, targetLang);
         if (trackCache && isRomanizedTextUnderNonLatinLang(trackCache.lang, lines)) {
-            deleteTrackCache(currentTrackUri, targetLang);
-            const lineCache = storage.getJSON<TranslationCache>('translation-cache', {});
-            lines.forEach(line => delete lineCache[`${targetLang}:${line}`]);
-            storage.setJSON('translation-cache', lineCache);
+            forgetCachedTranslations(currentTrackUri, targetLang, lines);
         } else if (trackCache && trackCache.lines.length === lines.length) {
             if (shouldInvalidateSameLanguageTrackCache(trackCache.lang, targetLang, lines, trackCache.lines)) {
                 deleteTrackCache(currentTrackUri, targetLang);

@@ -1,4 +1,4 @@
-import { state, parseLanguageList } from './state';
+import { state, parseLanguageList, refreshTargetLanguage } from './state';
 import type { NotificationLevel } from './state';
 import { storage } from './storage';
 import { notify } from './notify';
@@ -8,9 +8,11 @@ import type { ApiPreference, CustomApiFormat } from './translator';
 import { getModelOptions, refreshModelCatalog, resolveModelId, MODEL_PROVIDERS } from './modelCatalog';
 import type { ModelProvider } from './modelCatalog';
 import { normalizeHotkey } from './hotkeys';
+import { parseLanguageRules, NO_TRANSLATION } from './languageRules';
+import { parseFileTranslationMode } from './fileTranslations';
 
-export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages' | 'hotkey';
-export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'learningModeClass';
+export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages' | 'languageRules' | 'hotkey';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'forgetTrackTranslations' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'furiganaDisplay' | 'learningModeClass';
 
 export interface SettingsOption {
     value: string;
@@ -140,6 +142,32 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         effects: ['romanizationDisplay']
     },
     {
+        id: 'show-furigana',
+        section: 'Translation',
+        keywords: 'furigana hiragana kana ruby reading kanji japanese learn pronunciation above',
+        label: 'Show Furigana',
+        type: 'toggle',
+        storageKey: 'show-furigana',
+        defaultValue: false,
+        description: 'Write the hiragana reading above the kanji in Japanese lyrics. Works with or without translation. The Japanese dictionary (about 18 MB) downloads the first time.',
+        effects: ['furiganaDisplay']
+    },
+    {
+        id: 'source-language',
+        section: 'Translation',
+        keywords: 'source original input from language detection detect override force wrong misdetected auto',
+        label: 'Lyrics Language',
+        type: 'select',
+        storageKey: 'source-language',
+        defaultValue: 'auto',
+        options: [
+            { value: 'auto', text: 'Auto-detect (default)' },
+            ...SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name }))
+        ],
+        description: 'The language the lyrics are written in. Leave on Auto-detect unless songs keep getting the wrong language. To fix a single song, use "This song is in" from the right-click menu on the translate button.',
+        effects: ['forgetTrackTranslations', 'retranslate', 'furiganaDisplay']
+    },
+    {
         id: 'skip-languages',
         section: 'Translation',
         keywords: 'skip exclude ignore never do not translate languages i read understand multilingual bilingual',
@@ -153,6 +181,35 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         effects: ['retranslate']
     },
     {
+        id: 'language-rules',
+        section: 'Translation',
+        keywords: 'per language rules different target each language song depends on source simplified traditional chinese japanese override map',
+        label: 'Per-Language Targets',
+        type: 'languageRules',
+        storageKey: 'language-rules',
+        defaultValue: '',
+        options: SUPPORTED_LANGUAGES.map(language => ({ value: language.code, text: language.name })),
+        placeholder: 'Add a language…',
+        description: 'Pick a different target for songs in a specific language, like Simplified Chinese to Traditional Chinese. Every other language uses Target Language.',
+        effects: ['retranslate', 'fieldVisibility']
+    },
+    {
+        id: 'lyrics-file-translations',
+        section: 'Translation',
+        keywords: 'ttml file embedded built in included lyrics translation community uploaded local x-translation already translated',
+        label: 'Translations From the Lyrics File',
+        type: 'select',
+        storageKey: 'lyrics-file-translations',
+        defaultValue: 'match',
+        options: [
+            { value: 'match', text: 'Use when in my language (default)' },
+            { value: 'always', text: 'Always use them' },
+            { value: 'off', text: 'Ignore them' }
+        ],
+        description: "Some TTML lyrics come with their own translation. SLT shows it instead of a machine translation. Lines it doesn't cover are still translated, and your own edits always win.",
+        effects: ['retranslate']
+    },
+    {
         id: 'replace-script-conversions',
         section: 'Translation',
         keywords: 'chinese simplified traditional script convert conversion replace in place hanzi',
@@ -161,7 +218,8 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         storageKey: 'replace-script-conversions',
         defaultValue: false,
         description: 'Between Simplified and Traditional Chinese, show the converted lyrics in place of the original instead of below it.',
-        visibleWhen: () => (storage.get('target-language') || 'en').startsWith('zh'),
+        visibleWhen: () => [storage.get('target-language') || 'en', ...parseLanguageRules(storage.get('language-rules')).map(rule => rule.target)]
+            .some(target => target !== NO_TRANSLATION && target.startsWith('zh')),
         effects: ['reapplyTranslations']
     },
     {
@@ -684,10 +742,12 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
 
     switch (field.id) {
         case 'target-language':
-            state.targetLanguage = getResolvedTargetLanguage();
-            break;
         case 'language-variant':
-            state.targetLanguage = getResolvedTargetLanguage();
+            refreshTargetLanguage();
+            break;
+        case 'language-rules':
+            state.languageRules = parseLanguageRules(String(value));
+            refreshTargetLanguage();
             break;
         case 'overlay-mode':
             state.overlayMode = String(value) as OverlayMode;
@@ -695,15 +755,24 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'show-romanization':
             state.showRomanization = Boolean(value);
             break;
+        case 'show-furigana':
+            state.showFurigana = Boolean(value);
+            break;
         case 'skip-languages':
             state.skipLanguages = parseLanguageList(String(value));
+            break;
+        case 'source-language':
+            state.sourceLanguage = String(value) || 'auto';
             break;
         case 'replace-script-conversions':
             state.replaceScriptConversions = Boolean(value);
             break;
+        case 'lyrics-file-translations':
+            state.lyricsFileTranslations = parseFileTranslationMode(String(value));
+            break;
         case 'preferred-api':
             state.preferredApi = String(value) as ApiPreference;
-            state.targetLanguage = getResolvedTargetLanguage();
+            refreshTargetLanguage();
             configureTranslationApi();
             break;
         case 'custom-api-url':

@@ -1,11 +1,11 @@
-import { state } from './state';
+import { state, refreshTargetLanguage } from './state';
 import { storage } from './storage';
+import { setFuriganaEnabled } from './furiganaOverlay';
 import { setPreferredApi, clearTranslationCache, getCacheStats, getCachedTranslations, deleteCachedTranslation } from './translator';
 import { clearLyricsCache } from './lyricsFetcher';
 import { getCurrentTrackUri } from './trackCache';
 import { injectStyles } from '../styles/main';
 import { registerSettings } from './settings';
-import { getResolvedTargetLanguage } from './settingsModel';
 import { initConnectionIndicator, getConnectionState, refreshConnection, setConnectionIndicatorHidden } from './connectivity';
 import { startUpdateChecker, checkForUpdates, getUpdateInfo, VERSION, showPostUpdateChangelog } from './updater';
 import { setDebugMode, isDebugEnabled } from './debug';
@@ -53,6 +53,7 @@ export async function initialize(): Promise<void> {
     });
     injectStyles();
     setConnectionIndicatorHidden(state.hideConnectionIndicator);
+    setFuriganaEnabled(state.showFurigana);
     initConnectionIndicator();
 
     await registerSettings();
@@ -122,7 +123,7 @@ export async function initialize(): Promise<void> {
         },
         setLanguage: (lang: string) => {
             storage.set('target-language', lang);
-            state.targetLanguage = getResolvedTargetLanguage();
+            refreshTargetLanguage();
         },
         translate: translateCurrentLyrics,
         clearCache: clearTranslationCache,

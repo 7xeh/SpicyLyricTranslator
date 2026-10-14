@@ -883,7 +883,7 @@ function hasWrappedSyncWords(translationEl: HTMLElement): boolean {
     return words.some((wordEl, index) => index > 0 && Math.abs(wordEl.offsetTop - firstTop) > 2);
 }
 
-function fallbackToContinuousMultilineGradient(
+export function fallbackToContinuousMultilineGradient(
     translationEl: HTMLElement,
     translationText: string,
     originalLine: Element
@@ -892,7 +892,9 @@ function fallbackToContinuousMultilineGradient(
     if (!translationEl.querySelector(':scope > .slt-sync-word')) return;
     if (!hasWrappedSyncWords(translationEl)) return;
 
+    const qualityIndicator = translationEl.querySelector(':scope > .slt-quality-indicator');
     translationEl.textContent = translationText;
+    if (qualityIndicator) translationEl.appendChild(qualityIndicator);
     translationEl.dataset.sltGradientMode = 'continuous-multiline';
 }
 
@@ -2366,6 +2368,8 @@ function createQualityIndicator(doc: Document, index: number): HTMLElement | nul
     indicator.className = 'slt-quality-indicator';
 
     const isCached = meta.source === 'cache';
+    const isUser = meta.source === 'user';
+    const isFile = meta.source === 'file';
     const apiLabel = meta.api === 'google' ? 'Google'
         : meta.api === 'libretranslate' ? 'LibreTranslate'
         : meta.api === 'custom' ? 'Custom'
@@ -2375,17 +2379,23 @@ function createQualityIndicator(doc: Document, index: number): HTMLElement | nul
     indicator.dataset.api = meta.api || '';
 
     const dot = doc.createElement('span');
-    dot.className = `slt-qi-dot ${isCached ? 'slt-qi-cached' : 'slt-qi-fresh'}`;
+    dot.className = `slt-qi-dot ${isUser ? 'slt-qi-user' : isFile ? 'slt-qi-file' : isCached ? 'slt-qi-cached' : 'slt-qi-fresh'}`;
     indicator.appendChild(dot);
 
     const label = doc.createElement('span');
     label.className = 'slt-qi-label';
-    label.textContent = isCached ? `Cached · ${apiLabel}` : `Fresh · ${apiLabel}`;
+    label.textContent = isUser ? 'Yours' : isFile ? 'Lyrics file' : isCached ? `Cached · ${apiLabel}` : `Fresh · ${apiLabel}`;
     indicator.appendChild(label);
 
     const tooltipParts: string[] = [];
-    tooltipParts.push(`Source: ${isCached ? 'Cached' : 'Live API'}`);
-    tooltipParts.push(`Provider: ${apiLabel}`);
+    if (isUser) {
+        tooltipParts.push('Source: Your translation');
+    } else if (isFile) {
+        tooltipParts.push('Source: The translation inside the lyrics file');
+    } else {
+        tooltipParts.push(`Source: ${isCached ? 'Cached' : 'Live API'}`);
+        tooltipParts.push(`Provider: ${apiLabel}`);
+    }
     if (meta.detectedLanguage) {
         tooltipParts.push(`Detected: ${meta.detectedLanguage.toUpperCase()}`);
     }

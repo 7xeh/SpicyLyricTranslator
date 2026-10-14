@@ -392,6 +392,84 @@ export function detectByDistinctiveLatinMarkers(text: string): { code: string; c
     return { code: topCode, confidence };
 }
 
+export const CYRILLIC_LANGUAGE_CODES = new Set(['ru', 'uk', 'bg', 'sr', 'mk', 'be']);
+
+const RUSSIAN_ONLY_WORDS = new Set([
+    'что', 'чтобы', 'кто', 'меня', 'мне', 'он', 'она', 'они', 'его', 'ее', 'её', 'был', 'была', 'было', 'были',
+    'только', 'когда', 'нет', 'если', 'уже', 'где', 'сейчас', 'теперь', 'очень', 'всегда', 'никогда', 'ничего',
+    'хочу', 'люблю', 'знаю', 'может', 'будет', 'буду', 'здесь', 'тут', 'вот', 'ведь', 'лишь', 'пусть', 'тоже',
+    'снова', 'опять', 'себя', 'со', 'во', 'для', 'про', 'ночь', 'любовь', 'жизнь', 'сердце', 'день', 'весь',
+    'тобой', 'мной', 'собой', 'давай', 'просто', 'сегодня', 'завтра', 'через', 'потому', 'почему', 'зачем',
+    'нужно', 'надо', 'хорошо', 'глаза', 'так', 'же', 'один', 'одна', 'чем', 'вместе', 'больше', 'знать', 'быть'
+]);
+
+const BULGARIAN_ONLY_WORDS = new Set([
+    'аз', 'съм', 'си', 'сме', 'сте', 'са', 'ще', 'какво', 'това', 'този', 'тази', 'тези', 'които', 'който', 'която',
+    'което', 'защо', 'къде', 'кога', 'нищо', 'всичко', 'няма', 'нека', 'тя', 'той', 'ние', 'вие', 'бях', 'беше',
+    'мен', 'теб', 'днес', 'сега', 'обичам', 'искам', 'само', 'още', 'вече', 'тук', 'така', 'винаги', 'никога',
+    'обич', 'сърце', 'сърцето', 'нощ', 'нощта', 'любов', 'живот', 'очи', 'ако', 'защото', 'може', 'знам', 'мога',
+    'трябва', 'има', 'колко', 'кой', 'коя', 'кое', 'със', 'във', 'към', 'пред', 'след', 'през', 'отново', 'заедно',
+    'повече'
+]);
+
+function countMatches(text: string, regex: RegExp): number {
+    return (text.match(regex) || []).length;
+}
+
+export function detectCyrillicLanguage(text: string): { code: string; confidence: number } | null {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    if (!/[Ѐ-ӿ]/.test(lower)) return null;
+
+    const belarusian = countMatches(lower, /ў/g);
+    if (belarusian > 0) return { code: 'be', confidence: 0.9 };
+
+    const macedonian = countMatches(lower, /[ѓќѕ]/g);
+    if (macedonian > 0) return { code: 'mk', confidence: 0.9 };
+
+    const serbian = countMatches(lower, /[ђћ]/g) + countMatches(lower, /[јљњџ]/g);
+    if (serbian > 0) return { code: 'sr', confidence: 0.88 };
+
+    const russianLetters = countMatches(lower, /[ыэё]/g);
+    const ukrainian = countMatches(lower, /[іїєґ]/g);
+    if (ukrainian > 0 && ukrainian >= russianLetters) {
+        return { code: 'uk', confidence: Math.min(0.95, 0.8 + Math.min(ukrainian, 5) * 0.03) };
+    }
+
+    const softSigns = countMatches(lower, /ь(?!о)/g);
+    const bulgarianHardSigns = countMatches(lower, /ъ(?=[бвгджзйклмнпрстфхцчшщ])/g);
+
+    let russianWords = 0;
+    let bulgarianWords = 0;
+    for (const word of tokenizeWords(lower)) {
+        if (RUSSIAN_ONLY_WORDS.has(word)) russianWords++;
+        if (BULGARIAN_ONLY_WORDS.has(word)) bulgarianWords++;
+    }
+
+    const russianScore = russianLetters * 2 + softSigns + russianWords * 2;
+    const bulgarianScore = bulgarianHardSigns * 2 + bulgarianWords * 2;
+
+    if (russianScore < 2 && bulgarianScore < 2) return null;
+    if (russianScore === bulgarianScore) return null;
+
+    const winner = russianScore > bulgarianScore ? 'ru' : 'bg';
+    const winnerScore = Math.max(russianScore, bulgarianScore);
+    const loserScore = Math.min(russianScore, bulgarianScore);
+    if (winnerScore < loserScore * 2) return null;
+
+    return { code: winner, confidence: Math.min(0.95, 0.75 + Math.min(winnerScore - loserScore, 10) * 0.02) };
+}
+
+export function reconcileSourceLanguage(claimed: string | undefined, lines: string[]): string | undefined {
+    if (!claimed) return claimed;
+    const normalized = normalizeLanguageCode(claimed);
+    if (!CYRILLIC_LANGUAGE_CODES.has(normalized)) return claimed;
+
+    const local = detectCyrillicLanguage(lines.join('\n'));
+    if (!local || local.code === normalized) return claimed;
+    return local.code;
+}
+
 export function detectLanguageHeuristic(text: string): { code: string; confidence: number } | null {
     if (!text) return null;
 
@@ -447,7 +525,7 @@ export function detectLanguageHeuristic(text: string): { code: string; confidenc
 
     if (dominantScript && dominantScript.ratio > 0.2) {
         return {
-            code: dominantScript.code,
+            code: dominantScript.code === 'ru' ? detectCyrillicLanguage(normalizedText)?.code || 'ru' : dominantScript.code,
             confidence: Math.min(0.95, 0.6 + dominantScript.ratio * 0.3)
         };
     }
@@ -518,6 +596,7 @@ async function detectLanguageViaAPI(text: string): Promise<{ code: string; confi
     const data = await response.json();
     const rawDetectedLang = typeof data?.[2] === 'string' ? data[2] : 'unknown';
     let detectedLang = rawDetectedLang === 'unknown' ? 'unknown' : normalizeLanguageCode(rawDetectedLang);
+    detectedLang = reconcileSourceLanguage(detectedLang, [sample]) || detectedLang;
     if (detectedLang.startsWith('zh-')) {
         const scriptVariant = detectChineseScript(sample);
         if (scriptVariant !== CHINESE_UNDETERMINED) {
@@ -620,7 +699,7 @@ export function isLikelyNonTargetLine(text: string, targetLanguage: string): boo
     if (!trimmed) return false;
 
     if (NON_LATIN_SCRIPT_DETECTION_REGEX.test(trimmed)) {
-        return !['ja', 'zh-hans', 'zh-hant', 'zh-hani', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el']
+        return !['ja', 'zh-hans', 'zh-hant', 'zh-hani', 'ko', 'ar', 'he', 'ru', 'uk', 'bg', 'sr', 'mk', 'be', 'th', 'hi', 'el']
             .includes(normalizeTargetLanguageCode(targetLanguage));
     }
 
@@ -666,7 +745,7 @@ export function assessMixedLanguageContent(
     let uncertainCount = 0;
     let targetCount = 0;
     const targetBase = targetLanguage.toLowerCase().split('-')[0].split('_')[0];
-    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'el'].includes(targetBase);
+    const targetIsLatin = !['ja', 'zh', 'ko', 'ar', 'he', 'ru', 'uk', 'bg', 'sr', 'mk', 'be', 'th', 'hi', 'el'].includes(targetBase);
 
     for (const line of lines) {
         const trimmed = (line || '').trim();
@@ -812,6 +891,10 @@ export function getLanguageName(code: string): string {
         'pl': 'Polish',
         'lt': 'Lithuanian',
         'ru': 'Russian',
+        'bg': 'Bulgarian',
+        'sr': 'Serbian',
+        'mk': 'Macedonian',
+        'be': 'Belarusian',
         'ja': 'Japanese',
         'zh': 'Chinese',
         'zh-hans': 'Chinese (Simplified)',
@@ -851,6 +934,8 @@ export default {
     detectLyricsLanguage,
     detectRomanizedJapanese,
     detectChineseScript,
+    detectCyrillicLanguage,
+    reconcileSourceLanguage,
     refineChineseLanguageCode,
     normalizeLanguageCode,
     normalizeTargetLanguageCode,
