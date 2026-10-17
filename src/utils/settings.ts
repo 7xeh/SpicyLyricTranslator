@@ -2314,6 +2314,9 @@ export async function registerSettings(): Promise<void> {
     }
 
     watchForSettingsPage();
+    watchProfileMenu();
+
+    if (usesDomOnlyProfileMenu()) return;
 
     if (Spicetify.Platform?.History) {
         const registerMenuItem = () => {
@@ -2337,6 +2340,83 @@ export async function registerSettings(): Promise<void> {
         }
     }
 
+}
+
+function usesDomOnlyProfileMenu(): boolean {
+    const version = (Spicetify.Platform as { version?: unknown }).version;
+    if (typeof version !== 'string' || !version) return true;
+    const [major = 0, minor = 0, patch = 0] = version.split('.').map(part => Number.parseInt(part, 10) || 0);
+    return major > 1 || (major === 1 && (minor > 3 || (minor === 3 && patch >= 5)));
+}
+
+const MENU_LABEL = 'SLT Settings';
+const MENU_ROW_ID = 'slt-profile-menu-item';
+const PROFILE_BUTTON = '[data-testid="user-widget-link"]';
+const PROFILE_MENU = '#context-menu ul[role="menu"]';
+
+function syncProfileMenu(): void {
+    const profile = document.querySelector<HTMLElement>(PROFILE_BUTTON);
+    const owned = document.getElementById(MENU_ROW_ID);
+    const menu = document.querySelector<HTMLUListElement>(PROFILE_MENU);
+    if (profile?.getAttribute('aria-expanded') !== 'true' || !menu) {
+        owned?.remove();
+        return;
+    }
+
+    const rows = Array.from(menu.querySelectorAll<HTMLLIElement>(':scope > li[role="presentation"]'));
+    if (rows.some(row => row.id !== MENU_ROW_ID && row.textContent?.trim() === MENU_LABEL)) {
+        owned?.remove();
+        return;
+    }
+    if (owned?.parentElement === menu) return;
+    owned?.remove();
+
+    const template = rows.find(row => row.querySelector('[role="menuitem"]'));
+    const nativeButton = template?.querySelector<HTMLElement>('[role="menuitem"]');
+    if (!template || !nativeButton) return;
+
+    const row = document.createElement('li');
+    row.id = MENU_ROW_ID;
+    row.className = template.className;
+    row.setAttribute('role', 'presentation');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = nativeButton.className;
+    button.setAttribute('role', 'menuitem');
+    button.tabIndex = -1;
+    const label = document.createElement('span');
+    label.className = 'encore-text-body-small ellipsis-one-line';
+    label.dir = 'auto';
+    label.style.flex = '1';
+    label.textContent = MENU_LABEL;
+    const graphic = new DOMParser().parseFromString(SLT_MENU_ICON, 'image/svg+xml').documentElement;
+    graphic.setAttribute('aria-hidden', 'true');
+    button.append(document.importNode(graphic, true), label);
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (profile.getAttribute('aria-expanded') === 'true') profile.click();
+        openSettingsModal();
+    });
+    row.append(button);
+
+    const firstLinkRow = rows.find(candidate => candidate.querySelector('a[role="menuitem"][href]'));
+    if (firstLinkRow) firstLinkRow.before(row);
+    else menu.prepend(row);
+}
+
+function watchProfileMenu(): void {
+    new MutationObserver((records) => {
+        const relevant = records.some(record => {
+            const target = record.target;
+            if (target instanceof Element && (target.matches(PROFILE_BUTTON) || target.closest('#context-menu'))) return true;
+            return [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)].some(node =>
+                node instanceof Element && (node.matches('#context-menu') || !!node.querySelector('#context-menu'))
+            );
+        });
+        if (relevant) syncProfileMenu();
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] });
+    syncProfileMenu();
 }
 
 export default registerSettings;

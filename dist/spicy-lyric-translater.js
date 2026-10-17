@@ -11519,7 +11519,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"ef7843428d4d7483d8a37a8dbe7fe6d8647b8487b5bfaa12a7b565e6d1227ca0".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "ef7843428d4d7483d8a37a8dbe7fe6d8647b8487b5bfaa12a7b565e6d1227ca0" : "";
+    return !"41687a9c8ac50db8f889b2e4ea5abaf68bdb31a4d6192e49e5317d71b6f0f3f4".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "41687a9c8ac50db8f889b2e4ea5abaf68bdb31a4d6192e49e5317d71b6f0f3f4" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -20656,6 +20656,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     watchForSettingsPage();
+    watchProfileMenu();
+    if (usesDomOnlyProfileMenu())
+      return;
     if (Spicetify.Platform?.History) {
       const registerMenuItem = () => {
         if (Spicetify.Menu) {
@@ -20676,6 +20679,83 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         setTimeout(registerMenuItem, 2e3);
       }
     }
+  }
+  function usesDomOnlyProfileMenu() {
+    const version = Spicetify.Platform.version;
+    if (typeof version !== "string" || !version)
+      return true;
+    const [major = 0, minor = 0, patch = 0] = version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+    return major > 1 || major === 1 && (minor > 3 || minor === 3 && patch >= 5);
+  }
+  var MENU_LABEL = "SLT Settings";
+  var MENU_ROW_ID = "slt-profile-menu-item";
+  var PROFILE_BUTTON = '[data-testid="user-widget-link"]';
+  var PROFILE_MENU = '#context-menu ul[role="menu"]';
+  function syncProfileMenu() {
+    const profile = document.querySelector(PROFILE_BUTTON);
+    const owned = document.getElementById(MENU_ROW_ID);
+    const menu = document.querySelector(PROFILE_MENU);
+    if (profile?.getAttribute("aria-expanded") !== "true" || !menu) {
+      owned?.remove();
+      return;
+    }
+    const rows = Array.from(menu.querySelectorAll(':scope > li[role="presentation"]'));
+    if (rows.some((row2) => row2.id !== MENU_ROW_ID && row2.textContent?.trim() === MENU_LABEL)) {
+      owned?.remove();
+      return;
+    }
+    if (owned?.parentElement === menu)
+      return;
+    owned?.remove();
+    const template = rows.find((row2) => row2.querySelector('[role="menuitem"]'));
+    const nativeButton = template?.querySelector('[role="menuitem"]');
+    if (!template || !nativeButton)
+      return;
+    const row = document.createElement("li");
+    row.id = MENU_ROW_ID;
+    row.className = template.className;
+    row.setAttribute("role", "presentation");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = nativeButton.className;
+    button.setAttribute("role", "menuitem");
+    button.tabIndex = -1;
+    const label = document.createElement("span");
+    label.className = "encore-text-body-small ellipsis-one-line";
+    label.dir = "auto";
+    label.style.flex = "1";
+    label.textContent = MENU_LABEL;
+    const graphic = new DOMParser().parseFromString(SLT_MENU_ICON, "image/svg+xml").documentElement;
+    graphic.setAttribute("aria-hidden", "true");
+    button.append(document.importNode(graphic, true), label);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (profile.getAttribute("aria-expanded") === "true")
+        profile.click();
+      openSettingsModal();
+    });
+    row.append(button);
+    const firstLinkRow = rows.find((candidate) => candidate.querySelector('a[role="menuitem"][href]'));
+    if (firstLinkRow)
+      firstLinkRow.before(row);
+    else
+      menu.prepend(row);
+  }
+  function watchProfileMenu() {
+    new MutationObserver((records) => {
+      const relevant = records.some((record2) => {
+        const target = record2.target;
+        if (target instanceof Element && (target.matches(PROFILE_BUTTON) || target.closest("#context-menu")))
+          return true;
+        return [...Array.from(record2.addedNodes), ...Array.from(record2.removedNodes)].some(
+          (node) => node instanceof Element && (node.matches("#context-menu") || !!node.querySelector("#context-menu"))
+        );
+      });
+      if (relevant)
+        syncProfileMenu();
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-expanded"] });
+    syncProfileMenu();
   }
 
   // src/utils/shortcuts.ts
