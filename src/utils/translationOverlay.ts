@@ -48,6 +48,10 @@ let romanizationByContent: Map<string, string> = new Map();
 let originalByContent: Map<string, string> = new Map();
 let qualityByContent: Map<string, TranslationQualityMeta> = new Map();
 let timingByContent: Map<string, LyricLineData> = new Map();
+let backgroundTranslations: Map<string, string> = new Map();
+
+const BACKGROUND_LINE_SELECTOR = '.line.bg-line';
+const BACKGROUND_TRANSLATION_CLASS = 'slt-bg-translation';
 
 function normalizeCompare(text: string | undefined | null): string {
     return normalizeLyricMatchKey(text);
@@ -1918,8 +1922,64 @@ function applyNoneMode(doc: Document): void {
     markRenderComplete(doc);
 }
 
+function backgroundLinesIn(doc: Document): HTMLElement[] {
+    const container = findLyricsContainer(doc);
+    const scope: ParentNode = container || doc;
+    return Array.from(scope.querySelectorAll<HTMLElement>(BACKGROUND_LINE_SELECTOR));
+}
+
+function removeBackgroundTranslations(doc: Document): void {
+    doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach(el => el.remove());
+}
+
+export function backgroundTranslationKey(text: string | undefined | null): string {
+    return normalizeLyricMatchKey(text);
+}
+
+function applyBackgroundTranslations(doc: Document): void {
+    if (!isOverlayEnabled || currentConfig.mode === 'none' || backgroundTranslations.size === 0) {
+        removeBackgroundTranslations(doc);
+        return;
+    }
+    const claimed = new Set<Element>();
+    for (const line of backgroundLinesIn(doc)) {
+        const originalText = extractLineText(line);
+        const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
+        if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode) continue;
+
+        const next = line.nextElementSibling as HTMLElement | null;
+        const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
+        if (existing && existing.textContent === translation) {
+            claimed.add(existing);
+            continue;
+        }
+        existing?.remove();
+
+        const el = doc.createElement('div');
+        el.className = BACKGROUND_TRANSLATION_CLASS;
+        el.setAttribute('aria-hidden', 'true');
+        if (line.classList.contains('OppositeAligned')) el.classList.add('OppositeAligned');
+        if (line.classList.contains('rtl')) el.classList.add('rtl');
+        el.textContent = translation;
+        line.parentNode.insertBefore(el, line.nextSibling);
+        claimed.add(el);
+    }
+    doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach(el => {
+        if (!claimed.has(el)) el.remove();
+    });
+}
+
+export function setBackgroundTranslationData(data: Map<string, string>): void {
+    backgroundTranslations = new Map(data);
+    applyBackgroundTranslations(document);
+    const pipWindow = getPIPWindow();
+    if (pipWindow) applyBackgroundTranslations(pipWindow.document);
+}
+
 function renderTranslations(doc: Document): void {
     if (!isOverlayEnabled) return;
+
+    applyBackgroundTranslations(doc);
 
     if (currentConfig.mode === 'none') {
         applyNoneMode(doc);
@@ -2226,6 +2286,7 @@ export function disableOverlay(): void {
         if (interleavedOverlay) interleavedOverlay.remove();
 
         restoreOriginalLines(doc);
+        removeBackgroundTranslations(doc);
         doc.querySelectorAll('.slt-learning-row').forEach(el => el.remove());
     };
 

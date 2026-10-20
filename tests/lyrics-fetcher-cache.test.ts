@@ -168,3 +168,64 @@ test('drops blank Line and Static entries and falls back to romanized text', asy
     const staticResult = await fetchLyricsForTrackUri(trackUri);
     assert.deepEqual(staticResult?.lines, ['First', 'daini']);
 });
+
+test('background vocals ride along with their lead line without adding lines', async () => {
+    clearLyricsCache();
+    installSpicyLyricsCache({
+        id: trackId,
+        Type: 'Syllable',
+        Content: [
+            {
+                Type: 'Vocal',
+                Lead: {
+                    StartTime: 0,
+                    EndTime: 1000,
+                    Syllables: [
+                        { Text: 'My', StartTime: 0, EndTime: 200, IsPartOfWord: false },
+                        { Text: 'own', StartTime: 200, EndTime: 400, IsPartOfWord: false },
+                        { Text: 'enemy', StartTime: 400, EndTime: 1000, IsPartOfWord: false }
+                    ]
+                },
+                Background: [
+                    {
+                        StartTime: 0,
+                        EndTime: 1000,
+                        Syllables: [
+                            { Text: '(My', StartTime: 0, EndTime: 200, IsPartOfWord: false },
+                            { Text: 'in', StartTime: 200, EndTime: 300, IsPartOfWord: true },
+                            { Text: 'se', StartTime: 300, EndTime: 400, IsPartOfWord: true },
+                            { Text: 'curities', StartTime: 400, EndTime: 600, IsPartOfWord: false },
+                            { Text: '', StartTime: 600, EndTime: 650, IsPartOfWord: false },
+                            { Text: 'are)', StartTime: 650, EndTime: 1000, IsPartOfWord: false }
+                        ]
+                    },
+                    { StartTime: 0, EndTime: 1000, Syllables: [{ Text: '\u200b', StartTime: 0, EndTime: 1000, IsPartOfWord: false }] }
+                ]
+            },
+            {
+                Type: 'Vocal',
+                Lead: {
+                    StartTime: 1000,
+                    EndTime: 2000,
+                    Syllables: [{ Text: '\u541b', RomanizedText: 'kimi', StartTime: 1000, EndTime: 2000, IsPartOfWord: false }]
+                },
+                Background: [
+                    {
+                        StartTime: 1000,
+                        EndTime: 2000,
+                        Syllables: [
+                            { Text: '\u3042\u3044', RomanizedText: 'ai', StartTime: 1000, EndTime: 1500, IsPartOfWord: false },
+                            { Text: '\u3057\u3066\u308b', RomanizedText: 'shiteru', StartTime: 1500, EndTime: 2000, IsPartOfWord: false }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    const result = await fetchLyricsForTrackUri(trackUri);
+
+    assert.deepEqual(result?.lines, ['My own enemy', '\u541b']);
+    assert.deepEqual(result?.lineData[0]?.backgroundVocals, [{ text: '(My insecurities are)', romanizedText: undefined }]);
+    assert.deepEqual(result?.lineData[1]?.backgroundVocals, [{ text: '\u3042\u3044 \u3057\u3066\u308b', romanizedText: 'ai shiteru' }]);
+});

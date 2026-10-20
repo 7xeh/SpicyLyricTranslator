@@ -12,7 +12,7 @@ import { parseLanguageRules, NO_TRANSLATION } from './languageRules';
 import { parseFileTranslationMode } from './fileTranslations';
 
 export type SettingsFieldType = 'select' | 'toggle' | 'text' | 'password' | 'languages' | 'languageRules' | 'hotkey';
-export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'forgetTrackTranslations' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'furiganaDisplay' | 'learningModeClass';
+export type SettingsEffect = 'reapplyTranslations' | 'retranslate' | 'forgetTrackTranslations' | 'providerVisibility' | 'fieldVisibility' | 'qualityIndicatorClass' | 'connectionIndicatorClass' | 'romanizationDisplay' | 'furiganaDisplay' | 'backgroundVocals' | 'learningModeClass';
 
 export interface SettingsOption {
     value: string;
@@ -151,6 +151,17 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         defaultValue: false,
         description: 'Write the hiragana reading above the kanji in Japanese lyrics. Works with or without translation. The Japanese dictionary (about 18 MB) downloads the first time.',
         effects: ['furiganaDisplay']
+    },
+    {
+        id: 'translate-background-vocals',
+        section: 'Translation',
+        keywords: 'background vocals backing adlib ad-lib echo harmony choir bg secondary voice translate',
+        label: 'Also Translate Background Vocals',
+        type: 'toggle',
+        storageKey: 'translate-background-vocals',
+        defaultValue: true,
+        description: 'Translate the smaller background-vocal lines too, and show each translation under its line. Only lyrics with separate background vocals have them.',
+        effects: ['backgroundVocals']
     },
     {
         id: 'source-language',
@@ -757,6 +768,9 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'show-furigana':
             state.showFurigana = Boolean(value);
+            break;
+        case 'translate-background-vocals':
+            state.translateBackgroundVocals = Boolean(value);
             break;
         case 'skip-languages':
             state.skipLanguages = parseLanguageList(String(value));

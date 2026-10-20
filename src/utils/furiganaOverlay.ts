@@ -1,8 +1,10 @@
-import { buildFuriganaSegments, countKana, hasKanji } from './furigana';
-import type { FuriganaSegment, FuriganaToken } from './furigana';
+import { buildFuriganaSegments, countKana, hasKanji, parseDictionaryFeatures, rankReadingCandidates, resolveFuriganaSegments } from './furigana';
+import type { DictionaryEntry, FuriganaSegment, FuriganaToken, ResolvedFuriganaSegment } from './furigana';
+import { getFuriganaCorrections, furiganaCorrectionsRevision } from './furiganaCorrections';
+import { openFuriganaEditor } from './furiganaEditor';
 import { getSourceLanguageOverride } from './state';
 import { getCurrentTrackUri } from './trackCache';
-import { notify } from './notify';
+import { notify, dismissNotification } from './notify';
 import { debug, warn } from './debug';
 
 const KUROMOJI_VERSION = '0.1.2';
@@ -14,6 +16,10 @@ const STYLE_ID = 'slt-furigana-styles';
 const READING_CLASS = 'slt-furigana';
 const LINE_CLASS = 'slt-furigana-line';
 const TEXT_LINE_CLASS = 'slt-furigana-text-line';
+const EDITING_CLASS = 'slt-furigana-editing';
+const EDIT_TOAST_KEY = 'slt-furigana-edit-mode';
+const EDIT_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'];
+const MAX_CANDIDATES = 12;
 const LINE_SELECTOR = '#SpicyLyricsPage .line:not(.musical-line)';
 const HOST_SELECTOR = '.letter, .word, .line';
 const MIN_KANA_FOR_JAPANESE = 3;
@@ -23,11 +29,11 @@ const PASS_DELAY_MS = 60;
 const FURIGANA_STYLES = `
 #SpicyLyricsPage .line.${LINE_CLASS} {
     padding-top: 0.5em !important;
-    row-gap: 0.45em;
+    row-gap: 0.65em !important;
 }
 #SpicyLyricsPage .line.${LINE_CLASS}.${TEXT_LINE_CLASS} {
-    padding-top: 0.25em !important;
-    --lyrics-line-height: 1.75 !important;
+    padding-top: 0.2em !important;
+    --lyrics-line-height: 1.85 !important;
 }
 #SpicyLyricsPage .line .${READING_CLASS} {
     position: absolute;
@@ -53,6 +59,33 @@ const FURIGANA_STYLES = `
     background-clip: text;
     -webkit-background-clip: text;
 }
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS} {
+    pointer-events: auto;
+    cursor: pointer;
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}::after {
+    content: '';
+    position: absolute;
+    left: -0.06em;
+    right: -0.06em;
+    top: -0.62em;
+    height: 1.72em;
+    border-radius: 0.18em;
+    outline: 0.04em dashed rgba(255, 255, 255, 0.4);
+    transition: background 0.15s ease, outline-color 0.15s ease;
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}:hover::after {
+    background: rgba(255, 255, 255, 0.1);
+    outline-color: rgba(255, 255, 255, 0.85);
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-source="line"]::after,
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-source="song"]::after {
+    outline-style: solid;
+    outline-color: rgba(255, 196, 120, 0.75);
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-reading=""]::before {
+    content: '?';
+}
 #SpicyLyricsPage .line.Active .${READING_CLASS}::before,
 #SpicyLyricsPage .line.static .${READING_CLASS}::before {
     background-image: linear-gradient(
@@ -65,6 +98,13 @@ const FURIGANA_STYLES = `
 
 interface KuromojiTokenizer {
     tokenize(text: string): FuriganaToken[];
+    viterbi_builder?: { trie?: { commonPrefixSearch?: (key: string) => { k: string; v: number }[] } };
+    token_info_dictionary?: { target_map?: Record<string, (number | string)[]>; getFeatures?: (id: number | string) => string };
+}
+
+interface LineAnalysis {
+    tokens: FuriganaToken[];
+    segments: FuriganaSegment[];
 }
 
 interface LineText {
@@ -75,6 +115,7 @@ interface LineText {
 
 interface PlannedReading {
     host: HTMLElement;
+    segment: ResolvedFuriganaSegment;
     reading: string;
     left: number;
     top: number;
@@ -88,7 +129,9 @@ let loadFailureNotified = false;
 let lastLoadFailureAt = -Infinity;
 let passTimer: ReturnType<typeof setTimeout> | null = null;
 let passRunning = false;
-const segmentCache = new Map<string, FuriganaSegment[]>();
+const analysisCache = new Map<string, LineAnalysis>();
+let editing = false;
+const editListeners = new Map<Window, (event: Event) => void>();
 const lineSignatures = new WeakMap<Element, string>();
 const observers = new Map<Document, MutationObserver>();
 let resizeObserver: ResizeObserver | null = null;
@@ -196,21 +239,67 @@ function locate(lineText: LineText, index: number): { node: Text; offset: number
     return null;
 }
 
-function segmentsFor(text: string): FuriganaSegment[] {
-    const cached = segmentCache.get(text);
+function analyze(text: string): LineAnalysis {
+    const cached = analysisCache.get(text);
     if (cached) return cached;
-    let segments: FuriganaSegment[] = [];
+    let analysis: LineAnalysis = { tokens: [], segments: [] };
     try {
-        segments = tokenizer ? buildFuriganaSegments(tokenizer.tokenize(text)) : [];
+        const tokens = tokenizer ? tokenizer.tokenize(text) : [];
+        analysis = { tokens, segments: buildFuriganaSegments(tokens) };
     } catch (error) {
         warn('furigana: tokenize failed', error);
     }
-    if (segmentCache.size >= MAX_CACHED_LINES) {
-        const oldest = segmentCache.keys().next().value;
-        if (oldest !== undefined) segmentCache.delete(oldest);
+    if (analysisCache.size >= MAX_CACHED_LINES) {
+        const oldest = analysisCache.keys().next().value;
+        if (oldest !== undefined) analysisCache.delete(oldest);
     }
-    segmentCache.set(text, segments);
-    return segments;
+    analysisCache.set(text, analysis);
+    return analysis;
+}
+
+function segmentsFor(text: string): ResolvedFuriganaSegment[] {
+    const corrections = getFuriganaCorrections(getCurrentTrackUri(), text);
+    return resolveFuriganaSegments(text, analyze(text).segments, corrections, editing);
+}
+
+function lookupDictionary(word: string): DictionaryEntry[] {
+    const trie = tokenizer?.viterbi_builder?.trie;
+    const dictionary = tokenizer?.token_info_dictionary;
+    if (!word || !trie?.commonPrefixSearch || !dictionary?.target_map || !dictionary.getFeatures) return [];
+    const entries: DictionaryEntry[] = [];
+    try {
+        for (const hit of trie.commonPrefixSearch(word)) {
+            if (hit.k !== word) continue;
+            for (const id of dictionary.target_map[hit.v] || []) {
+                const entry = parseDictionaryFeatures(String(dictionary.getFeatures(id)));
+                if (entry) entries.push(entry);
+            }
+        }
+    } catch (error) {
+        warn('furigana: dictionary lookup failed', error);
+        return [];
+    }
+    return entries;
+}
+
+function readingCandidates(text: string, segment: ResolvedFuriganaSegment): string[] {
+    const spanText = text.slice(segment.start, segment.end);
+    let tokenSurface = spanText;
+    let tokenOffset = 0;
+    let cursor = 0;
+    for (const token of analyze(text).tokens) {
+        const surface = token.surface_form || '';
+        const start = typeof token.word_position === 'number' && token.word_position > 0 ? token.word_position - 1 : cursor;
+        cursor = start + surface.length;
+        if (start <= segment.start && segment.end <= start + surface.length) {
+            tokenSurface = surface;
+            tokenOffset = segment.start - start;
+            break;
+        }
+    }
+    const ranked = rankReadingCandidates(segment.auto, spanText, tokenSurface, tokenOffset, lookupDictionary);
+    if (segment.reading && !ranked.includes(segment.reading)) ranked.unshift(segment.reading);
+    return ranked.slice(0, MAX_CANDIDATES);
 }
 
 function isJapaneseSong(lineTexts: string[]): boolean {
@@ -232,10 +321,28 @@ function clearLine(line: Element): void {
 
 function lineSignature(line: HTMLElement, text: string): string {
     const fontSize = line.ownerDocument.defaultView?.getComputedStyle(line).fontSize || '';
-    return `${text}\u0000${line.offsetWidth}\u0000${fontSize}`;
+    return `${text}\u0000${line.offsetWidth}\u0000${fontSize}\u0000${furiganaCorrectionsRevision()}\u0000${editing ? 'edit' : ''}`;
 }
 
-function planReadings(line: HTMLElement, lineText: LineText, segments: FuriganaSegment[]): PlannedReading[] | null {
+function widestRow(rects: DOMRect[]): DOMRect | null {
+    const rows: DOMRect[][] = [];
+    for (const rect of rects) {
+        const row = rows.find(items => Math.abs(items[0].top + items[0].height / 2 - (rect.top + rect.height / 2)) < rect.height / 2);
+        if (row) row.push(rect);
+        else rows.push([rect]);
+    }
+    let best: DOMRect | null = null;
+    for (const row of rows) {
+        const left = Math.min(...row.map(r => r.left));
+        const right = Math.max(...row.map(r => r.right));
+        const top = Math.min(...row.map(r => r.top));
+        const bottom = Math.max(...row.map(r => r.bottom));
+        if (!best || right - left > best.width) best = new DOMRect(left, top, right - left, bottom - top);
+    }
+    return best;
+}
+
+function planReadings(line: HTMLElement, lineText: LineText, segments: ResolvedFuriganaSegment[]): PlannedReading[] | null {
     const doc = line.ownerDocument;
     const view = doc.defaultView;
     const planned: PlannedReading[] = [];
@@ -251,19 +358,21 @@ function planReadings(line: HTMLElement, lineText: LineText, segments: FuriganaS
         const range = doc.createRange();
         range.setStart(start.node, start.offset);
         range.setEnd(end.node, Math.min(end.offset + 1, end.node.length));
-        const rect = Array.from(range.getClientRects()).find(r => r.width > 0 && r.height > 0);
+        const rect = widestRow(Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0));
         if (!rect) return null;
 
         const hostRect = host.getBoundingClientRect();
         const scale = host.offsetWidth > 0 ? hostRect.width / host.offsetWidth : 1;
         const fontSize = parseFloat(view?.getComputedStyle(host).fontSize || '') || 16;
         const unit = (scale || 1) * fontSize;
+        const glyphTop = rect.top + (rect.height - unit) / 2;
 
         planned.push({
             host,
+            segment,
             reading: segment.reading,
             left: (rect.left - hostRect.left) / unit,
-            top: (rect.top - hostRect.top) / unit,
+            top: (glyphTop - hostRect.top) / unit,
             width: rect.width / unit,
         });
     }
@@ -278,6 +387,9 @@ function placeReadings(planned: PlannedReading[]): void {
         span.className = READING_CLASS;
         span.setAttribute('aria-hidden', 'true');
         span.dataset.sltReading = item.reading;
+        span.dataset.sltStart = String(item.segment.start);
+        span.dataset.sltEnd = String(item.segment.end);
+        span.dataset.sltSource = item.segment.source;
         span.style.left = `${item.left.toFixed(3)}em`;
         span.style.top = `${item.top.toFixed(3)}em`;
         span.style.width = `${item.width.toFixed(3)}em`;
@@ -307,7 +419,7 @@ function annotateDocument({ doc, lines, texts, japanese }: DocumentLines): void 
     ensureStyles(doc);
     watchResize(doc);
 
-    const pending: { line: HTMLElement; text: LineText; segments: FuriganaSegment[] }[] = [];
+    const pending: { line: HTMLElement; text: LineText; segments: ResolvedFuriganaSegment[] }[] = [];
     lines.forEach((line, index) => {
         const lineText = texts[index];
         const segments = japanese && tokenizer && hasKanji(lineText.text) ? segmentsFor(lineText.text) : [];
@@ -348,6 +460,7 @@ async function runPass(): Promise<void> {
     try {
         const docs = getDocuments();
         docs.forEach(observeDocument);
+        docs.forEach(syncEditing);
         if (!tokenizer && docs.map(collectLines).some(needsReadings)) await loadTokenizer();
         if (!enabled) return;
         docs.map(collectLines).forEach(annotateDocument);
@@ -393,6 +506,99 @@ function watchResize(doc: Document): void {
     resizeTargets.add(target);
 }
 
+function readingSpanFrom(event: Event): HTMLElement | null {
+    const target = event.target as Element | null;
+    const span = target?.closest?.(`.${READING_CLASS}`) as HTMLElement | null;
+    return span && span.closest(LINE_SELECTOR) ? span : null;
+}
+
+function spanOrigin(span: HTMLElement): DOMRect | null {
+    if (span.ownerDocument !== document) return null;
+    const rect = span.getBoundingClientRect();
+    const fontSize = parseFloat(getComputedStyle(span).fontSize) || 16;
+    const scale = span.offsetWidth > 0 ? rect.width / span.offsetWidth : 1;
+    const height = fontSize * (scale || 1);
+    return new DOMRect(rect.left, rect.top - height * 0.6, rect.width, height * 1.6);
+}
+
+function openEditorFor(span: HTMLElement): void {
+    const line = span.closest<HTMLElement>(LINE_SELECTOR);
+    const trackUri = getCurrentTrackUri();
+    const start = Number(span.dataset.sltStart);
+    const end = Number(span.dataset.sltEnd);
+    if (!line || !trackUri || !Number.isFinite(start) || !Number.isFinite(end)) return;
+    const text = readLineText(line).text;
+    const segment = segmentsFor(text).find(item => item.start === start && item.end === end);
+    if (!segment) return;
+    openFuriganaEditor({
+        trackUri,
+        lineText: text,
+        start,
+        end,
+        reading: segment.reading,
+        autoReading: segment.auto,
+        source: segment.source,
+        candidates: readingCandidates(text, segment),
+        origin: spanOrigin(span),
+        onChange: () => scheduleFuriganaPass(0)
+    });
+}
+
+function onEditEvent(event: Event): void {
+    if (!editing) return;
+    const span = readingSpanFrom(event);
+    if (!span) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.type === 'click') openEditorFor(span);
+}
+
+function syncEditing(doc: Document): void {
+    doc.body?.classList.toggle(EDITING_CLASS, editing);
+    const view = doc.defaultView;
+    if (!view) return;
+    const bound = editListeners.get(view);
+    if (editing && !bound) {
+        EDIT_EVENTS.forEach(type => view.addEventListener(type, onEditEvent, true));
+        editListeners.set(view, onEditEvent);
+    } else if (!editing && bound) {
+        EDIT_EVENTS.forEach(type => view.removeEventListener(type, bound, true));
+        editListeners.delete(view);
+    }
+}
+
+export function setFuriganaEditing(on: boolean): void {
+    const next = on && enabled;
+    if (next === editing) return;
+    editing = next;
+    getDocuments().forEach(syncEditing);
+    editListeners.forEach((handler, view) => {
+        if (editing) return;
+        EDIT_EVENTS.forEach(type => view.removeEventListener(type, handler, true));
+        editListeners.delete(view);
+    });
+    if (editing) {
+        notify({
+            kind: 'info',
+            key: EDIT_TOAST_KEY,
+            title: 'Fixing furigana',
+            description: 'Click a reading to change it. Kanji without a reading show a ?. Clicks on readings will not seek while this is on.',
+            duration: Infinity,
+            inbox: false,
+            force: true,
+            actions: [{ label: 'Done', primary: true, onClick: () => setFuriganaEditing(false) }],
+            onDismiss: () => setFuriganaEditing(false)
+        });
+    } else {
+        dismissNotification(EDIT_TOAST_KEY);
+    }
+    if (enabled) scheduleFuriganaPass(0);
+}
+
+export function isFuriganaEditing(): boolean {
+    return editing;
+}
+
 function removeAllReadings(): void {
     for (const doc of getDocuments()) {
         doc.querySelectorAll(`.${READING_CLASS}`).forEach(el => el.remove());
@@ -406,6 +612,7 @@ export function setFuriganaEnabled(on: boolean): void {
         if (on) scheduleFuriganaPass(0);
         return;
     }
+    if (!on) setFuriganaEditing(false);
     enabled = on;
     if (on) {
         loadFailureNotified = false;

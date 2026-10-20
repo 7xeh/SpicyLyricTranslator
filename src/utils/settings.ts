@@ -3,7 +3,7 @@ import { state, isLearningActive, parseLanguageList } from './state';
 import { clearTranslationCache, clearWordBreakdownCache } from './translator';
 import { getTrackCacheStats, getAllCachedTracks, deleteTrackCache, getTrackCache, updateTrackCacheLines, getCurrentTrackUri } from './trackCache';
 import { VERSION, REPO_URL, runManualUpdateCheck, showCurrentChangelog, getDisplayHash, registerSettingLinker } from './updater';
-import { forceRetranslate, forgetCurrentTrackTranslations, syncLearningButton } from './core';
+import { forceRetranslate, forgetCurrentTrackTranslations, syncLearningButton, setBackgroundVocalTranslation } from './core';
 import { displayModal, hideModal } from './modal';
 import { openUserTranslationEditor } from './userTranslationEditor';
 import { openDialog } from './surface';
@@ -324,6 +324,9 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean, d
     }
     if (effects.includes('furiganaDisplay')) {
         setFuriganaEnabled(state.showFurigana);
+    }
+    if (effects.includes('backgroundVocals')) {
+        setBackgroundVocalTranslation(state.translateBackgroundVocals);
     }
     if (effects.includes('learningModeClass')) {
         setOverlayLearningMode(isLearningActive());

@@ -8,11 +8,12 @@ import { SUPPORTED_LANGUAGES } from './translator';
 import { getLanguageName } from './languageDetection';
 import { openUserTranslationEditor } from './userTranslationEditor';
 import { hasUserTranslations } from './userTranslations';
+import { isFuriganaEditing, setFuriganaEditing } from './furiganaOverlay';
 import { warn } from './debug';
 
 const QUICK_MENU_ID = 'slt-quick-menu';
 
-const QUICK_FIELD_IDS = ['overlay-mode', 'learning-mode', 'show-romanization', 'show-furigana'];
+const QUICK_FIELD_IDS = ['overlay-mode', 'learning-mode', 'show-romanization', 'translate-background-vocals', 'show-furigana'];
 
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -232,6 +233,25 @@ function buildSelectRow(field: SettingsField, onChange: () => void): HTMLElement
     return row;
 }
 
+function buildFuriganaEditRow(): HTMLElement {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'slt-qm-item';
+    item.setAttribute('role', 'menuitemcheckbox');
+    item.setAttribute('aria-checked', String(isFuriganaEditing()));
+    item.dataset.sltQmFuriganaEdit = 'true';
+    item.style.display = state.showFurigana ? '' : 'none';
+    item.innerHTML = `
+        <span class="slt-qm-check">✓</span>
+        <span class="slt-qm-label">Fix furigana readings</span>
+    `;
+    item.addEventListener('click', () => {
+        setFuriganaEditing(!isFuriganaEditing());
+        closeQuickMenu();
+    });
+    return item;
+}
+
 function buildTrackSourceLanguageRow(trackUri: string): HTMLElement {
     const current = getTrackSourceLanguage(trackUri) || 'auto';
     const detected = !getSourceLanguageOverride(trackUri) && state.detectedLanguage && state.detectedLanguage !== 'unknown'
@@ -298,7 +318,14 @@ export function openQuickMenu(x: number, y: number): void {
             menu.appendChild(sep);
         };
 
-        const refresh = () => syncQuickMenuState(menu);
+        const refresh = () => {
+            syncQuickMenuState(menu);
+            const editRow = menu.querySelector<HTMLElement>('[data-slt-qm-furigana-edit]');
+            if (editRow) {
+                editRow.style.display = state.showFurigana ? '' : 'none';
+                editRow.setAttribute('aria-checked', String(isFuriganaEditing()));
+            }
+        };
 
         QUICK_FIELD_IDS.forEach((id, index) => {
             const field = getSettingField(id);
@@ -308,6 +335,7 @@ export function openQuickMenu(x: number, y: number): void {
 
             if (field.type === 'toggle') {
                 menu.appendChild(buildToggleRow(field, refresh));
+                if (field.id === 'show-furigana') menu.appendChild(buildFuriganaEditRow());
             } else if (field.id === 'overlay-mode') {
                 menu.appendChild(buildModeRows(field, refresh));
             } else {

@@ -34,7 +34,10 @@ import {
     setOverlayLearningMode,
     invalidateLearningRow,
     setLearningTargetLanguage,
-    setLearningSourceLanguage
+    setLearningSourceLanguage,
+    setBackgroundTranslationData,
+    backgroundTranslationKey,
+    isEchoedTranslation
 } from './translationOverlay';
 import type { OverlayMode } from './translationOverlay';
 import { shouldSkipTranslation, detectLanguageHeuristic, detectRomanizedJapanese, isSameLanguage, refineChineseLanguageCode, reconcileSourceLanguage, isLikelyNonTargetLine, getLanguageName, isExcludedSourceLanguage, isChineseScriptConversion } from './languageDetection';
@@ -64,6 +67,10 @@ let contentTranslation = new Map<string, string>();
 let contentQuality = new Map<string, TranslationQualityMeta>();
 let coveredKeys = new Set<string>();
 let fillGapsInFlight = false;
+let backgroundTranslation = new Map<string, string>();
+let backgroundAttempted = new Set<string>();
+let backgroundTrackUri: string | null = null;
+let backgroundInFlight = false;
 let gapFillSuppressed = false;
 
 interface SkippedTranslationState {
@@ -1539,7 +1546,116 @@ function applyTranslations(lines: NodeListOf<Element>): number {
     }
     updateOverlayContent(translationMapByIndex);
     debug(`applyTranslations: matched ${translationMapByIndex.size}/${lines.length} DOM lines`);
+    void translateBackgroundVocals();
     return translationMapByIndex.size;
+}
+
+function getBackgroundVocalLines(): Element[] {
+    const docs: Document[] = [document];
+    const pip = getPIPWindow();
+    if (pip) docs.push(pip.document);
+    for (const doc of docs) {
+        const lines = doc.querySelectorAll('#SpicyLyricsPage .line.bg-line, .LyricsContent .line.bg-line');
+        if (lines.length > 0) return Array.from(lines);
+    }
+    return [];
+}
+
+function resetBackgroundTranslations(): void {
+    backgroundTranslation = new Map();
+    backgroundAttempted = new Set();
+    backgroundTrackUri = null;
+    setBackgroundTranslationData(backgroundTranslation);
+}
+
+async function loadBackgroundOriginals(): Promise<Map<string, string>> {
+    const originals = new Map<string, string>();
+    try {
+        const lyrics = await fetchLyricsFromAPI();
+        lyrics?.lineData.forEach(line => line.backgroundVocals?.forEach(vocal => {
+            const key = backgroundTranslationKey(vocal.text);
+            if (key && !originals.has(key)) originals.set(key, vocal.text);
+            const romanKey = backgroundTranslationKey(vocal.romanizedText);
+            if (romanKey && !originals.has(romanKey)) originals.set(romanKey, vocal.text);
+        }));
+    } catch (err) {
+        warn('Failed to read background vocals from the lyrics:', err);
+    }
+    return originals;
+}
+
+async function translateBackgroundVocals(): Promise<void> {
+    if (!state.isEnabled || !state.translateBackgroundVocals || state.isTranslating || backgroundInFlight) return;
+
+    const trackUri = getCurrentTrackUri();
+    if (trackUri !== backgroundTrackUri) {
+        resetBackgroundTranslations();
+        backgroundTrackUri = trackUri;
+    }
+
+    const pending = new Map<string, string>();
+    for (const line of getBackgroundVocalLines()) {
+        const text = extractLineText(line).trim();
+        const key = backgroundTranslationKey(text);
+        if (!key || backgroundAttempted.has(key) || pending.has(key)) continue;
+        if (/^[♪♫•\-–—\s]+$/.test(text)) continue;
+        pending.set(key, text);
+    }
+    if (pending.size === 0) return;
+
+    backgroundInFlight = true;
+    try {
+        const romanized = isRomanizationActive();
+        const originals = await loadBackgroundOriginals();
+        const keys: string[] = [];
+        const sources: string[] = [];
+        pending.forEach((domText, key) => {
+            const source = originals.get(key) || (romanized ? '' : domText);
+            if (!source && originals.size === 0) return;
+            backgroundAttempted.add(key);
+            if (!source) return;
+            keys.push(key);
+            sources.push(source);
+        });
+        if (sources.length === 0) return;
+
+        const fileLines = trackUri && trackUri === fileTranslationUri ? fileTranslationLines : new Map<string, string>();
+        const results = applyUserTranslations(
+            applyUserTranslations(
+                await translateLyrics(sources, state.targetLanguage, trackUri || undefined, undefined, true),
+                sources,
+                fileLines,
+                'file'
+            ),
+            sources,
+            getUserTranslations(trackUri, state.targetLanguage)
+        );
+        if (trackUri !== getCurrentTrackUri() || trackUri !== backgroundTrackUri || !state.translateBackgroundVocals) return;
+
+        let added = false;
+        results.forEach((result, i) => {
+            const translated = (result.translatedText || '').trim();
+            if (!translated || isEchoedTranslation(translated, sources[i])) return;
+            backgroundTranslation.set(keys[i], translated);
+            added = true;
+        });
+        if (added) setBackgroundTranslationData(backgroundTranslation);
+        debug(`translateBackgroundVocals: ${backgroundTranslation.size} background lines translated`);
+    } catch (err) {
+        warn('Failed to translate background vocals:', err);
+        pending.forEach((_text, key) => backgroundAttempted.delete(key));
+    } finally {
+        backgroundInFlight = false;
+    }
+}
+
+export function setBackgroundVocalTranslation(on: boolean): void {
+    state.translateBackgroundVocals = on;
+    if (!on) {
+        resetBackgroundTranslations();
+        return;
+    }
+    void translateBackgroundVocals();
 }
 
 function clearReapplyTimers(): void {
@@ -1705,6 +1821,7 @@ export function removeTranslations(): void {
     contentTranslation = new Map();
     contentQuality = new Map();
     coveredKeys = new Set();
+    resetBackgroundTranslations();
 
     const docs = [document];
     const pip = getPIPWindow();

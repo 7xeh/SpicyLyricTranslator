@@ -5846,6 +5846,7 @@ ${text3}`
     hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
     showRomanization: storage.get("show-romanization") === "true",
     showFurigana: storage.get("show-furigana") === "true",
+    translateBackgroundVocals: storage.get("translate-background-vocals") !== "false",
     learningMode: storage.get("learning-mode") === "true",
     learningVisible: storage.get("learning-visible") !== "false",
     learningBreakdownMode: storage.get("learning-breakdown-mode") === "on-demand" ? "on-demand" : "auto",
@@ -5972,6 +5973,211 @@ ${text3}`
       }));
     }
     return segments;
+  }
+  var MAX_READING_LENGTH = 32;
+  function normalizeReading(input) {
+    const compact = (input || "").normalize("NFKC").replace(/\s+/g, "");
+    return toHiragana(compact).slice(0, MAX_READING_LENGTH);
+  }
+  function correctionRangeKey(start, end) {
+    return `${start}-${end}`;
+  }
+  function uncoveredKanjiRuns(text3, segments) {
+    const covered = new Array(text3.length).fill(false);
+    segments.forEach((segment) => {
+      for (let i = segment.start; i < segment.end && i < text3.length; i++)
+        covered[i] = true;
+    });
+    const runs = [];
+    let offset = 0;
+    for (const char of Array.from(text3)) {
+      const free = isKanji(char) && !covered[offset];
+      const last = runs[runs.length - 1];
+      if (free && last && last.end === offset)
+        last.end += char.length;
+      else if (free)
+        runs.push({ start: offset, end: offset + char.length, reading: "" });
+      offset += char.length;
+    }
+    return runs;
+  }
+  function resolveFuriganaSegments(text3, segments, corrections, includeUncovered = false) {
+    const candidates = includeUncovered || corrections ? [...segments, ...uncoveredKanjiRuns(text3, segments)].sort((a, b) => a.start - b.start) : segments;
+    const resolved = [];
+    for (const segment of candidates) {
+      const lineReading = corrections?.lines[correctionRangeKey(segment.start, segment.end)];
+      const songReading = corrections?.words[text3.slice(segment.start, segment.end)];
+      const source = typeof lineReading === "string" ? "line" : typeof songReading === "string" ? "song" : "auto";
+      const reading = source === "line" ? lineReading : source === "song" ? songReading : segment.reading;
+      if (!reading && !includeUncovered)
+        continue;
+      resolved.push({ start: segment.start, end: segment.end, reading, auto: segment.reading, source });
+    }
+    return resolved;
+  }
+  function parseDictionaryFeatures(features) {
+    const fields = (features || "").split(",");
+    if (fields.length < 9 || !fields[0])
+      return null;
+    const reading = fields[8] && fields[8] !== "*" ? fields[8] : "";
+    if (!reading)
+      return null;
+    return {
+      surface: fields[0],
+      pos: fields[1] || "",
+      posDetail: fields[2] || "",
+      base: fields[7] && fields[7] !== "*" ? fields[7] : fields[0],
+      reading
+    };
+  }
+  function readingForSpan(surface, start, end, reading) {
+    if (!surface || !reading || start < 0 || end > surface.length || start >= end)
+      return "";
+    const spanText = surface.slice(start, end);
+    if (!hasKanji(spanText))
+      return "";
+    if (start === 0 && end === surface.length) {
+      const whole = splitOkurigana(surface, reading);
+      if (whole.length === 1 && whole[0].start === 0 && whole[0].end === surface.length)
+        return whole[0].reading;
+      if (whole.length === 0)
+        return "";
+    }
+    const match = splitOkurigana(surface, reading).find((segment) => segment.start === start && segment.end === end);
+    return match ? match.reading : "";
+  }
+  function rankReadingCandidates(autoReading, spanText, tokenSurface, tokenOffset, lookup) {
+    const primary = [];
+    const secondary = [];
+    const push = (list, reading) => {
+      const normalized = normalizeReading(reading);
+      if (normalized && !primary.includes(normalized) && !secondary.includes(normalized))
+        list.push(normalized);
+    };
+    const isName = (entry) => entry.posDetail === "\u56FA\u6709\u540D\u8A5E";
+    const spanStart = tokenOffset;
+    const spanEnd = tokenOffset + spanText.length;
+    push(primary, autoReading);
+    if (tokenSurface) {
+      const tokenEntries = lookup(tokenSurface);
+      tokenEntries.forEach((entry) => {
+        const reading = readingForSpan(tokenSurface, spanStart, spanEnd, entry.reading);
+        if (reading)
+          push(isName(entry) ? secondary : primary, reading);
+      });
+      const bases = Array.from(new Set(tokenEntries.map((entry) => entry.base).filter((base) => base !== tokenSurface)));
+      bases.forEach((base) => {
+        if (base.slice(spanStart, spanEnd) !== spanText)
+          return;
+        lookup(base).forEach((entry) => {
+          const reading = readingForSpan(base, spanStart, spanEnd, entry.reading);
+          if (reading)
+            push(isName(entry) ? secondary : primary, reading);
+        });
+      });
+    }
+    if (spanText !== tokenSurface) {
+      lookup(spanText).forEach((entry) => push(isName(entry) ? secondary : primary, entry.reading));
+    }
+    return [...primary, ...secondary];
+  }
+
+  // src/utils/furiganaCorrections.ts
+  var FURIGANA_CORRECTIONS_KEY = "furigana-corrections";
+  var revision = 0;
+  var cachedStore = null;
+  function isRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+  function readStore2() {
+    if (cachedStore)
+      return cachedStore;
+    const store = storage.getJSON(FURIGANA_CORRECTIONS_KEY, {});
+    cachedStore = isRecord(store) ? store : {};
+    return cachedStore;
+  }
+  function writeStore(store) {
+    cachedStore = null;
+    const saved = storage.setJSON(FURIGANA_CORRECTIONS_KEY, store);
+    if (saved)
+      revision++;
+    return saved;
+  }
+  function readEntry(store, trackUri) {
+    const entry = store[trackUri];
+    return {
+      lines: isRecord(entry?.lines) ? entry.lines : {},
+      words: isRecord(entry?.words) ? entry.words : {},
+      updatedAt: entry?.updatedAt || 0,
+      trackName: entry?.trackName,
+      artistName: entry?.artistName
+    };
+  }
+  function onlyStrings(record2) {
+    const clean = {};
+    Object.entries(record2).forEach(([key, value]) => {
+      if (key && typeof value === "string")
+        clean[key] = value;
+    });
+    return clean;
+  }
+  function furiganaCorrectionsRevision() {
+    return revision;
+  }
+  function getFuriganaCorrections(trackUri, lineText) {
+    if (!trackUri)
+      return null;
+    const entry = readEntry(readStore2(), trackUri);
+    const lines = isRecord(entry.lines[lineText]) ? onlyStrings(entry.lines[lineText]) : {};
+    const words = onlyStrings(entry.words);
+    if (Object.keys(lines).length === 0 && Object.keys(words).length === 0)
+      return null;
+    return { lines, words };
+  }
+  function persist(store, trackUri, entry) {
+    Object.keys(entry.lines).forEach((lineText) => {
+      if (!isRecord(entry.lines[lineText]) || Object.keys(entry.lines[lineText]).length === 0)
+        delete entry.lines[lineText];
+    });
+    if (Object.keys(entry.lines).length === 0 && Object.keys(entry.words).length === 0)
+      delete store[trackUri];
+    else
+      store[trackUri] = { ...entry, updatedAt: Date.now() };
+    return writeStore(store);
+  }
+  function saveFuriganaCorrection(trackUri, target, reading, scope, meta = {}) {
+    if (!trackUri || !target.lineText || target.end <= target.start)
+      return false;
+    const store = readStore2();
+    const entry = readEntry(store, trackUri);
+    const rangeKey = correctionRangeKey(target.start, target.end);
+    const surface = target.lineText.slice(target.start, target.end);
+    const value = normalizeReading(reading);
+    const line = isRecord(entry.lines[target.lineText]) ? { ...entry.lines[target.lineText] } : {};
+    if (scope === "song") {
+      entry.words = { ...entry.words, [surface]: value };
+      delete line[rangeKey];
+    } else {
+      line[rangeKey] = value;
+    }
+    entry.lines = { ...entry.lines, [target.lineText]: line };
+    entry.trackName = meta.trackName || entry.trackName;
+    entry.artistName = meta.artistName || entry.artistName;
+    return persist(store, trackUri, entry);
+  }
+  function clearFuriganaCorrection(trackUri, target) {
+    if (!trackUri || !target.lineText)
+      return false;
+    const store = readStore2();
+    const entry = readEntry(store, trackUri);
+    const surface = target.lineText.slice(target.start, target.end);
+    const line = isRecord(entry.lines[target.lineText]) ? { ...entry.lines[target.lineText] } : {};
+    delete line[correctionRangeKey(target.start, target.end)];
+    const words = { ...entry.words };
+    delete words[surface];
+    entry.lines = { ...entry.lines, [target.lineText]: line };
+    entry.words = words;
+    return persist(store, trackUri, entry);
   }
 
   // src/utils/uiTheme.ts
@@ -7455,15 +7661,199 @@ body.slt-update-waiting #TranslateToggle::after {
       dismissToast(key);
   }
 
+  // src/utils/furiganaEditor.ts
+  var STYLE_ID2 = "slt-furigana-editor-styles";
+  var EDITOR_STYLES = `
+.slt-fe { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.slt-fe-preview { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 12px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--slt-ui-line); }
+.slt-fe-word { font-size: 34px; font-weight: 700; line-height: 1.2; color: var(--slt-ui-ink); }
+.slt-fe-word rt { font-size: 0.42em; font-weight: 600; letter-spacing: 0.04em; color: var(--slt-ui-accent); padding-bottom: 2px; }
+.slt-fe-context { font-size: 13px; line-height: 1.5; color: var(--slt-ui-ink-faint); text-align: center; overflow-wrap: anywhere; }
+.slt-fe-context mark { background: none; color: var(--slt-ui-ink); font-weight: 700; text-decoration: underline; text-decoration-color: var(--slt-ui-accent); text-underline-offset: 3px; }
+.slt-fe-label { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--slt-ui-ink-faint); }
+.slt-fe-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.slt-fe-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--slt-ui-line); background: transparent; color: var(--slt-ui-ink-muted); font: inherit; font-size: 14px; font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease; }
+.slt-fe-chip:hover { color: var(--slt-ui-ink); border-color: var(--slt-ui-ink-faint); background: rgba(255, 255, 255, 0.05); }
+.slt-fe-chip[aria-pressed="true"] { color: var(--slt-ui-accent-ink, #000); background: var(--slt-ui-accent); border-color: transparent; }
+.slt-fe-chip:focus-visible { outline: 2px solid var(--slt-ui-accent); outline-offset: 2px; }
+.slt-fe-chip-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.7; }
+.slt-fe-chip-none { font-style: italic; }
+.slt-fe-none { margin: 0; font-size: 12.5px; color: var(--slt-ui-ink-faint); }
+.slt-fe-scope { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.slt-fe-scope label { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--slt-ui-line); cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; }
+.slt-fe-scope label:hover { border-color: var(--slt-ui-ink-faint); }
+.slt-fe-scope label:has(input:checked) { border-color: var(--slt-ui-accent-line, var(--slt-ui-accent)); background: var(--slt-ui-accent-soft, rgba(255, 255, 255, 0.08)); }
+.slt-fe-scope label:has(input:focus-visible) { outline: 2px solid var(--slt-ui-accent); outline-offset: 2px; }
+.slt-fe-scope input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.slt-fe-scope strong { font-size: 13px; font-weight: 650; color: var(--slt-ui-ink); }
+.slt-fe-scope span { font-size: 11.5px; color: var(--slt-ui-ink-faint); }
+.slt-fe-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--slt-ui-ink-faint); }
+`;
+  function ensureEditorStyles() {
+    if (document.getElementById(STYLE_ID2))
+      return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID2;
+    style.textContent = EDITOR_STYLES;
+    document.head.appendChild(style);
+  }
+  function previewWord(surface, reading) {
+    const ruby = el("ruby", {}, surface);
+    ruby.append(el("rt", { text: reading || "\xA0" }));
+    return el("div", { class: "slt-fe-word" }, ruby);
+  }
+  function contextLine(lineText, start, end) {
+    return el(
+      "div",
+      { class: "slt-fe-context" },
+      lineText.slice(0, start),
+      el("mark", { text: lineText.slice(start, end) }),
+      lineText.slice(end)
+    );
+  }
+  function scopeOption(value, title, detail, checked) {
+    const input = el("input", { type: "radio", name: "slt-fe-scope", value, checked });
+    return el("label", {}, input, el("strong", { text: title }), el("span", { text: detail }));
+  }
+  function openFuriganaEditor(request) {
+    ensureEditorStyles();
+    const { trackUri, lineText, start, end } = request;
+    const surface = lineText.slice(start, end);
+    const target = { lineText, start, end };
+    let selected = request.reading;
+    const preview = el("div", { class: "slt-fe-preview" });
+    const renderPreview = () => {
+      preview.replaceChildren(previewWord(surface, selected), contextLine(lineText, start, end));
+    };
+    const input = el("input", {
+      class: "slt-ui-input",
+      type: "text",
+      value: request.reading,
+      placeholder: "Type the reading in kana, e.g. \u3055\u3060\u3081",
+      spellcheck: "false",
+      autocomplete: "off",
+      "aria-label": "Reading",
+      "data-slt-autofocus": true,
+      "data-slt-esc-local": true
+    });
+    const chips = el("div", { class: "slt-fe-chips", role: "group", "aria-label": "Dictionary readings" });
+    const chipButtons = [];
+    const syncChips = () => {
+      chipButtons.forEach((chip) => chip.setAttribute("aria-pressed", String(chip.dataset.reading === selected)));
+    };
+    const select = (reading) => {
+      selected = reading;
+      input.value = reading;
+      syncChips();
+      renderPreview();
+    };
+    const candidates = request.candidates.filter(Boolean);
+    candidates.forEach((reading) => {
+      const chip = el("button", { class: "slt-fe-chip", type: "button", "data-reading": reading }, reading);
+      if (reading === request.autoReading)
+        chip.append(el("span", { class: "slt-fe-chip-tag", text: "auto" }));
+      chip.addEventListener("click", () => select(reading));
+      chip.addEventListener("dblclick", () => {
+        select(reading);
+        save();
+      });
+      chipButtons.push(chip);
+      chips.append(chip);
+    });
+    const noneChip = el("button", { class: "slt-fe-chip slt-fe-chip-none", type: "button", "data-reading": "" }, "No reading");
+    noneChip.addEventListener("click", () => select(""));
+    chipButtons.push(noneChip);
+    chips.append(noneChip);
+    input.addEventListener("input", () => {
+      selected = normalizeReading(input.value);
+      syncChips();
+      renderPreview();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        save();
+      }
+    });
+    const scope = el(
+      "div",
+      { class: "slt-fe-scope", role: "radiogroup", "aria-label": "Apply to" },
+      scopeOption("line", "This line", "And its repeats", request.source !== "song"),
+      scopeOption("song", "Whole song", `Every ${surface} in this song`, request.source === "song")
+    );
+    const root = el(
+      "div",
+      { class: "slt-fe" },
+      preview,
+      el(
+        "div",
+        {},
+        el("p", { class: "slt-fe-label", text: "Dictionary readings" }),
+        candidates.length > 0 ? chips : el("div", {}, el("p", { class: "slt-fe-none", text: "The dictionary has no other readings for this word. Type the one the singer uses below." }), chips)
+      ),
+      el("div", {}, el("p", { class: "slt-fe-label", text: "Reading" }), input),
+      el("div", {}, el("p", { class: "slt-fe-label", text: "Apply to" }), scope),
+      el("p", { class: "slt-fe-hint", text: "Katakana and half-width kana are saved as hiragana. Corrections stay on this device for this song only." })
+    );
+    let handle = null;
+    const finish = (ok2, title) => {
+      if (!ok2) {
+        notify({ kind: "error", key: "slt-furigana-edit-save", title: "Couldn't save the reading", description: "Spotify refused to store it. Clearing cached translations may free up space." });
+        return;
+      }
+      handle?.close();
+      request.onChange();
+      notify({ kind: "success", key: "slt-furigana-edit-save", title, duration: 2400 });
+    };
+    function save() {
+      const chosenScope = scope.querySelector("input:checked")?.value === "song" ? "song" : "line";
+      const reading = normalizeReading(input.value);
+      if (reading === request.autoReading && request.source === "auto") {
+        handle?.close();
+        return;
+      }
+      const ok2 = reading === request.autoReading && chosenScope === "line" && request.source === "line" ? clearFuriganaCorrection(trackUri, target) : saveFuriganaCorrection(trackUri, target, reading, chosenScope, getCurrentTrackMeta());
+      const where = chosenScope === "song" ? `every ${surface} in this song` : "this line";
+      finish(ok2, reading ? `${surface} now reads ${reading} on ${where}` : `${surface} shows no reading on ${where}`);
+    }
+    const actions = [];
+    if (request.source !== "auto") {
+      actions.push({
+        label: "Use automatic",
+        kind: "ghost",
+        keepOpen: true,
+        onClick: () => finish(clearFuriganaCorrection(trackUri, target), `${surface} is back to the automatic reading`)
+      });
+    }
+    actions.push({ label: "Cancel", id: "cancel" });
+    actions.push({ label: "Save", kind: "primary", id: "save", keepOpen: true, onClick: () => save() });
+    renderPreview();
+    syncChips();
+    handle = openDialog({
+      title: "Fix reading",
+      eyebrow: "Furigana",
+      content: root,
+      size: "sm",
+      origin: request.origin || null,
+      actions
+    });
+    input.select();
+    return handle;
+  }
+
   // src/utils/furiganaOverlay.ts
   var KUROMOJI_VERSION = "0.1.2";
   var KUROMOJI_SCRIPT_URL = `https://cdn.jsdelivr.net/npm/kuromoji@${KUROMOJI_VERSION}/build/kuromoji.js`;
   var KUROMOJI_DICT_URL = `https://cdn.jsdelivr.net/npm/kuromoji@${KUROMOJI_VERSION}/dict`;
   var LOAD_RETRY_DELAY_MS = 6e4;
-  var STYLE_ID2 = "slt-furigana-styles";
+  var STYLE_ID3 = "slt-furigana-styles";
   var READING_CLASS = "slt-furigana";
   var LINE_CLASS = "slt-furigana-line";
   var TEXT_LINE_CLASS = "slt-furigana-text-line";
+  var EDITING_CLASS = "slt-furigana-editing";
+  var EDIT_TOAST_KEY = "slt-furigana-edit-mode";
+  var EDIT_EVENTS = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick"];
+  var MAX_CANDIDATES = 12;
   var LINE_SELECTOR = "#SpicyLyricsPage .line:not(.musical-line)";
   var HOST_SELECTOR = ".letter, .word, .line";
   var MIN_KANA_FOR_JAPANESE = 3;
@@ -7472,11 +7862,11 @@ body.slt-update-waiting #TranslateToggle::after {
   var FURIGANA_STYLES = `
 #SpicyLyricsPage .line.${LINE_CLASS} {
     padding-top: 0.5em !important;
-    row-gap: 0.45em;
+    row-gap: 0.65em !important;
 }
 #SpicyLyricsPage .line.${LINE_CLASS}.${TEXT_LINE_CLASS} {
-    padding-top: 0.25em !important;
-    --lyrics-line-height: 1.75 !important;
+    padding-top: 0.2em !important;
+    --lyrics-line-height: 1.85 !important;
 }
 #SpicyLyricsPage .line .${READING_CLASS} {
     position: absolute;
@@ -7502,6 +7892,33 @@ body.slt-update-waiting #TranslateToggle::after {
     background-clip: text;
     -webkit-background-clip: text;
 }
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS} {
+    pointer-events: auto;
+    cursor: pointer;
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}::after {
+    content: '';
+    position: absolute;
+    left: -0.06em;
+    right: -0.06em;
+    top: -0.62em;
+    height: 1.72em;
+    border-radius: 0.18em;
+    outline: 0.04em dashed rgba(255, 255, 255, 0.4);
+    transition: background 0.15s ease, outline-color 0.15s ease;
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}:hover::after {
+    background: rgba(255, 255, 255, 0.1);
+    outline-color: rgba(255, 255, 255, 0.85);
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-source="line"]::after,
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-source="song"]::after {
+    outline-style: solid;
+    outline-color: rgba(255, 196, 120, 0.75);
+}
+.${EDITING_CLASS} #SpicyLyricsPage .line .${READING_CLASS}[data-slt-reading=""]::before {
+    content: '?';
+}
 #SpicyLyricsPage .line.Active .${READING_CLASS}::before,
 #SpicyLyricsPage .line.static .${READING_CLASS}::before {
     background-image: linear-gradient(
@@ -7518,7 +7935,9 @@ body.slt-update-waiting #TranslateToggle::after {
   var lastLoadFailureAt = -Infinity;
   var passTimer = null;
   var passRunning = false;
-  var segmentCache = /* @__PURE__ */ new Map();
+  var analysisCache = /* @__PURE__ */ new Map();
+  var editing = false;
+  var editListeners = /* @__PURE__ */ new Map();
   var lineSignatures = /* @__PURE__ */ new WeakMap();
   var observers = /* @__PURE__ */ new Map();
   var resizeObserver = null;
@@ -7591,10 +8010,10 @@ body.slt-update-waiting #TranslateToggle::after {
     return docs;
   }
   function ensureStyles(doc) {
-    if (doc.getElementById(STYLE_ID2))
+    if (doc.getElementById(STYLE_ID3))
       return;
     const style = doc.createElement("style");
-    style.id = STYLE_ID2;
+    style.id = STYLE_ID3;
     style.textContent = FURIGANA_STYLES;
     (doc.head || doc.documentElement).appendChild(style);
   }
@@ -7626,23 +8045,70 @@ body.slt-update-waiting #TranslateToggle::after {
     }
     return null;
   }
-  function segmentsFor(text3) {
-    const cached = segmentCache.get(text3);
+  function analyze(text3) {
+    const cached = analysisCache.get(text3);
     if (cached)
       return cached;
-    let segments = [];
+    let analysis = { tokens: [], segments: [] };
     try {
-      segments = tokenizer ? buildFuriganaSegments(tokenizer.tokenize(text3)) : [];
+      const tokens = tokenizer ? tokenizer.tokenize(text3) : [];
+      analysis = { tokens, segments: buildFuriganaSegments(tokens) };
     } catch (error2) {
       warn("furigana: tokenize failed", error2);
     }
-    if (segmentCache.size >= MAX_CACHED_LINES) {
-      const oldest = segmentCache.keys().next().value;
+    if (analysisCache.size >= MAX_CACHED_LINES) {
+      const oldest = analysisCache.keys().next().value;
       if (oldest !== void 0)
-        segmentCache.delete(oldest);
+        analysisCache.delete(oldest);
     }
-    segmentCache.set(text3, segments);
-    return segments;
+    analysisCache.set(text3, analysis);
+    return analysis;
+  }
+  function segmentsFor(text3) {
+    const corrections = getFuriganaCorrections(getCurrentTrackUri(), text3);
+    return resolveFuriganaSegments(text3, analyze(text3).segments, corrections, editing);
+  }
+  function lookupDictionary(word) {
+    const trie = tokenizer?.viterbi_builder?.trie;
+    const dictionary = tokenizer?.token_info_dictionary;
+    if (!word || !trie?.commonPrefixSearch || !dictionary?.target_map || !dictionary.getFeatures)
+      return [];
+    const entries = [];
+    try {
+      for (const hit of trie.commonPrefixSearch(word)) {
+        if (hit.k !== word)
+          continue;
+        for (const id of dictionary.target_map[hit.v] || []) {
+          const entry = parseDictionaryFeatures(String(dictionary.getFeatures(id)));
+          if (entry)
+            entries.push(entry);
+        }
+      }
+    } catch (error2) {
+      warn("furigana: dictionary lookup failed", error2);
+      return [];
+    }
+    return entries;
+  }
+  function readingCandidates(text3, segment) {
+    const spanText = text3.slice(segment.start, segment.end);
+    let tokenSurface = spanText;
+    let tokenOffset = 0;
+    let cursor = 0;
+    for (const token of analyze(text3).tokens) {
+      const surface = token.surface_form || "";
+      const start = typeof token.word_position === "number" && token.word_position > 0 ? token.word_position - 1 : cursor;
+      cursor = start + surface.length;
+      if (start <= segment.start && segment.end <= start + surface.length) {
+        tokenSurface = surface;
+        tokenOffset = segment.start - start;
+        break;
+      }
+    }
+    const ranked = rankReadingCandidates(segment.auto, spanText, tokenSurface, tokenOffset, lookupDictionary);
+    if (segment.reading && !ranked.includes(segment.reading))
+      ranked.unshift(segment.reading);
+    return ranked.slice(0, MAX_CANDIDATES);
   }
   function isJapaneseSong(lineTexts) {
     const override = getSourceLanguageOverride(getCurrentTrackUri());
@@ -7663,7 +8129,27 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   function lineSignature(line, text3) {
     const fontSize = line.ownerDocument.defaultView?.getComputedStyle(line).fontSize || "";
-    return `${text3}\0${line.offsetWidth}\0${fontSize}`;
+    return `${text3}\0${line.offsetWidth}\0${fontSize}\0${furiganaCorrectionsRevision()}\0${editing ? "edit" : ""}`;
+  }
+  function widestRow(rects) {
+    const rows = [];
+    for (const rect of rects) {
+      const row = rows.find((items) => Math.abs(items[0].top + items[0].height / 2 - (rect.top + rect.height / 2)) < rect.height / 2);
+      if (row)
+        row.push(rect);
+      else
+        rows.push([rect]);
+    }
+    let best = null;
+    for (const row of rows) {
+      const left = Math.min(...row.map((r) => r.left));
+      const right = Math.max(...row.map((r) => r.right));
+      const top = Math.min(...row.map((r) => r.top));
+      const bottom = Math.max(...row.map((r) => r.bottom));
+      if (!best || right - left > best.width)
+        best = new DOMRect(left, top, right - left, bottom - top);
+    }
+    return best;
   }
   function planReadings(line, lineText, segments) {
     const doc = line.ownerDocument;
@@ -7680,18 +8166,20 @@ body.slt-update-waiting #TranslateToggle::after {
       const range = doc.createRange();
       range.setStart(start.node, start.offset);
       range.setEnd(end.node, Math.min(end.offset + 1, end.node.length));
-      const rect = Array.from(range.getClientRects()).find((r) => r.width > 0 && r.height > 0);
+      const rect = widestRow(Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0));
       if (!rect)
         return null;
       const hostRect = host.getBoundingClientRect();
       const scale = host.offsetWidth > 0 ? hostRect.width / host.offsetWidth : 1;
       const fontSize = parseFloat(view?.getComputedStyle(host).fontSize || "") || 16;
       const unit = (scale || 1) * fontSize;
+      const glyphTop = rect.top + (rect.height - unit) / 2;
       planned.push({
         host,
+        segment,
         reading: segment.reading,
         left: (rect.left - hostRect.left) / unit,
-        top: (rect.top - hostRect.top) / unit,
+        top: (glyphTop - hostRect.top) / unit,
         width: rect.width / unit
       });
     }
@@ -7704,6 +8192,9 @@ body.slt-update-waiting #TranslateToggle::after {
       span.className = READING_CLASS;
       span.setAttribute("aria-hidden", "true");
       span.dataset.sltReading = item.reading;
+      span.dataset.sltStart = String(item.segment.start);
+      span.dataset.sltEnd = String(item.segment.end);
+      span.dataset.sltSource = item.segment.source;
       span.style.left = `${item.left.toFixed(3)}em`;
       span.style.top = `${item.top.toFixed(3)}em`;
       span.style.width = `${item.width.toFixed(3)}em`;
@@ -7761,6 +8252,7 @@ body.slt-update-waiting #TranslateToggle::after {
     try {
       const docs = getDocuments();
       docs.forEach(observeDocument);
+      docs.forEach(syncEditing);
       if (!tokenizer && docs.map(collectLines).some(needsReadings))
         await loadTokenizer();
       if (!enabled)
@@ -7813,11 +8305,107 @@ body.slt-update-waiting #TranslateToggle::after {
     resizeObserver.observe(target);
     resizeTargets.add(target);
   }
+  function readingSpanFrom(event) {
+    const target = event.target;
+    const span = target?.closest?.(`.${READING_CLASS}`);
+    return span && span.closest(LINE_SELECTOR) ? span : null;
+  }
+  function spanOrigin(span) {
+    if (span.ownerDocument !== document)
+      return null;
+    const rect = span.getBoundingClientRect();
+    const fontSize = parseFloat(getComputedStyle(span).fontSize) || 16;
+    const scale = span.offsetWidth > 0 ? rect.width / span.offsetWidth : 1;
+    const height = fontSize * (scale || 1);
+    return new DOMRect(rect.left, rect.top - height * 0.6, rect.width, height * 1.6);
+  }
+  function openEditorFor(span) {
+    const line = span.closest(LINE_SELECTOR);
+    const trackUri = getCurrentTrackUri();
+    const start = Number(span.dataset.sltStart);
+    const end = Number(span.dataset.sltEnd);
+    if (!line || !trackUri || !Number.isFinite(start) || !Number.isFinite(end))
+      return;
+    const text3 = readLineText(line).text;
+    const segment = segmentsFor(text3).find((item) => item.start === start && item.end === end);
+    if (!segment)
+      return;
+    openFuriganaEditor({
+      trackUri,
+      lineText: text3,
+      start,
+      end,
+      reading: segment.reading,
+      autoReading: segment.auto,
+      source: segment.source,
+      candidates: readingCandidates(text3, segment),
+      origin: spanOrigin(span),
+      onChange: () => scheduleFuriganaPass(0)
+    });
+  }
+  function onEditEvent(event) {
+    if (!editing)
+      return;
+    const span = readingSpanFrom(event);
+    if (!span)
+      return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.type === "click")
+      openEditorFor(span);
+  }
+  function syncEditing(doc) {
+    doc.body?.classList.toggle(EDITING_CLASS, editing);
+    const view = doc.defaultView;
+    if (!view)
+      return;
+    const bound = editListeners.get(view);
+    if (editing && !bound) {
+      EDIT_EVENTS.forEach((type) => view.addEventListener(type, onEditEvent, true));
+      editListeners.set(view, onEditEvent);
+    } else if (!editing && bound) {
+      EDIT_EVENTS.forEach((type) => view.removeEventListener(type, bound, true));
+      editListeners.delete(view);
+    }
+  }
+  function setFuriganaEditing(on) {
+    const next = on && enabled;
+    if (next === editing)
+      return;
+    editing = next;
+    getDocuments().forEach(syncEditing);
+    editListeners.forEach((handler, view) => {
+      if (editing)
+        return;
+      EDIT_EVENTS.forEach((type) => view.removeEventListener(type, handler, true));
+      editListeners.delete(view);
+    });
+    if (editing) {
+      notify({
+        kind: "info",
+        key: EDIT_TOAST_KEY,
+        title: "Fixing furigana",
+        description: "Click a reading to change it. Kanji without a reading show a ?. Clicks on readings will not seek while this is on.",
+        duration: Infinity,
+        inbox: false,
+        force: true,
+        actions: [{ label: "Done", primary: true, onClick: () => setFuriganaEditing(false) }],
+        onDismiss: () => setFuriganaEditing(false)
+      });
+    } else {
+      dismissNotification(EDIT_TOAST_KEY);
+    }
+    if (enabled)
+      scheduleFuriganaPass(0);
+  }
+  function isFuriganaEditing() {
+    return editing;
+  }
   function removeAllReadings() {
     for (const doc of getDocuments()) {
       doc.querySelectorAll(`.${READING_CLASS}`).forEach((el2) => el2.remove());
       doc.querySelectorAll(`.${LINE_CLASS}`).forEach((el2) => el2.classList.remove(LINE_CLASS, TEXT_LINE_CLASS));
-      doc.getElementById(STYLE_ID2)?.remove();
+      doc.getElementById(STYLE_ID3)?.remove();
     }
   }
   function setFuriganaEnabled(on) {
@@ -7826,6 +8414,8 @@ body.slt-update-waiting #TranslateToggle::after {
         scheduleFuriganaPass(0);
       return;
     }
+    if (!on)
+      setFuriganaEditing(false);
     enabled = on;
     if (on) {
       loadFailureNotified = false;
@@ -8073,6 +8663,39 @@ body.slt-update-waiting #TranslateToggle::after {
     const parts = trackUri.split(":");
     return parts[parts.length - 1] || null;
   }
+  function joinBackgroundSyllables(syllables) {
+    const kept = syllables.filter(
+      (syllable) => hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
+    );
+    if (kept.length === 0)
+      return null;
+    let text3 = "";
+    let romanized = "";
+    let anyRomanized = false;
+    kept.forEach((syllable, i) => {
+      const roman = syllable.TransliteratedText ?? syllable.RomanizedText;
+      const display = pickLyricDisplayText(syllable.Text, roman);
+      if (roman && roman !== display)
+        anyRomanized = true;
+      if (i > 0 && !kept[i - 1].IsPartOfWord) {
+        text3 += " ";
+        romanized += " ";
+      }
+      text3 += display;
+      romanized += roman ?? display;
+    });
+    const clean = cleanLyricText(text3);
+    if (!clean)
+      return null;
+    return {
+      text: clean,
+      romanizedText: anyRomanized ? romanized.replace(/\s+/g, " ").trim() : void 0
+    };
+  }
+  function extractBackgroundVocals(group) {
+    const vocals = (group.Background || []).map((background) => joinBackgroundSyllables(background.Syllables || [])).filter((vocal) => vocal !== null);
+    return vocals.length > 0 ? vocals : void 0;
+  }
   function extractContentLinesData(lyrics) {
     const lineData = [];
     if (!lyrics.Content)
@@ -8130,6 +8753,7 @@ body.slt-update-waiting #TranslateToggle::after {
           isInstrumental: false,
           romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, " ").trim() : void 0,
           translatedText: group.Lead.TranslatedText ?? group.TranslatedText,
+          backgroundVocals: extractBackgroundVocals(group),
           words: wordTimings
         });
         continue;
@@ -8305,6 +8929,9 @@ body.slt-update-waiting #TranslateToggle::after {
   var originalByContent = /* @__PURE__ */ new Map();
   var qualityByContent = /* @__PURE__ */ new Map();
   var timingByContent = /* @__PURE__ */ new Map();
+  var backgroundTranslations = /* @__PURE__ */ new Map();
+  var BACKGROUND_LINE_SELECTOR = ".line.bg-line";
+  var BACKGROUND_TRANSLATION_CLASS = "slt-bg-translation";
   function normalizeCompare(text3) {
     return normalizeLyricMatchKey(text3);
   }
@@ -9842,9 +10469,62 @@ body.slt-update-waiting #TranslateToggle::after {
     }
     markRenderComplete(doc);
   }
+  function backgroundLinesIn(doc) {
+    const container = findLyricsContainer(doc);
+    const scope = container || doc;
+    return Array.from(scope.querySelectorAll(BACKGROUND_LINE_SELECTOR));
+  }
+  function removeBackgroundTranslations(doc) {
+    doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach((el2) => el2.remove());
+  }
+  function backgroundTranslationKey(text3) {
+    return normalizeLyricMatchKey(text3);
+  }
+  function applyBackgroundTranslations(doc) {
+    if (!isOverlayEnabled || currentConfig.mode === "none" || backgroundTranslations.size === 0) {
+      removeBackgroundTranslations(doc);
+      return;
+    }
+    const claimed = /* @__PURE__ */ new Set();
+    for (const line of backgroundLinesIn(doc)) {
+      const originalText = extractLineText(line);
+      const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
+      if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode)
+        continue;
+      const next = line.nextElementSibling;
+      const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
+      if (existing && existing.textContent === translation) {
+        claimed.add(existing);
+        continue;
+      }
+      existing?.remove();
+      const el2 = doc.createElement("div");
+      el2.className = BACKGROUND_TRANSLATION_CLASS;
+      el2.setAttribute("aria-hidden", "true");
+      if (line.classList.contains("OppositeAligned"))
+        el2.classList.add("OppositeAligned");
+      if (line.classList.contains("rtl"))
+        el2.classList.add("rtl");
+      el2.textContent = translation;
+      line.parentNode.insertBefore(el2, line.nextSibling);
+      claimed.add(el2);
+    }
+    doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach((el2) => {
+      if (!claimed.has(el2))
+        el2.remove();
+    });
+  }
+  function setBackgroundTranslationData(data) {
+    backgroundTranslations = new Map(data);
+    applyBackgroundTranslations(document);
+    const pipWindow = getPIPWindow();
+    if (pipWindow)
+      applyBackgroundTranslations(pipWindow.document);
+  }
   function renderTranslations(doc) {
     if (!isOverlayEnabled)
       return;
+    applyBackgroundTranslations(doc);
     if (currentConfig.mode === "none") {
       applyNoneMode(doc);
       return;
@@ -10116,6 +10796,7 @@ body.slt-update-waiting #TranslateToggle::after {
       if (interleavedOverlay)
         interleavedOverlay.remove();
       restoreOriginalLines(doc);
+      removeBackgroundTranslations(doc);
       doc.querySelectorAll(".slt-learning-row").forEach((el2) => el2.remove());
     };
     cleanup(document);
@@ -11016,6 +11697,46 @@ body.slt-overlay-active .LyricsContent {}
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
+.slt-bg-translation {
+    display: block;
+    font-size: calc(0.56em * var(--slt-overlay-font-scale, 1));
+    font-weight: 700;
+    padding: 0 0 10px 0;
+    margin-top: -0.2em;
+    line-height: 1.2;
+    pointer-events: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    box-sizing: border-box;
+    padding-inline-end: 0.25em;
+    color: rgba(255, 255, 255, 0.7);
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
+    filter: blur(var(--BlurAmount, 0px));
+    transition: opacity 0.3s cubic-bezier(0.37, 0, 0.63, 1), filter 0.3s cubic-bezier(0.37, 0, 0.63, 1);
+}
+
+.slt-bg-translation.OppositeAligned,
+.slt-bg-translation.rtl {
+    text-align: end;
+}
+
+.line.bg-line.Active + .slt-bg-translation {
+    filter: none !important;
+    opacity: var(--Vocal-Active-opacity, 1) !important;
+}
+
+.line.bg-line.Sung + .slt-bg-translation {
+    opacity: var(--Vocal-Sung-opacity, 0.497);
+}
+
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
+#SpicyLyricsPage.CardMode .slt-bg-translation {
+    font-size: calc(0.49em * var(--slt-overlay-font-scale, 1));
+    padding-bottom: 4px;
+}
+
 .slt-sync-translation.slt-interleaved-translation {
 
     --gradient-degrees: 180deg;
@@ -11519,7 +12240,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"41687a9c8ac50db8f889b2e4ea5abaf68bdb31a4d6192e49e5317d71b6f0f3f4".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "41687a9c8ac50db8f889b2e4ea5abaf68bdb31a4d6192e49e5317d71b6f0f3f4" : "";
+    return !"85b14b02957a405cc252fa8e1469fc78d10fc006a88449b80754e207031f3ef3".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "85b14b02957a405cc252fa8e1469fc78d10fc006a88449b80754e207031f3ef3" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -12949,6 +13670,17 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       effects: ["furiganaDisplay"]
     },
     {
+      id: "translate-background-vocals",
+      section: "Translation",
+      keywords: "background vocals backing adlib ad-lib echo harmony choir bg secondary voice translate",
+      label: "Also Translate Background Vocals",
+      type: "toggle",
+      storageKey: "translate-background-vocals",
+      defaultValue: true,
+      description: "Translate the smaller background-vocal lines too, and show each translation under its line. Only lyrics with separate background vocals have them.",
+      effects: ["backgroundVocals"]
+    },
+    {
       id: "source-language",
       section: "Translation",
       keywords: "source original input from language detection detect override force wrong misdetected auto",
@@ -13529,6 +14261,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       case "show-furigana":
         state.showFurigana = Boolean(value);
         break;
+      case "translate-background-vocals":
+        state.translateBackgroundVocals = Boolean(value);
+        break;
       case "skip-languages":
         state.skipLanguages = parseLanguageList(String(value));
         break;
@@ -13657,9 +14392,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
 
   // src/utils/userTranslationEditor.ts
-  var STYLE_ID3 = "slt-user-translation-styles";
+  var STYLE_ID4 = "slt-user-translation-styles";
   var SOURCE_FETCH_TIMEOUT_MS = 4e3;
-  var EDITOR_STYLES = `
+  var EDITOR_STYLES2 = `
 .slt-ut { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .slt-ut-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .slt-ut-count { font-size: 13px; font-weight: 650; color: var(--slt-ui-ink); margin-right: auto; }
@@ -13704,12 +14439,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     .slt-ut-edit { grid-column: 2; }
 }
 `;
-  function ensureEditorStyles() {
-    if (document.getElementById(STYLE_ID3))
+  function ensureEditorStyles2() {
+    if (document.getElementById(STYLE_ID4))
       return;
     const style = document.createElement("style");
-    style.id = STYLE_ID3;
-    style.textContent = EDITOR_STYLES;
+    style.id = STYLE_ID4;
+    style.textContent = EDITOR_STYLES2;
     document.head.appendChild(style);
   }
   var CHECK_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -13779,7 +14514,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       notify({ kind: "warning", key: "slt-user-translation", title: "Play a song first", description: "Your own translation is saved for the song that is playing." });
       return;
     }
-    ensureEditorStyles();
+    ensureEditorStyles2();
     const sourceLines = await loadSourceLines(trackUri, targetLang);
     if (sourceLines.length === 0) {
       notify({ kind: "warning", key: "slt-user-translation", title: "No lyrics to translate", description: "Open the song in Spicy Lyrics so its lines can be loaded, then try again." });
@@ -14052,7 +14787,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
 
   // src/utils/quickMenu.ts
   var QUICK_MENU_ID = "slt-quick-menu";
-  var QUICK_FIELD_IDS = ["overlay-mode", "learning-mode", "show-romanization", "show-furigana"];
+  var QUICK_FIELD_IDS = ["overlay-mode", "learning-mode", "show-romanization", "translate-background-vocals", "show-furigana"];
   var outsideClickHandler = null;
   var keydownHandler = null;
   function escapeHtml2(text3) {
@@ -14247,6 +14982,24 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     row.appendChild(select);
     return row;
   }
+  function buildFuriganaEditRow() {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "slt-qm-item";
+    item.setAttribute("role", "menuitemcheckbox");
+    item.setAttribute("aria-checked", String(isFuriganaEditing()));
+    item.dataset.sltQmFuriganaEdit = "true";
+    item.style.display = state.showFurigana ? "" : "none";
+    item.innerHTML = `
+        <span class="slt-qm-check">\u2713</span>
+        <span class="slt-qm-label">Fix furigana readings</span>
+    `;
+    item.addEventListener("click", () => {
+      setFuriganaEditing(!isFuriganaEditing());
+      closeQuickMenu();
+    });
+    return item;
+  }
   function buildTrackSourceLanguageRow(trackUri) {
     const current = getTrackSourceLanguage(trackUri) || "auto";
     const detected = !getSourceLanguageOverride(trackUri) && state.detectedLanguage && state.detectedLanguage !== "unknown" ? ` (${getLanguageName(state.detectedLanguage)})` : "";
@@ -14299,7 +15052,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         sep.className = "slt-qm-sep";
         menu.appendChild(sep);
       };
-      const refresh = () => syncQuickMenuState(menu);
+      const refresh = () => {
+        syncQuickMenuState(menu);
+        const editRow = menu.querySelector("[data-slt-qm-furigana-edit]");
+        if (editRow) {
+          editRow.style.display = state.showFurigana ? "" : "none";
+          editRow.setAttribute("aria-checked", String(isFuriganaEditing()));
+        }
+      };
       QUICK_FIELD_IDS.forEach((id, index) => {
         const field = getSettingField(id);
         if (!field)
@@ -14308,6 +15068,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           addSeparator();
         if (field.type === "toggle") {
           menu.appendChild(buildToggleRow(field, refresh));
+          if (field.id === "show-furigana")
+            menu.appendChild(buildFuriganaEditRow());
         } else if (field.id === "overlay-mode") {
           menu.appendChild(buildModeRows(field, refresh));
         } else {
@@ -14379,6 +15141,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var contentQuality = /* @__PURE__ */ new Map();
   var coveredKeys = /* @__PURE__ */ new Set();
   var fillGapsInFlight = false;
+  var backgroundTranslation = /* @__PURE__ */ new Map();
+  var backgroundAttempted = /* @__PURE__ */ new Set();
+  var backgroundTrackUri = null;
+  var backgroundInFlight = false;
   var gapFillSuppressed = false;
   var lastSkippedTranslation = null;
   function normalizeMatchKey(text3) {
@@ -15672,7 +16438,120 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     updateOverlayContent(translationMapByIndex);
     debug(`applyTranslations: matched ${translationMapByIndex.size}/${lines.length} DOM lines`);
+    void translateBackgroundVocals();
     return translationMapByIndex.size;
+  }
+  function getBackgroundVocalLines() {
+    const docs = [document];
+    const pip = getPIPWindow2();
+    if (pip)
+      docs.push(pip.document);
+    for (const doc of docs) {
+      const lines = doc.querySelectorAll("#SpicyLyricsPage .line.bg-line, .LyricsContent .line.bg-line");
+      if (lines.length > 0)
+        return Array.from(lines);
+    }
+    return [];
+  }
+  function resetBackgroundTranslations() {
+    backgroundTranslation = /* @__PURE__ */ new Map();
+    backgroundAttempted = /* @__PURE__ */ new Set();
+    backgroundTrackUri = null;
+    setBackgroundTranslationData(backgroundTranslation);
+  }
+  async function loadBackgroundOriginals() {
+    const originals = /* @__PURE__ */ new Map();
+    try {
+      const lyrics = await fetchLyricsFromAPI();
+      lyrics?.lineData.forEach((line) => line.backgroundVocals?.forEach((vocal) => {
+        const key = backgroundTranslationKey(vocal.text);
+        if (key && !originals.has(key))
+          originals.set(key, vocal.text);
+        const romanKey = backgroundTranslationKey(vocal.romanizedText);
+        if (romanKey && !originals.has(romanKey))
+          originals.set(romanKey, vocal.text);
+      }));
+    } catch (err) {
+      warn("Failed to read background vocals from the lyrics:", err);
+    }
+    return originals;
+  }
+  async function translateBackgroundVocals() {
+    if (!state.isEnabled || !state.translateBackgroundVocals || state.isTranslating || backgroundInFlight)
+      return;
+    const trackUri = getCurrentTrackUri();
+    if (trackUri !== backgroundTrackUri) {
+      resetBackgroundTranslations();
+      backgroundTrackUri = trackUri;
+    }
+    const pending = /* @__PURE__ */ new Map();
+    for (const line of getBackgroundVocalLines()) {
+      const text3 = extractLineText2(line).trim();
+      const key = backgroundTranslationKey(text3);
+      if (!key || backgroundAttempted.has(key) || pending.has(key))
+        continue;
+      if (/^[♪♫•\-–—\s]+$/.test(text3))
+        continue;
+      pending.set(key, text3);
+    }
+    if (pending.size === 0)
+      return;
+    backgroundInFlight = true;
+    try {
+      const romanized = isRomanizationActive();
+      const originals = await loadBackgroundOriginals();
+      const keys = [];
+      const sources = [];
+      pending.forEach((domText, key) => {
+        const source = originals.get(key) || (romanized ? "" : domText);
+        if (!source && originals.size === 0)
+          return;
+        backgroundAttempted.add(key);
+        if (!source)
+          return;
+        keys.push(key);
+        sources.push(source);
+      });
+      if (sources.length === 0)
+        return;
+      const fileLines = trackUri && trackUri === fileTranslationUri ? fileTranslationLines : /* @__PURE__ */ new Map();
+      const results = applyUserTranslations(
+        applyUserTranslations(
+          await translateLyrics(sources, state.targetLanguage, trackUri || void 0, void 0, true),
+          sources,
+          fileLines,
+          "file"
+        ),
+        sources,
+        getUserTranslations(trackUri, state.targetLanguage)
+      );
+      if (trackUri !== getCurrentTrackUri() || trackUri !== backgroundTrackUri || !state.translateBackgroundVocals)
+        return;
+      let added = false;
+      results.forEach((result, i) => {
+        const translated = (result.translatedText || "").trim();
+        if (!translated || isEchoedTranslation(translated, sources[i]))
+          return;
+        backgroundTranslation.set(keys[i], translated);
+        added = true;
+      });
+      if (added)
+        setBackgroundTranslationData(backgroundTranslation);
+      debug(`translateBackgroundVocals: ${backgroundTranslation.size} background lines translated`);
+    } catch (err) {
+      warn("Failed to translate background vocals:", err);
+      pending.forEach((_text, key) => backgroundAttempted.delete(key));
+    } finally {
+      backgroundInFlight = false;
+    }
+  }
+  function setBackgroundVocalTranslation(on) {
+    state.translateBackgroundVocals = on;
+    if (!on) {
+      resetBackgroundTranslations();
+      return;
+    }
+    void translateBackgroundVocals();
   }
   function clearReapplyTimers() {
     for (const timer of reapplyTimers) {
@@ -15814,6 +16693,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     contentTranslation = /* @__PURE__ */ new Map();
     contentQuality = /* @__PURE__ */ new Map();
     coveredKeys = /* @__PURE__ */ new Set();
+    resetBackgroundTranslations();
     const docs = [document];
     const pip = getPIPWindow2();
     if (pip)
@@ -18772,6 +19652,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     if (effects.includes("furiganaDisplay")) {
       setFuriganaEnabled(state.showFurigana);
+    }
+    if (effects.includes("backgroundVocals")) {
+      setBackgroundVocalTranslation(state.translateBackgroundVocals);
     }
     if (effects.includes("learningModeClass")) {
       setOverlayLearningMode(isLearningActive());

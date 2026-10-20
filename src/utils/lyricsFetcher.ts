@@ -62,6 +62,11 @@ export interface WordTimingData {
     isPartOfWord: boolean;
 }
 
+export interface BackgroundVocalText {
+    text: string;
+    romanizedText?: string;
+}
+
 export interface LyricLineData {
     text: string;
     startTime: number;
@@ -69,6 +74,7 @@ export interface LyricLineData {
     isInstrumental: boolean;
     romanizedText?: string;
     translatedText?: string;
+    backgroundVocals?: BackgroundVocalText[];
 
     words?: WordTimingData[];
 }
@@ -344,6 +350,40 @@ function getTrackIdFromUri(trackUri: string): string | null {
     return parts[parts.length - 1] || null;
 }
 
+export function joinBackgroundSyllables(syllables: SyllableData[]): BackgroundVocalText | null {
+    const kept = syllables.filter(syllable =>
+        hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
+    );
+    if (kept.length === 0) return null;
+    let text = '';
+    let romanized = '';
+    let anyRomanized = false;
+    kept.forEach((syllable, i) => {
+        const roman = syllable.TransliteratedText ?? syllable.RomanizedText;
+        const display = pickLyricDisplayText(syllable.Text, roman);
+        if (roman && roman !== display) anyRomanized = true;
+        if (i > 0 && !kept[i - 1].IsPartOfWord) {
+            text += ' ';
+            romanized += ' ';
+        }
+        text += display;
+        romanized += roman ?? display;
+    });
+    const clean = cleanLyricText(text);
+    if (!clean) return null;
+    return {
+        text: clean,
+        romanizedText: anyRomanized ? romanized.replace(/\s+/g, ' ').trim() : undefined
+    };
+}
+
+function extractBackgroundVocals(group: VocalGroup): BackgroundVocalText[] | undefined {
+    const vocals = (group.Background || [])
+        .map(background => joinBackgroundSyllables(background.Syllables || []))
+        .filter((vocal): vocal is BackgroundVocalText => vocal !== null);
+    return vocals.length > 0 ? vocals : undefined;
+}
+
 function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
     const lineData: LyricLineData[] = [];
     if (!lyrics.Content) return lineData;
@@ -400,6 +440,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 isInstrumental: false,
                 romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, ' ').trim() : undefined,
                 translatedText: group.Lead.TranslatedText ?? group.TranslatedText,
+                backgroundVocals: extractBackgroundVocals(group),
                 words: wordTimings,
             });
             continue;

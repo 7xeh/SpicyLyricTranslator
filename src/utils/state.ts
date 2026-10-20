@@ -88,6 +88,7 @@ export interface ExtensionState {
     hideConnectionIndicator: boolean;
     showRomanization: boolean;
     showFurigana: boolean;
+    translateBackgroundVocals: boolean;
     learningMode: boolean;
     learningVisible: boolean;
     learningBreakdownMode: LearningBreakdownMode;
@@ -147,6 +148,7 @@ export const state: ExtensionState = {
     hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
     showRomanization: storage.get('show-romanization') === 'true',
     showFurigana: storage.get('show-furigana') === 'true',
+    translateBackgroundVocals: storage.get('translate-background-vocals') !== 'false',
     learningMode: storage.get('learning-mode') === 'true',
     learningVisible: storage.get('learning-visible') !== 'false',
     learningBreakdownMode: storage.get('learning-breakdown-mode') === 'on-demand' ? 'on-demand' : 'auto',

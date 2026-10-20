@@ -547,6 +547,46 @@ body.slt-overlay-active .LyricsContent {}
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
+.slt-bg-translation {
+    display: block;
+    font-size: calc(0.56em * var(--slt-overlay-font-scale, 1));
+    font-weight: 700;
+    padding: 0 0 10px 0;
+    margin-top: -0.2em;
+    line-height: 1.2;
+    pointer-events: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    box-sizing: border-box;
+    padding-inline-end: 0.25em;
+    color: rgba(255, 255, 255, 0.7);
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
+    filter: blur(var(--BlurAmount, 0px));
+    transition: opacity 0.3s cubic-bezier(0.37, 0, 0.63, 1), filter 0.3s cubic-bezier(0.37, 0, 0.63, 1);
+}
+
+.slt-bg-translation.OppositeAligned,
+.slt-bg-translation.rtl {
+    text-align: end;
+}
+
+.line.bg-line.Active + .slt-bg-translation {
+    filter: none !important;
+    opacity: var(--Vocal-Active-opacity, 1) !important;
+}
+
+.line.bg-line.Sung + .slt-bg-translation {
+    opacity: var(--Vocal-Sung-opacity, 0.497);
+}
+
+body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
+#SpicyLyricsPage.CardMode .slt-bg-translation {
+    font-size: calc(0.49em * var(--slt-overlay-font-scale, 1));
+    padding-bottom: 4px;
+}
+
 .slt-sync-translation.slt-interleaved-translation {
 
     --gradient-degrees: 180deg;

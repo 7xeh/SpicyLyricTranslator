@@ -32,6 +32,8 @@ Each translated line can show a quality indicator, so you can tell at a glance w
 - **Smart language detection** skips translation when lyrics are already in your target language
 - **Translations from the lyrics file** — when a TTML file already includes a translation, SLT shows it (marked *Lyrics file*) instead of machine-translating
 - **Furigana** — hiragana readings above the kanji of Japanese lyrics, synced with Spicy Lyrics' word highlighting
+- **Background vocals** — the smaller background-vocal lines get their own translation underneath, so ad-libs and echoes that carry the meaning aren't left out
+- **Fix furigana readings** — click any reading to swap it for another dictionary reading or type the one the singer uses, for one line or the whole song
 - **Per-language targets** send each song language somewhere different — Simplified Chinese to Traditional, English left alone, everything else to your Target Language
 - **Regional variants** — e.g. Valencian for Catalan, on LLM providers
 
