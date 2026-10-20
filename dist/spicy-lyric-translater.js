@@ -12172,7 +12172,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.5" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.6" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -12240,7 +12240,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"85b14b02957a405cc252fa8e1469fc78d10fc006a88449b80754e207031f3ef3".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "85b14b02957a405cc252fa8e1469fc78d10fc006a88449b80754e207031f3ef3" : "";
+    return !"5306c7824234354d80aea5f4c069f2dd162058d2c15c91a4c487b1e2a9c0ae60".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "5306c7824234354d80aea5f4c069f2dd162058d2c15c91a4c487b1e2a9c0ae60" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
