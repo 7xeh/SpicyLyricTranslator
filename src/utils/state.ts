@@ -36,6 +36,15 @@ function resolveStoredNotificationLevel(): NotificationLevel {
     return storage.get('show-notifications') === 'false' ? 'off' : 'all';
 }
 
+function resolveStoredConnectionIndicator(): boolean {
+    const legacy = storage.get('hide-connection-indicator');
+    if (legacy !== null) {
+        if (storage.get('show-connection-indicator') === null) storage.set('show-connection-indicator', String(legacy !== 'true'));
+        storage.remove('hide-connection-indicator');
+    }
+    return storage.get('show-connection-indicator') !== 'false';
+}
+
 export interface TranslationQualityMeta {
     source: 'cache' | 'api' | 'user' | 'file';
     api?: string;
@@ -85,7 +94,7 @@ export interface ExtensionState {
     detectedLanguage: string | null;
     syncWordHighlight: boolean;
     showQualityIndicator: boolean;
-    hideConnectionIndicator: boolean;
+    showConnectionIndicator: boolean;
     showRomanization: boolean;
     showFurigana: boolean;
     translateBackgroundVocals: boolean;
@@ -145,7 +154,7 @@ export const state: ExtensionState = {
     detectedLanguage: null,
     syncWordHighlight: storage.get('sync-word-highlight') !== 'false',
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',
-    hideConnectionIndicator: storage.get('hide-connection-indicator') === 'true',
+    showConnectionIndicator: resolveStoredConnectionIndicator(),
     showRomanization: storage.get('show-romanization') === 'true',
     showFurigana: storage.get('show-furigana') === 'true',
     translateBackgroundVocals: storage.get('translate-background-vocals') !== 'false',

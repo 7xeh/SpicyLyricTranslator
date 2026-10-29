@@ -317,7 +317,7 @@ function runSettingEffects(effects: SettingsEffect[], value: string | boolean, d
         document.body.classList.toggle('slt-hide-quality-indicator', !Boolean(value));
     }
     if (effects.includes('connectionIndicatorClass')) {
-        setConnectionIndicatorHidden(Boolean(value));
+        setConnectionIndicatorHidden(!Boolean(value));
     }
     if (effects.includes('romanizationDisplay')) {
         setOverlayRomanization(Boolean(value));

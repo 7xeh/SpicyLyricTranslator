@@ -550,13 +550,13 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         effects: ['qualityIndicatorClass']
     },
     {
-        id: 'hide-connection-indicator',
+        id: 'show-connection-indicator',
         section: 'Interface',
-        keywords: 'connection status indicator hide ping',
-        label: 'Hide Connection Status',
+        keywords: 'connection status indicator show hide ping',
+        label: 'Show Connection Status',
         type: 'toggle',
-        storageKey: 'hide-connection-indicator',
-        defaultValue: false,
+        storageKey: 'show-connection-indicator',
+        defaultValue: true,
         effects: ['connectionIndicatorClass']
     },
     {
@@ -888,8 +888,8 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
         case 'breakdown-hotkey':
             state.breakdownHotkey = String(value);
             break;
-        case 'hide-connection-indicator':
-            state.hideConnectionIndicator = Boolean(value);
+        case 'show-connection-indicator':
+            state.showConnectionIndicator = Boolean(value);
             break;
     }
 

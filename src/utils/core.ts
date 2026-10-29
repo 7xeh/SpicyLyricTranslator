@@ -18,6 +18,7 @@ import {
     setOriginalTextData,
     setQualityMetadata,
     setTranslationContentData,
+    setUnlinkedContentData,
     setRomanizationContentData,
     setOriginalContentData,
     setQualityContentData,
@@ -47,7 +48,7 @@ import { warn, error, debug } from './debug';
 import { notify, dismissNotification } from './notify';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
 import { cleanLyricText, normalizeLyricMatchKey } from './text';
-import { getUserTranslations, applyUserTranslations, coversAllLines } from './userTranslations';
+import { getUserTranslations, applyUserTranslations, coversAllLines, findUnlinkedLines } from './userTranslations';
 
 let viewControlsObserver: MutationObserver | null = null;
 let lyricsObserver: MutationObserver | null = null;
@@ -1138,7 +1139,8 @@ export async function translateCurrentLyrics(): Promise<void> {
         debug(`translate: provider done at ${sincePhaseStart()}`);
 
         if (!excludedSource) translations = applyUserTranslations(translations, lineTexts, fileLines, 'file');
-        translations = applyUserTranslations(translations, lineTexts, userLines);
+        translations = applyUserTranslations(translations, lineTexts, userLines, 'user', true);
+        const unlinkedLines = findUnlinkedLines(lineTexts, userLines);
 
         const hasMeaningfulTranslation = translations.some(result =>
             result.wasTranslated &&
@@ -1170,6 +1172,18 @@ export async function translateCurrentLyrics(): Promise<void> {
         const qualityByContent = new Map<string, TranslationQualityMeta>();
         const romanizationByContent = new Map<string, string>();
         const originalByContent = new Map<string, string>();
+        const unlinkedByContent = new Map<string, Map<number, string>>();
+        const sourceOccurrences = new Map<string, number>();
+        const romOccurrences = new Map<string, number>();
+        const countOccurrence = (counts: Map<string, number>, norm: string): number => {
+            const occurrence = (counts.get(norm) || 0) + 1;
+            counts.set(norm, occurrence);
+            return occurrence;
+        };
+        const setUnlinked = (norm: string, occurrence: number, translated: string): void => {
+            if (!unlinkedByContent.has(norm)) unlinkedByContent.set(norm, new Map());
+            unlinkedByContent.get(norm)!.set(occurrence, translated);
+        };
 
         translations.forEach((result, index) => {
             const source = lineTexts[index];
@@ -1178,15 +1192,22 @@ export async function translateCurrentLyrics(): Promise<void> {
 
             const sourceNorm = normalizeMatchKey(source);
             const romNorm = normalizeMatchKey(lineData?.romanizedText);
+            const sourceOccurrence = sourceNorm ? countOccurrence(sourceOccurrences, sourceNorm) : 0;
+            const romOccurrence = romNorm ? countOccurrence(romOccurrences, romNorm) : 0;
 
-            if (source && source.trim()) {
-                state.translatedLyrics.set(source, translated);
-                if (sourceNorm) translationByContent.set(sourceNorm, translated);
-            }
+            if (unlinkedLines.has(index)) {
+                if (sourceNorm) setUnlinked(sourceNorm, sourceOccurrence, translated);
+                if (romNorm) setUnlinked(romNorm, romOccurrence, translated);
+            } else {
+                if (source && source.trim()) {
+                    state.translatedLyrics.set(source, translated);
+                    if (sourceNorm) translationByContent.set(sourceNorm, translated);
+                }
 
-            if (lineData?.romanizedText && lineData.romanizedText.trim()) {
-                state.translatedLyrics.set(lineData.romanizedText, translated);
-                if (romNorm) translationByContent.set(romNorm, translated);
+                if (lineData?.romanizedText && lineData.romanizedText.trim()) {
+                    state.translatedLyrics.set(lineData.romanizedText, translated);
+                    if (romNorm) translationByContent.set(romNorm, translated);
+                }
             }
 
             if (result.wasTranslated) {
@@ -1266,6 +1287,7 @@ export async function translateCurrentLyrics(): Promise<void> {
         addTimingByContent(apiLineData);
 
         setTranslationContentData(translationByContent);
+        setUnlinkedContentData(unlinkedByContent);
         setRomanizationContentData(romanizationByContent);
         setOriginalContentData(originalByContent);
         setQualityContentData(qualityByContent);
@@ -1273,7 +1295,7 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         contentTranslation = translationByContent;
         contentQuality = qualityByContent;
-        coveredKeys = new Set(translationByContent.keys());
+        coveredKeys = new Set([...translationByContent.keys(), ...unlinkedByContent.keys()]);
 
         const buildIndexMapsForLines = (targetLines: NodeListOf<Element> | Element[]): void => {
             const translationsByIdx = new Map<number, string>();
@@ -1283,14 +1305,16 @@ export async function translateCurrentLyrics(): Promise<void> {
 
             const targetArr = Array.from(targetLines);
             const allowIndexFallback = targetArr.length === translations.length;
+            const domOccurrences = new Map<string, number>();
 
             targetArr.forEach((line, domIdx) => {
                 const domText = extractLineText(line);
                 if (!domText) return;
 
                 const matchKeys = buildMatchKeys(domText);
+                const occurrence = countOccurrence(domOccurrences, matchKeys.norm);
 
-                let translation = lookupWithKeys(translationByContent, matchKeys);
+                let translation = unlinkedByContent.get(matchKeys.norm)?.get(occurrence) || lookupWithKeys(translationByContent, matchKeys);
                 if (!translation && allowIndexFallback && translations[domIdx]) {
                     translation = translations[domIdx].translatedText;
                 }
@@ -1821,6 +1845,7 @@ export function removeTranslations(): void {
     contentTranslation = new Map();
     contentQuality = new Map();
     coveredKeys = new Set();
+    setUnlinkedContentData(new Map());
     resetBackgroundTranslations();
 
     const docs = [document];

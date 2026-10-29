@@ -30,7 +30,7 @@ Before sending anything to a provider, the extension checks whether the lyrics a
 
 ## Connection indicator
 
-Reports server latency and the total number of installed users. Hide it with **Hide Connection Status**.
+Reports server latency and the total number of installed users. Hide it by turning off **Show Connection Status**.
 
 ## Privacy
 

@@ -48,6 +48,7 @@ let romanizationByContent: Map<string, string> = new Map();
 let originalByContent: Map<string, string> = new Map();
 let qualityByContent: Map<string, TranslationQualityMeta> = new Map();
 let timingByContent: Map<string, LyricLineData> = new Map();
+let unlinkedByContent: Map<string, Map<number, string>> = new Map();
 let backgroundTranslations: Map<string, string> = new Map();
 
 const BACKGROUND_LINE_SELECTOR = '.line.bg-line';
@@ -139,6 +140,7 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
 
     let contentLines = 0;
     let matchedLines = 0;
+    const occurrences = new Map<string, number>();
 
     for (let index = 0; index < lines.length; index++) {
         const text = lineTexts[index];
@@ -146,8 +148,10 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
         contentLines++;
 
         const keys = buildContentLookupKeys(text);
+        const occurrence = (occurrences.get(keys.norm) || 0) + 1;
+        occurrences.set(keys.norm, occurrence);
 
-        const t = lookupByKeys(translationByContent, keys);
+        const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
         if (t) {
             nextTranslation.set(index, t);
             matchedLines++;
@@ -180,6 +184,10 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
 
 export function setTranslationContentData(data: Map<string, string>): void {
     translationByContent = new Map(data);
+}
+
+export function setUnlinkedContentData(data: Map<string, Map<number, string>>): void {
+    unlinkedByContent = new Map(data);
 }
 
 export function setRomanizationContentData(data: Map<string, string>): void {
@@ -2301,6 +2309,7 @@ export function disableOverlay(): void {
     romanizationMap.clear();
     originalTextMap.clear();
     translationByContent.clear();
+    unlinkedByContent.clear();
     romanizationByContent.clear();
     originalByContent.clear();
     qualityByContent.clear();

@@ -2,6 +2,7 @@ import { storage } from './storage';
 import { normalizeLyricMatchKey } from './text';
 
 const USER_TRANSLATIONS_KEY = 'user-translations';
+const UNLINKED_SEPARATOR = '#';
 
 export interface UserTranslationMeta {
     trackName?: string;
@@ -83,16 +84,60 @@ export function isKeepOriginal(sourceLine: string, translation: string): boolean
     return Boolean(sourceKey) && sourceKey === userTranslationKey(translation);
 }
 
+export function unlinkedTranslationKey(key: string, occurrence: number): string {
+    return `${key}${UNLINKED_SEPARATOR}${occurrence}`;
+}
+
+export function isUnlinkedTranslationKey(key: string): boolean {
+    return key.includes(UNLINKED_SEPARATOR);
+}
+
+export function lineOccurrences(sourceLines: string[]): number[] {
+    const seen = new Map<string, number>();
+    return sourceLines.map(line => {
+        const key = userTranslationKey(line);
+        if (!key) return 0;
+        const occurrence = (seen.get(key) || 0) + 1;
+        seen.set(key, occurrence);
+        return occurrence;
+    });
+}
+
+function hasUnlinkedTranslations(userLines: Map<string, string>): boolean {
+    for (const key of userLines.keys()) {
+        if (isUnlinkedTranslationKey(key)) return true;
+    }
+    return false;
+}
+
+function unlinkedTranslation(userLines: Map<string, string>, sourceLine: string, occurrence: number): string | undefined {
+    const key = userTranslationKey(sourceLine);
+    return key && occurrence > 0 ? userLines.get(unlinkedTranslationKey(key, occurrence)) : undefined;
+}
+
+export function findUnlinkedLines(sourceLines: string[], userLines: Map<string, string>): Set<number> {
+    const unlinked = new Set<number>();
+    if (!hasUnlinkedTranslations(userLines)) return unlinked;
+    lineOccurrences(sourceLines).forEach((occurrence, index) => {
+        if (unlinkedTranslation(userLines, sourceLines[index], occurrence)) unlinked.add(index);
+    });
+    return unlinked;
+}
+
 export function applyUserTranslations<T extends TranslatableResult>(
     results: T[],
     sourceLines: string[],
     userLines: Map<string, string>,
-    source: 'user' | 'file' = 'user'
+    source: 'user' | 'file' = 'user',
+    byOccurrence = false
 ): T[] {
     if (userLines.size === 0) return results;
+    const lines = results.map((result, index) => sourceLines[index] ?? result.originalText);
+    const occurrences = byOccurrence && hasUnlinkedTranslations(userLines) ? lineOccurrences(lines) : null;
     return results.map((result, index) => {
-        const sourceLine = sourceLines[index] ?? result.originalText;
-        const translation = userLines.get(userTranslationKey(sourceLine));
+        const sourceLine = lines[index];
+        const translation = (occurrences && unlinkedTranslation(userLines, sourceLine, occurrences[index]))
+            || userLines.get(userTranslationKey(sourceLine));
         if (!translation) return result;
         const keepOriginal = isKeepOriginal(sourceLine, translation);
         return {
@@ -107,9 +152,10 @@ export function applyUserTranslations<T extends TranslatableResult>(
 
 export function coversAllLines(sourceLines: string[], userLines: Map<string, string>): boolean {
     if (userLines.size === 0) return false;
-    return sourceLines.every(line => {
+    const occurrences = lineOccurrences(sourceLines);
+    return sourceLines.every((line, index) => {
         const key = userTranslationKey(line);
-        return !key || userLines.has(key);
+        return !key || userLines.has(key) || userLines.has(unlinkedTranslationKey(key, occurrences[index]));
     });
 }
 
@@ -121,5 +167,9 @@ export default {
     saveUserTranslations,
     applyUserTranslations,
     coversAllLines,
-    isKeepOriginal
+    isKeepOriginal,
+    unlinkedTranslationKey,
+    isUnlinkedTranslationKey,
+    lineOccurrences,
+    findUnlinkedLines
 };

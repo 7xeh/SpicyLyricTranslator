@@ -51,7 +51,7 @@ Only the fields for your selected provider are shown. See [Providers](providers.
 | Setting | What it does |
 | --- | --- |
 | **Show Translation Quality Indicator** | Per-line confidence indicator on translated lines |
-| **Hide Connection Status** | Hides the latency and installed-users indicator |
+| **Show Connection Status** | Shows the latency and installed-users indicator. On by default |
 
 ## Actions
 

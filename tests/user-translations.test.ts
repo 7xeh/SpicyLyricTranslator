@@ -23,7 +23,11 @@ const {
     saveUserTranslations,
     applyUserTranslations,
     coversAllLines,
-    userTranslationKey
+    userTranslationKey,
+    unlinkedTranslationKey,
+    isUnlinkedTranslationKey,
+    lineOccurrences,
+    findUnlinkedLines
 } = require('../src/utils/userTranslations') as typeof import('../src/utils/userTranslations');
 
 const TRACK = 'spotify:track:abc';
@@ -90,4 +94,49 @@ test('coversAllLines only reports full coverage when every translatable line has
     assert.equal(coversAllLines(['a line', 'b line', '♪'], user), true);
     assert.equal(coversAllLines(['a line', 'c line'], user), false);
     assert.equal(coversAllLines(['a line'], new Map()), false);
+});
+
+test('unlinked keys never collide with a normalized lyric key', () => {
+    const key = userTranslationKey('Snap out of it #2');
+    assert.equal(isUnlinkedTranslationKey(key), false);
+    assert.equal(isUnlinkedTranslationKey(unlinkedTranslationKey(key, 2)), true);
+});
+
+test('line occurrences count repeats of the same normalized text', () => {
+    assert.deepEqual(lineOccurrences(['Snap out of it', 'Other', 'snap out of it!', '♪', 'Snap out of it']), [1, 1, 2, 0, 3]);
+});
+
+test('an unlinked repeat gets its own translation while the rest stay linked', () => {
+    const sources = ['Snap out of it', 'Other', 'Snap out of it', 'Snap out of it'];
+    const key = userTranslationKey('Snap out of it');
+    const user = new Map([[key, 'Wake up now'], [unlinkedTranslationKey(key, 3), 'Wake up eventually']]);
+    const results = sources.map(line => result(line, `auto ${line}`));
+
+    const applied = applyUserTranslations(results, sources, user, 'user', true);
+    assert.deepEqual(applied.map(r => r.translatedText), ['Wake up now', 'auto Other', 'Wake up now', 'Wake up eventually']);
+    assert.deepEqual(Array.from(findUnlinkedLines(sources, user)), [3]);
+
+    const unordered = applyUserTranslations(results, sources, user);
+    assert.equal(unordered[3].translatedText, 'Wake up now');
+});
+
+test('an unlinked repeat without a shared translation keeps the automatic one elsewhere', () => {
+    const sources = ['Snap out of it', 'Snap out of it'];
+    const key = userTranslationKey('Snap out of it');
+    const user = new Map([[unlinkedTranslationKey(key, 2), 'Wake up eventually']]);
+    const applied = applyUserTranslations(sources.map(line => result(line, 'auto')), sources, user, 'user', true);
+    assert.deepEqual(applied.map(r => r.translatedText), ['auto', 'Wake up eventually']);
+    assert.deepEqual(applied.map(r => r.source), ['api', 'user']);
+    assert.equal(coversAllLines(sources, user), false);
+    assert.equal(coversAllLines(['Snap out of it'], new Map([[key, 'x']])), true);
+    assert.equal(coversAllLines(sources, new Map([[unlinkedTranslationKey(key, 1), 'a'], [unlinkedTranslationKey(key, 2), 'b']])), true);
+});
+
+test('a stale unlinked key past the last repeat is ignored', () => {
+    const sources = ['Snap out of it', 'Snap out of it'];
+    const key = userTranslationKey('Snap out of it');
+    const user = new Map([[key, 'Shared'], [unlinkedTranslationKey(key, 7), 'Gone']]);
+    const applied = applyUserTranslations(sources.map(line => result(line, 'auto')), sources, user, 'user', true);
+    assert.deepEqual(applied.map(r => r.translatedText), ['Shared', 'Shared']);
+    assert.equal(findUnlinkedLines(sources, user).size, 0);
 });

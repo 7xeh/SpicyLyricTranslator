@@ -52,7 +52,7 @@ export async function initialize(): Promise<void> {
         maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
-    setConnectionIndicatorHidden(state.hideConnectionIndicator);
+    setConnectionIndicatorHidden(!state.showConnectionIndicator);
     setFuriganaEnabled(state.showFurigana);
     initConnectionIndicator();
 

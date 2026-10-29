@@ -5592,6 +5592,7 @@ ${text3}`
 
   // src/utils/userTranslations.ts
   var USER_TRANSLATIONS_KEY = "user-translations";
+  var UNLINKED_SEPARATOR = "#";
   function entryKey(trackUri, targetLang) {
     return `${trackUri}|${targetLang.toLowerCase()}`;
   }
@@ -5641,12 +5642,52 @@ ${text3}`
     const sourceKey = userTranslationKey(sourceLine);
     return Boolean(sourceKey) && sourceKey === userTranslationKey(translation);
   }
-  function applyUserTranslations(results, sourceLines, userLines, source = "user") {
+  function unlinkedTranslationKey(key, occurrence) {
+    return `${key}${UNLINKED_SEPARATOR}${occurrence}`;
+  }
+  function isUnlinkedTranslationKey(key) {
+    return key.includes(UNLINKED_SEPARATOR);
+  }
+  function lineOccurrences(sourceLines) {
+    const seen = /* @__PURE__ */ new Map();
+    return sourceLines.map((line) => {
+      const key = userTranslationKey(line);
+      if (!key)
+        return 0;
+      const occurrence = (seen.get(key) || 0) + 1;
+      seen.set(key, occurrence);
+      return occurrence;
+    });
+  }
+  function hasUnlinkedTranslations(userLines) {
+    for (const key of userLines.keys()) {
+      if (isUnlinkedTranslationKey(key))
+        return true;
+    }
+    return false;
+  }
+  function unlinkedTranslation(userLines, sourceLine, occurrence) {
+    const key = userTranslationKey(sourceLine);
+    return key && occurrence > 0 ? userLines.get(unlinkedTranslationKey(key, occurrence)) : void 0;
+  }
+  function findUnlinkedLines(sourceLines, userLines) {
+    const unlinked = /* @__PURE__ */ new Set();
+    if (!hasUnlinkedTranslations(userLines))
+      return unlinked;
+    lineOccurrences(sourceLines).forEach((occurrence, index) => {
+      if (unlinkedTranslation(userLines, sourceLines[index], occurrence))
+        unlinked.add(index);
+    });
+    return unlinked;
+  }
+  function applyUserTranslations(results, sourceLines, userLines, source = "user", byOccurrence = false) {
     if (userLines.size === 0)
       return results;
+    const lines = results.map((result, index) => sourceLines[index] ?? result.originalText);
+    const occurrences = byOccurrence && hasUnlinkedTranslations(userLines) ? lineOccurrences(lines) : null;
     return results.map((result, index) => {
-      const sourceLine = sourceLines[index] ?? result.originalText;
-      const translation = userLines.get(userTranslationKey(sourceLine));
+      const sourceLine = lines[index];
+      const translation = occurrences && unlinkedTranslation(userLines, sourceLine, occurrences[index]) || userLines.get(userTranslationKey(sourceLine));
       if (!translation)
         return result;
       const keepOriginal = isKeepOriginal(sourceLine, translation);
@@ -5662,9 +5703,10 @@ ${text3}`
   function coversAllLines(sourceLines, userLines) {
     if (userLines.size === 0)
       return false;
-    return sourceLines.every((line) => {
+    const occurrences = lineOccurrences(sourceLines);
+    return sourceLines.every((line, index) => {
       const key = userTranslationKey(line);
-      return !key || userLines.has(key);
+      return !key || userLines.has(key) || userLines.has(unlinkedTranslationKey(key, occurrences[index]));
     });
   }
 
@@ -5797,6 +5839,15 @@ ${text3}`
       return stored;
     return storage.get("show-notifications") === "false" ? "off" : "all";
   }
+  function resolveStoredConnectionIndicator() {
+    const legacy2 = storage.get("hide-connection-indicator");
+    if (legacy2 !== null) {
+      if (storage.get("show-connection-indicator") === null)
+        storage.set("show-connection-indicator", String(legacy2 !== "true"));
+      storage.remove("hide-connection-indicator");
+    }
+    return storage.get("show-connection-indicator") !== "false";
+  }
   var state = {
     isEnabled: storage.get("translation-enabled") === "true",
     isTranslating: false,
@@ -5843,7 +5894,7 @@ ${text3}`
     detectedLanguage: null,
     syncWordHighlight: storage.get("sync-word-highlight") !== "false",
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
-    hideConnectionIndicator: storage.get("hide-connection-indicator") === "true",
+    showConnectionIndicator: resolveStoredConnectionIndicator(),
     showRomanization: storage.get("show-romanization") === "true",
     showFurigana: storage.get("show-furigana") === "true",
     translateBackgroundVocals: storage.get("translate-background-vocals") !== "false",
@@ -8929,6 +8980,7 @@ body.slt-update-waiting #TranslateToggle::after {
   var originalByContent = /* @__PURE__ */ new Map();
   var qualityByContent = /* @__PURE__ */ new Map();
   var timingByContent = /* @__PURE__ */ new Map();
+  var unlinkedByContent = /* @__PURE__ */ new Map();
   var backgroundTranslations = /* @__PURE__ */ new Map();
   var BACKGROUND_LINE_SELECTOR = ".line.bg-line";
   var BACKGROUND_TRANSLATION_CLASS = "slt-bg-translation";
@@ -9008,13 +9060,16 @@ body.slt-update-waiting #TranslateToggle::after {
     const nextTiming = [];
     let contentLines = 0;
     let matchedLines = 0;
+    const occurrences = /* @__PURE__ */ new Map();
     for (let index = 0; index < lines.length; index++) {
       const text3 = lineTexts[index];
       if (!text3)
         continue;
       contentLines++;
       const keys = buildContentLookupKeys(text3);
-      const t = lookupByKeys(translationByContent, keys);
+      const occurrence = (occurrences.get(keys.norm) || 0) + 1;
+      occurrences.set(keys.norm, occurrence);
+      const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
       if (t) {
         nextTranslation.set(index, t);
         matchedLines++;
@@ -9043,6 +9098,9 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   function setTranslationContentData(data) {
     translationByContent = new Map(data);
+  }
+  function setUnlinkedContentData(data) {
+    unlinkedByContent = new Map(data);
   }
   function setRomanizationContentData(data) {
     romanizationByContent = new Map(data);
@@ -10808,6 +10866,7 @@ body.slt-update-waiting #TranslateToggle::after {
     romanizationMap.clear();
     originalTextMap.clear();
     translationByContent.clear();
+    unlinkedByContent.clear();
     romanizationByContent.clear();
     originalByContent.clear();
     qualityByContent.clear();
@@ -12172,7 +12231,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.6" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.7" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -12240,7 +12299,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"5306c7824234354d80aea5f4c069f2dd162058d2c15c91a4c487b1e2a9c0ae60".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "5306c7824234354d80aea5f4c069f2dd162058d2c15c91a4c487b1e2a9c0ae60" : "";
+    return !"e46264dbe998fabd5952bd1520e6d55692bfcca8f37fcdde7a24a92bf77840ea".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "e46264dbe998fabd5952bd1520e6d55692bfcca8f37fcdde7a24a92bf77840ea" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -14066,13 +14125,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       effects: ["qualityIndicatorClass"]
     },
     {
-      id: "hide-connection-indicator",
+      id: "show-connection-indicator",
       section: "Interface",
-      keywords: "connection status indicator hide ping",
-      label: "Hide Connection Status",
+      keywords: "connection status indicator show hide ping",
+      label: "Show Connection Status",
       type: "toggle",
-      storageKey: "hide-connection-indicator",
-      defaultValue: false,
+      storageKey: "show-connection-indicator",
+      defaultValue: true,
       effects: ["connectionIndicatorClass"]
     },
     {
@@ -14381,8 +14440,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       case "breakdown-hotkey":
         state.breakdownHotkey = String(value);
         break;
-      case "hide-connection-indicator":
-        state.hideConnectionIndicator = Boolean(value);
+      case "show-connection-indicator":
+        state.showConnectionIndicator = Boolean(value);
         break;
     }
     const coupled = enforceLearningCoupling(field.id, value);
@@ -14423,6 +14482,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
 .slt-ut-auto-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
 .slt-ut-auto-missing { color: #f0b860; }
 .slt-ut-repeat { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: var(--slt-ui-ink-muted); background: rgba(255, 255, 255, 0.08); vertical-align: middle; }
+.slt-ut-repeat[hidden] { display: none; }
+.slt-ut-link { border: 0; font-family: inherit; line-height: inherit; cursor: pointer; transition: color 0.15s ease, background 0.15s ease; }
+.slt-ut-link:hover, .slt-ut-link:focus-visible { color: var(--slt-ui-ink); background: rgba(255, 255, 255, 0.16); }
+.slt-ut-link:focus-visible { outline: 2px solid var(--slt-ui-accent); outline-offset: 1px; }
+.slt-ut-link-hover { display: none; }
+.slt-ut-link:hover .slt-ut-link-idle, .slt-ut-link:focus-visible .slt-ut-link-idle { display: none; }
+.slt-ut-link:hover .slt-ut-link-hover, .slt-ut-link:focus-visible .slt-ut-link-hover { display: inline; }
+.slt-ut-row.slt-ut-unlinked .slt-ut-link { color: var(--slt-ui-accent-ink, #000); background: var(--slt-ui-accent); }
 .slt-ut-edit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .slt-ut .slt-ut-input { min-height: 38px; padding: 8px 12px; resize: none; overflow: hidden; line-height: 1.4; }
 .slt-ut-row.slt-ut-kept .slt-ut-input { color: var(--slt-ui-ink-faint); text-decoration: line-through; }
@@ -14540,7 +14607,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     );
     const hint = el("p", {
       class: "slt-ut-hint",
-      text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
+      text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
     });
     const pasteInput = el("textarea", {
       class: "slt-ui-input",
@@ -14555,22 +14622,56 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const emptyFilterNote = el("div", { class: "slt-ut-empty", text: "Every line already has an automatic translation." });
     emptyFilterNote.hidden = true;
     root.append(head, hint, pastePanel, rowsContainer, emptyFilterNote);
+    const occurrenceList = lineOccurrences(sourceLines.map((line) => line.text));
     const initialValues = new Map(uniqueKeys.map((key) => [key, savedLines.get(key) || ""]));
+    sourceLines.forEach((line, index) => {
+      if (occurrenceList[index] < 2)
+        return;
+      const unlinkedKey = unlinkedTranslationKey(line.key, occurrenceList[index]);
+      const saved = savedLines.get(unlinkedKey);
+      if (saved)
+        initialValues.set(unlinkedKey, saved);
+    });
     const values = new Map(initialValues);
     const rows = [];
     const seen = /* @__PURE__ */ new Set();
     let handle = null;
     let confirmDiscard = false;
-    const isDirty = () => uniqueKeys.some((key) => (values.get(key) || "") !== (initialValues.get(key) || ""));
+    const slotKeys = () => Array.from(new Set(rows.map((entry) => entry.valueKey)));
+    const trackedKeys = () => Array.from(/* @__PURE__ */ new Set([...initialValues.keys(), ...values.keys()]));
+    const isDirty = () => trackedKeys().some((key) => (values.get(key) || "") !== (initialValues.get(key) || ""));
     const refreshRowState = (entry) => {
-      const value = values.get(entry.line.key) || "";
-      entry.row.classList.toggle("slt-ut-dirty", value !== (initialValues.get(entry.line.key) || ""));
+      const value = values.get(entry.valueKey) || "";
+      const dirty = entry.valueKey !== entry.initialValueKey || value !== (initialValues.get(entry.valueKey) || "");
+      entry.row.classList.toggle("slt-ut-dirty", dirty);
       entry.row.classList.toggle("slt-ut-kept", Boolean(value) && isKeepOriginal(entry.line.text, value));
+      entry.row.classList.toggle("slt-ut-unlinked", entry.valueKey !== entry.line.key);
+    };
+    const refreshLinkTag = (entry) => {
+      if (!entry.linkTag)
+        return;
+      const unlinked = entry.valueKey !== entry.line.key;
+      const [idle, hover] = Array.from(entry.linkTag.children);
+      idle.textContent = unlinked ? "unlinked" : "repeat";
+      hover.textContent = unlinked ? "\u26D3\uFE0F Relink" : "\u26D3\uFE0F\u200D\u{1F4A5} Unlink";
+      const label = unlinked ? "Share one translation with the other repeats again" : "Translate this repeat on its own without changing the others";
+      entry.linkTag.title = label;
+      entry.linkTag.setAttribute("aria-label", label);
+    };
+    const refreshRepeatCounts = () => {
+      rows.forEach((entry) => {
+        if (!entry.countTag)
+          return;
+        const linked = rows.filter((other) => other.valueKey === entry.line.key).length;
+        entry.countTag.textContent = `\xD7${linked}`;
+        entry.countTag.hidden = linked < 2;
+      });
     };
     const cancelLabel = () => handle?.footer.querySelector('[data-action="cancel"] .slt-ui-btn-label');
     const refreshSummary = () => {
-      const yours = uniqueKeys.filter((key) => cleanUserTranslation(values.get(key))).length;
-      count.textContent = `${yours} of ${uniqueKeys.length} line${uniqueKeys.length === 1 ? "" : "s"} translated by you`;
+      const slots = slotKeys();
+      const yours = slots.filter((key) => cleanUserTranslation(values.get(key))).length;
+      count.textContent = `${yours} of ${slots.length} line${slots.length === 1 ? "" : "s"} translated by you`;
       const dirty = isDirty();
       if (handle) {
         dialogOptions.dismissible = !dirty;
@@ -14589,7 +14690,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const setValue = (key, value, except) => {
       values.set(key, value);
       rows.forEach((entry) => {
-        if (entry.line.key !== key)
+        if (entry.valueKey !== key)
           return;
         if (entry.input !== except) {
           entry.input.value = value;
@@ -14602,23 +14703,52 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const applyFilters = () => {
       let visible = 0;
       rows.forEach((entry) => {
-        const hidden = missingFilter.checked && autoLines.has(entry.line.key) || repeatFilter.checked && entry.repeat;
+        const hidden = missingFilter.checked && autoLines.has(entry.line.key) || repeatFilter.checked && entry.repeat && entry.valueKey === entry.line.key;
         entry.row.hidden = hidden;
         if (!hidden)
           visible++;
       });
       emptyFilterNote.hidden = visible > 0;
     };
+    const toggleLink = (entry) => {
+      const unlinkedKey = unlinkedTranslationKey(entry.line.key, entry.occurrence);
+      if (entry.valueKey === unlinkedKey) {
+        values.delete(unlinkedKey);
+        entry.valueKey = entry.line.key;
+      } else {
+        values.set(unlinkedKey, values.get(entry.line.key) || autoLines.get(entry.line.key) || "");
+        entry.valueKey = unlinkedKey;
+      }
+      entry.input.value = values.get(entry.valueKey) || "";
+      autoGrow(entry.input);
+      refreshLinkTag(entry);
+      refreshRowState(entry);
+      refreshRepeatCounts();
+      refreshSummary();
+      applyFilters();
+      if (!entry.row.hidden)
+        entry.input.focus();
+    };
     sourceLines.forEach((line, index) => {
       const repeat = seen.has(line.key);
       seen.add(line.key);
+      const occurrence = occurrenceList[index];
+      const unlinkedKey = unlinkedTranslationKey(line.key, occurrence);
+      const valueKey = repeat && initialValues.has(unlinkedKey) ? unlinkedKey : line.key;
       const auto = autoLines.get(line.key);
       const total = occurrences.get(line.key) || 1;
       const sourceText = el("div", { class: "slt-ut-src-text", text: line.text });
-      if (!repeat && total > 1)
-        sourceText.append(el("span", { class: "slt-ut-repeat", text: `\xD7${total}` }));
-      if (repeat)
-        sourceText.append(el("span", { class: "slt-ut-repeat", text: "repeat" }));
+      const countTag = !repeat && total > 1 ? el("span", { class: "slt-ut-repeat", text: `\xD7${total}` }) : null;
+      const linkTag = repeat ? el(
+        "button",
+        { class: "slt-ut-repeat slt-ut-link", type: "button" },
+        el("span", { class: "slt-ut-link-idle" }),
+        el("span", { class: "slt-ut-link-hover" })
+      ) : null;
+      if (countTag)
+        sourceText.append(countTag);
+      if (linkTag)
+        sourceText.append(linkTag);
       const autoNode = auto ? el("div", { class: "slt-ut-auto" }, el("span", { class: "slt-ut-auto-label", text: "Auto" }), auto) : el("div", { class: "slt-ut-auto slt-ut-auto-missing", text: "No automatic translation" });
       const input = el("textarea", {
         class: "slt-ui-input slt-ut-input",
@@ -14627,7 +14757,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         placeholder: auto ? "Keep the automatic translation" : "Your translation",
         "aria-label": `Your translation for line ${index + 1}`
       });
-      input.value = values.get(line.key) || "";
+      input.value = values.get(valueKey) || "";
       const tools = el("div", { class: "slt-ut-tools" });
       if (auto)
         tools.append(el("button", { class: "slt-ut-mini", type: "button", "data-tool": "auto", text: "Use automatic", title: "Copy the automatic translation into the box to tweak it" }));
@@ -14649,13 +14779,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         ),
         el("div", { class: "slt-ut-edit" }, input, tools)
       );
-      const entry = { line, row, input, repeat };
+      const entry = { line, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
       rows.push(entry);
       rowsContainer.append(row);
+      refreshLinkTag(entry);
       refreshRowState(entry);
+      linkTag?.addEventListener("click", () => toggleLink(entry));
       input.addEventListener("input", () => {
         autoGrow(input);
-        setValue(line.key, input.value, input);
+        setValue(entry.valueKey, input.value, input);
       });
       input.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" || event.shiftKey)
@@ -14671,27 +14803,28 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       tools.addEventListener("click", (event) => {
         const tool = event.target.closest("[data-tool]")?.getAttribute("data-tool");
         if (tool === "auto" && auto)
-          setValue(line.key, auto);
+          setValue(entry.valueKey, auto);
         else if (tool === "keep")
-          setValue(line.key, line.text);
+          setValue(entry.valueKey, line.text);
         else if (tool === "clear")
-          setValue(line.key, "");
+          setValue(entry.valueKey, "");
         else
           return;
         input.focus();
       });
     });
+    refreshRepeatCounts();
     missingFilter.addEventListener("change", applyFilters);
     repeatFilter.addEventListener("change", applyFilters);
     const fillFromAuto = () => {
-      uniqueKeys.forEach((key) => {
-        const auto = autoLines.get(key);
-        if (auto && !cleanUserTranslation(values.get(key)))
-          setValue(key, auto);
+      rows.forEach((entry) => {
+        const auto = autoLines.get(entry.line.key);
+        if (auto && !cleanUserTranslation(values.get(entry.valueKey)))
+          setValue(entry.valueKey, auto);
       });
     };
     const copyTranslations = async () => {
-      const text3 = sourceLines.map((line) => cleanUserTranslation(values.get(line.key)) || autoLines.get(line.key) || "").join("\n");
+      const text3 = rows.map((entry) => cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || "").join("\n");
       try {
         await navigator.clipboard.writeText(text3);
         notify({ kind: "success", key: "slt-user-translation", title: "Translation copied", description: "One line per lyric line, ready to paste back in later." });
@@ -14708,7 +14841,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const targets = rows.filter((entry) => !entry.row.hidden);
       const filled = Math.min(pasted.length, targets.length);
       for (let i = 0; i < filled; i++)
-        setValue(targets[i].line.key, pasted[i]);
+        setValue(targets[i].valueKey, pasted[i]);
       pastePanel.hidden = true;
       pasteInput.value = "";
       const extra = pasted.length > targets.length ? ` ${pasted.length - targets.length} pasted line${pasted.length - targets.length === 1 ? " was" : "s were"} left over.` : "";
@@ -14716,7 +14849,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
     const save = () => {
       const merged = getUserTranslations(trackUri, targetLang);
-      uniqueKeys.forEach((key) => {
+      trackedKeys().forEach((key) => {
         const value = cleanUserTranslation(values.get(key));
         if (value)
           merged.set(key, value);
@@ -14728,7 +14861,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return;
       }
       handle?.close();
-      const yours = uniqueKeys.filter((key) => merged.has(key)).length;
+      const yours = slotKeys().filter((key) => merged.has(key)).length;
       notify({
         kind: "success",
         key: "slt-user-translation",
@@ -14756,7 +14889,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             { label: "Copy translation", hint: "Plain text", onClick: () => {
               void copyTranslations();
             } },
-            { label: "Clear all lines", onClick: () => uniqueKeys.forEach((key) => setValue(key, "")) }
+            { label: "Clear all lines", onClick: () => slotKeys().forEach((key) => setValue(key, "")) }
           ]
         },
         {
@@ -16046,7 +16179,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       debug(`translate: provider done at ${sincePhaseStart()}`);
       if (!excludedSource)
         translations = applyUserTranslations(translations, lineTexts, fileLines, "file");
-      translations = applyUserTranslations(translations, lineTexts, userLines);
+      translations = applyUserTranslations(translations, lineTexts, userLines, "user", true);
+      const unlinkedLines = findUnlinkedLines(lineTexts, userLines);
       const hasMeaningfulTranslation = translations.some(
         (result) => result.wasTranslated && normalizeForComparison(result.originalText) !== normalizeForComparison(result.translatedText)
       );
@@ -16072,21 +16206,43 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const qualityByContent2 = /* @__PURE__ */ new Map();
       const romanizationByContent2 = /* @__PURE__ */ new Map();
       const originalByContent2 = /* @__PURE__ */ new Map();
+      const unlinkedByContent2 = /* @__PURE__ */ new Map();
+      const sourceOccurrences = /* @__PURE__ */ new Map();
+      const romOccurrences = /* @__PURE__ */ new Map();
+      const countOccurrence = (counts, norm) => {
+        const occurrence = (counts.get(norm) || 0) + 1;
+        counts.set(norm, occurrence);
+        return occurrence;
+      };
+      const setUnlinked = (norm, occurrence, translated) => {
+        if (!unlinkedByContent2.has(norm))
+          unlinkedByContent2.set(norm, /* @__PURE__ */ new Map());
+        unlinkedByContent2.get(norm).set(occurrence, translated);
+      };
       translations.forEach((result, index) => {
         const source = lineTexts[index];
         const lineData = useApiLines && apiVocalLineData ? apiVocalLineData[index] : void 0;
         const translated = result.translatedText;
         const sourceNorm = normalizeMatchKey(source);
         const romNorm = normalizeMatchKey(lineData?.romanizedText);
-        if (source && source.trim()) {
-          state.translatedLyrics.set(source, translated);
+        const sourceOccurrence = sourceNorm ? countOccurrence(sourceOccurrences, sourceNorm) : 0;
+        const romOccurrence = romNorm ? countOccurrence(romOccurrences, romNorm) : 0;
+        if (unlinkedLines.has(index)) {
           if (sourceNorm)
-            translationByContent2.set(sourceNorm, translated);
-        }
-        if (lineData?.romanizedText && lineData.romanizedText.trim()) {
-          state.translatedLyrics.set(lineData.romanizedText, translated);
+            setUnlinked(sourceNorm, sourceOccurrence, translated);
           if (romNorm)
-            translationByContent2.set(romNorm, translated);
+            setUnlinked(romNorm, romOccurrence, translated);
+        } else {
+          if (source && source.trim()) {
+            state.translatedLyrics.set(source, translated);
+            if (sourceNorm)
+              translationByContent2.set(sourceNorm, translated);
+          }
+          if (lineData?.romanizedText && lineData.romanizedText.trim()) {
+            state.translatedLyrics.set(lineData.romanizedText, translated);
+            if (romNorm)
+              translationByContent2.set(romNorm, translated);
+          }
         }
         if (result.wasTranslated) {
           const meta = {
@@ -16174,13 +16330,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       addTimingByContent(apiVocalLineData);
       addTimingByContent(apiLineData);
       setTranslationContentData(translationByContent2);
+      setUnlinkedContentData(unlinkedByContent2);
       setRomanizationContentData(romanizationByContent2);
       setOriginalContentData(originalByContent2);
       setQualityContentData(qualityByContent2);
       setTimingContentData(timingByContent2);
       contentTranslation = translationByContent2;
       contentQuality = qualityByContent2;
-      coveredKeys = new Set(translationByContent2.keys());
+      coveredKeys = /* @__PURE__ */ new Set([...translationByContent2.keys(), ...unlinkedByContent2.keys()]);
       const buildIndexMapsForLines = (targetLines) => {
         const translationsByIdx = /* @__PURE__ */ new Map();
         const qualityByIdx = /* @__PURE__ */ new Map();
@@ -16188,12 +16345,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         const originalByIdx = /* @__PURE__ */ new Map();
         const targetArr = Array.from(targetLines);
         const allowIndexFallback = targetArr.length === translations.length;
+        const domOccurrences = /* @__PURE__ */ new Map();
         targetArr.forEach((line, domIdx) => {
           const domText = extractLineText2(line);
           if (!domText)
             return;
           const matchKeys = buildMatchKeys(domText);
-          let translation = lookupWithKeys(translationByContent2, matchKeys);
+          const occurrence = countOccurrence(domOccurrences, matchKeys.norm);
+          let translation = unlinkedByContent2.get(matchKeys.norm)?.get(occurrence) || lookupWithKeys(translationByContent2, matchKeys);
           if (!translation && allowIndexFallback && translations[domIdx]) {
             translation = translations[domIdx].translatedText;
           }
@@ -16693,6 +16852,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     contentTranslation = /* @__PURE__ */ new Map();
     contentQuality = /* @__PURE__ */ new Map();
     coveredKeys = /* @__PURE__ */ new Set();
+    setUnlinkedContentData(/* @__PURE__ */ new Map());
     resetBackgroundTranslations();
     const docs = [document];
     const pip = getPIPWindow2();
@@ -19645,7 +19805,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       document.body.classList.toggle("slt-hide-quality-indicator", !Boolean(value));
     }
     if (effects.includes("connectionIndicatorClass")) {
-      setConnectionIndicatorHidden(Boolean(value));
+      setConnectionIndicatorHidden(!Boolean(value));
     }
     if (effects.includes("romanizationDisplay")) {
       setOverlayRomanization(Boolean(value));
@@ -21717,7 +21877,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       maxParallelChunks: state.maxParallelChunks
     });
     injectStyles();
-    setConnectionIndicatorHidden(state.hideConnectionIndicator);
+    setConnectionIndicatorHidden(!state.showConnectionIndicator);
     setFuriganaEnabled(state.showFurigana);
     initConnectionIndicator();
     await registerSettings();

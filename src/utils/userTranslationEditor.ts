@@ -10,7 +10,9 @@ import {
     saveUserTranslations,
     userTranslationKey,
     cleanUserTranslation,
-    isKeepOriginal
+    isKeepOriginal,
+    unlinkedTranslationKey,
+    lineOccurrences
 } from './userTranslations';
 
 interface EditorLine {
@@ -24,6 +26,11 @@ interface EditorRow {
     row: HTMLElement;
     input: HTMLTextAreaElement;
     repeat: boolean;
+    occurrence: number;
+    valueKey: string;
+    initialValueKey: string;
+    countTag: HTMLElement | null;
+    linkTag: HTMLElement | null;
 }
 
 const STYLE_ID = 'slt-user-translation-styles';
@@ -58,6 +65,14 @@ const EDITOR_STYLES = `
 .slt-ut-auto-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
 .slt-ut-auto-missing { color: #f0b860; }
 .slt-ut-repeat { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: var(--slt-ui-ink-muted); background: rgba(255, 255, 255, 0.08); vertical-align: middle; }
+.slt-ut-repeat[hidden] { display: none; }
+.slt-ut-link { border: 0; font-family: inherit; line-height: inherit; cursor: pointer; transition: color 0.15s ease, background 0.15s ease; }
+.slt-ut-link:hover, .slt-ut-link:focus-visible { color: var(--slt-ui-ink); background: rgba(255, 255, 255, 0.16); }
+.slt-ut-link:focus-visible { outline: 2px solid var(--slt-ui-accent); outline-offset: 1px; }
+.slt-ut-link-hover { display: none; }
+.slt-ut-link:hover .slt-ut-link-idle, .slt-ut-link:focus-visible .slt-ut-link-idle { display: none; }
+.slt-ut-link:hover .slt-ut-link-hover, .slt-ut-link:focus-visible .slt-ut-link-hover { display: inline; }
+.slt-ut-row.slt-ut-unlinked .slt-ut-link { color: var(--slt-ui-accent-ink, #000); background: var(--slt-ui-accent); }
 .slt-ut-edit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .slt-ut .slt-ut-input { min-height: 38px; padding: 8px 12px; resize: none; overflow: hidden; line-height: 1.4; }
 .slt-ut-row.slt-ut-kept .slt-ut-input { color: var(--slt-ui-ink-faint); text-decoration: line-through; }
@@ -189,7 +204,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     );
     const hint = el('p', {
         class: 'slt-ut-hint',
-        text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
+        text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
     });
 
     const pasteInput = el('textarea', {
@@ -207,7 +222,14 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     emptyFilterNote.hidden = true;
     root.append(head, hint, pastePanel, rowsContainer, emptyFilterNote);
 
+    const occurrenceList = lineOccurrences(sourceLines.map(line => line.text));
     const initialValues = new Map<string, string>(uniqueKeys.map(key => [key, savedLines.get(key) || '']));
+    sourceLines.forEach((line, index) => {
+        if (occurrenceList[index] < 2) return;
+        const unlinkedKey = unlinkedTranslationKey(line.key, occurrenceList[index]);
+        const saved = savedLines.get(unlinkedKey);
+        if (saved) initialValues.set(unlinkedKey, saved);
+    });
     const values = new Map(initialValues);
     const rows: EditorRow[] = [];
     const seen = new Set<string>();
@@ -215,20 +237,46 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     let handle: SurfaceHandle | null = null;
     let confirmDiscard = false;
 
-    const isDirty = (): boolean => uniqueKeys.some(key => (values.get(key) || '') !== (initialValues.get(key) || ''));
+    const slotKeys = (): string[] => Array.from(new Set(rows.map(entry => entry.valueKey)));
+    const trackedKeys = (): string[] => Array.from(new Set([...initialValues.keys(), ...values.keys()]));
+
+    const isDirty = (): boolean => trackedKeys().some(key => (values.get(key) || '') !== (initialValues.get(key) || ''));
 
     const refreshRowState = (entry: EditorRow): void => {
-        const value = values.get(entry.line.key) || '';
-        entry.row.classList.toggle('slt-ut-dirty', value !== (initialValues.get(entry.line.key) || ''));
+        const value = values.get(entry.valueKey) || '';
+        const dirty = entry.valueKey !== entry.initialValueKey || value !== (initialValues.get(entry.valueKey) || '');
+        entry.row.classList.toggle('slt-ut-dirty', dirty);
         entry.row.classList.toggle('slt-ut-kept', Boolean(value) && isKeepOriginal(entry.line.text, value));
+        entry.row.classList.toggle('slt-ut-unlinked', entry.valueKey !== entry.line.key);
+    };
+
+    const refreshLinkTag = (entry: EditorRow): void => {
+        if (!entry.linkTag) return;
+        const unlinked = entry.valueKey !== entry.line.key;
+        const [idle, hover] = Array.from(entry.linkTag.children);
+        idle.textContent = unlinked ? 'unlinked' : 'repeat';
+        hover.textContent = unlinked ? '⛓️ Relink' : '⛓️‍💥 Unlink';
+        const label = unlinked ? 'Share one translation with the other repeats again' : 'Translate this repeat on its own without changing the others';
+        entry.linkTag.title = label;
+        entry.linkTag.setAttribute('aria-label', label);
+    };
+
+    const refreshRepeatCounts = (): void => {
+        rows.forEach(entry => {
+            if (!entry.countTag) return;
+            const linked = rows.filter(other => other.valueKey === entry.line.key).length;
+            entry.countTag.textContent = `×${linked}`;
+            entry.countTag.hidden = linked < 2;
+        });
     };
 
     const cancelLabel = (): HTMLElement | null =>
         handle?.footer.querySelector('[data-action="cancel"] .slt-ui-btn-label') as HTMLElement | null;
 
     const refreshSummary = (): void => {
-        const yours = uniqueKeys.filter(key => cleanUserTranslation(values.get(key))).length;
-        count.textContent = `${yours} of ${uniqueKeys.length} line${uniqueKeys.length === 1 ? '' : 's'} translated by you`;
+        const slots = slotKeys();
+        const yours = slots.filter(key => cleanUserTranslation(values.get(key))).length;
+        count.textContent = `${yours} of ${slots.length} line${slots.length === 1 ? '' : 's'} translated by you`;
         const dirty = isDirty();
         if (handle) {
             dialogOptions.dismissible = !dirty;
@@ -246,7 +294,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     const setValue = (key: string, value: string, except?: HTMLTextAreaElement): void => {
         values.set(key, value);
         rows.forEach(entry => {
-            if (entry.line.key !== key) return;
+            if (entry.valueKey !== key) return;
             if (entry.input !== except) {
                 entry.input.value = value;
                 autoGrow(entry.input);
@@ -259,22 +307,52 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     const applyFilters = (): void => {
         let visible = 0;
         rows.forEach(entry => {
-            const hidden = (missingFilter.checked && autoLines.has(entry.line.key)) || (repeatFilter.checked && entry.repeat);
+            const hidden = (missingFilter.checked && autoLines.has(entry.line.key))
+                || (repeatFilter.checked && entry.repeat && entry.valueKey === entry.line.key);
             entry.row.hidden = hidden;
             if (!hidden) visible++;
         });
         emptyFilterNote.hidden = visible > 0;
     };
 
+    const toggleLink = (entry: EditorRow): void => {
+        const unlinkedKey = unlinkedTranslationKey(entry.line.key, entry.occurrence);
+        if (entry.valueKey === unlinkedKey) {
+            values.delete(unlinkedKey);
+            entry.valueKey = entry.line.key;
+        } else {
+            values.set(unlinkedKey, values.get(entry.line.key) || autoLines.get(entry.line.key) || '');
+            entry.valueKey = unlinkedKey;
+        }
+        entry.input.value = values.get(entry.valueKey) || '';
+        autoGrow(entry.input);
+        refreshLinkTag(entry);
+        refreshRowState(entry);
+        refreshRepeatCounts();
+        refreshSummary();
+        applyFilters();
+        if (!entry.row.hidden) entry.input.focus();
+    };
+
     sourceLines.forEach((line, index) => {
         const repeat = seen.has(line.key);
         seen.add(line.key);
+        const occurrence = occurrenceList[index];
+        const unlinkedKey = unlinkedTranslationKey(line.key, occurrence);
+        const valueKey = repeat && initialValues.has(unlinkedKey) ? unlinkedKey : line.key;
         const auto = autoLines.get(line.key);
         const total = occurrences.get(line.key) || 1;
 
         const sourceText = el('div', { class: 'slt-ut-src-text', text: line.text });
-        if (!repeat && total > 1) sourceText.append(el('span', { class: 'slt-ut-repeat', text: `×${total}` }));
-        if (repeat) sourceText.append(el('span', { class: 'slt-ut-repeat', text: 'repeat' }));
+        const countTag = !repeat && total > 1 ? el('span', { class: 'slt-ut-repeat', text: `×${total}` }) : null;
+        const linkTag = repeat
+            ? el('button', { class: 'slt-ut-repeat slt-ut-link', type: 'button' },
+                el('span', { class: 'slt-ut-link-idle' }),
+                el('span', { class: 'slt-ut-link-hover' })
+            )
+            : null;
+        if (countTag) sourceText.append(countTag);
+        if (linkTag) sourceText.append(linkTag);
 
         const autoNode = auto
             ? el('div', { class: 'slt-ut-auto' }, el('span', { class: 'slt-ut-auto-label', text: 'Auto' }), auto)
@@ -287,7 +365,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             placeholder: auto ? 'Keep the automatic translation' : 'Your translation',
             'aria-label': `Your translation for line ${index + 1}`
         }) as HTMLTextAreaElement;
-        input.value = values.get(line.key) || '';
+        input.value = values.get(valueKey) || '';
 
         const tools = el('div', { class: 'slt-ut-tools' });
         if (auto) tools.append(el('button', { class: 'slt-ut-mini', type: 'button', 'data-tool': 'auto', text: 'Use automatic', title: 'Copy the automatic translation into the box to tweak it' }));
@@ -307,14 +385,16 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             el('div', { class: 'slt-ut-edit' }, input, tools)
         );
 
-        const entry: EditorRow = { line, row, input, repeat };
+        const entry: EditorRow = { line, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
         rows.push(entry);
         rowsContainer.append(row);
+        refreshLinkTag(entry);
         refreshRowState(entry);
 
+        linkTag?.addEventListener('click', () => toggleLink(entry));
         input.addEventListener('input', () => {
             autoGrow(input);
-            setValue(line.key, input.value, input);
+            setValue(entry.valueKey, input.value, input);
         });
         input.addEventListener('keydown', event => {
             if (event.key !== 'Enter' || event.shiftKey) return;
@@ -326,26 +406,27 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
         });
         tools.addEventListener('click', event => {
             const tool = (event.target as HTMLElement).closest('[data-tool]')?.getAttribute('data-tool');
-            if (tool === 'auto' && auto) setValue(line.key, auto);
-            else if (tool === 'keep') setValue(line.key, line.text);
-            else if (tool === 'clear') setValue(line.key, '');
+            if (tool === 'auto' && auto) setValue(entry.valueKey, auto);
+            else if (tool === 'keep') setValue(entry.valueKey, line.text);
+            else if (tool === 'clear') setValue(entry.valueKey, '');
             else return;
             input.focus();
         });
     });
 
+    refreshRepeatCounts();
     missingFilter.addEventListener('change', applyFilters);
     repeatFilter.addEventListener('change', applyFilters);
 
     const fillFromAuto = (): void => {
-        uniqueKeys.forEach(key => {
-            const auto = autoLines.get(key);
-            if (auto && !cleanUserTranslation(values.get(key))) setValue(key, auto);
+        rows.forEach(entry => {
+            const auto = autoLines.get(entry.line.key);
+            if (auto && !cleanUserTranslation(values.get(entry.valueKey))) setValue(entry.valueKey, auto);
         });
     };
 
     const copyTranslations = async (): Promise<void> => {
-        const text = sourceLines.map(line => cleanUserTranslation(values.get(line.key)) || autoLines.get(line.key) || '').join('\n');
+        const text = rows.map(entry => cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || '').join('\n');
         try {
             await navigator.clipboard.writeText(text);
             notify({ kind: 'success', key: 'slt-user-translation', title: 'Translation copied', description: 'One line per lyric line, ready to paste back in later.' });
@@ -362,7 +443,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
         const pasted = pasteInput.value.split(/\r?\n/).map(cleanUserTranslation).filter(Boolean);
         const targets = rows.filter(entry => !entry.row.hidden);
         const filled = Math.min(pasted.length, targets.length);
-        for (let i = 0; i < filled; i++) setValue(targets[i].line.key, pasted[i]);
+        for (let i = 0; i < filled; i++) setValue(targets[i].valueKey, pasted[i]);
         pastePanel.hidden = true;
         pasteInput.value = '';
         const extra = pasted.length > targets.length ? ` ${pasted.length - targets.length} pasted line${pasted.length - targets.length === 1 ? ' was' : 's were'} left over.` : '';
@@ -371,7 +452,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
 
     const save = (): void => {
         const merged = getUserTranslations(trackUri, targetLang);
-        uniqueKeys.forEach(key => {
+        trackedKeys().forEach(key => {
             const value = cleanUserTranslation(values.get(key));
             if (value) merged.set(key, value);
             else merged.delete(key);
@@ -381,7 +462,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             return;
         }
         handle?.close();
-        const yours = uniqueKeys.filter(key => merged.has(key)).length;
+        const yours = slotKeys().filter(key => merged.has(key)).length;
         notify({
             kind: 'success',
             key: 'slt-user-translation',
@@ -404,7 +485,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
                     { label: 'Start from the automatic translation', hint: 'Fills empty lines', onClick: fillFromAuto },
                     { label: 'Paste translated lines…', hint: 'One per line', onClick: () => { pastePanel.hidden = false; pasteInput.focus(); } },
                     { label: 'Copy translation', hint: 'Plain text', onClick: () => { void copyTranslations(); } },
-                    { label: 'Clear all lines', onClick: () => uniqueKeys.forEach(key => setValue(key, '')) }
+                    { label: 'Clear all lines', onClick: () => slotKeys().forEach(key => setValue(key, '')) }
                 ]
             },
             {
