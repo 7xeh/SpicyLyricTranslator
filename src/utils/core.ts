@@ -1660,6 +1660,8 @@ async function translateBackgroundVocals(): Promise<void> {
         results.forEach((result, i) => {
             const translated = (result.translatedText || '').trim();
             if (!translated || isEchoedTranslation(translated, sources[i])) return;
+            const handWritten = result.source === 'user' || result.source === 'file';
+            if (!handWritten && translated.length > Math.max(40, sources[i].length * 6)) return;
             backgroundTranslation.set(keys[i], translated);
             added = true;
         });
@@ -1671,6 +1673,10 @@ async function translateBackgroundVocals(): Promise<void> {
     } finally {
         backgroundInFlight = false;
     }
+}
+
+export function getBackgroundVocalTranslations(trackUri: string | null): Map<string, string> {
+    return trackUri && trackUri === backgroundTrackUri ? new Map(backgroundTranslation) : new Map();
 }
 
 export function setBackgroundVocalTranslation(on: boolean): void {

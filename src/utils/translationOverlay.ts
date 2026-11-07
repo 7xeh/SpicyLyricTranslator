@@ -1955,9 +1955,10 @@ function applyBackgroundTranslations(doc: Document): void {
         const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
         if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode) continue;
 
+        const sig = `${currentConfig.syncWordHighlight ? 'W' : ''}${translation}`;
         const next = line.nextElementSibling as HTMLElement | null;
         const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
-        if (existing && existing.textContent === translation) {
+        if (existing && existing.dataset.sltSig === sig) {
             claimed.add(existing);
             continue;
         }
@@ -1965,15 +1966,62 @@ function applyBackgroundTranslations(doc: Document): void {
 
         const el = doc.createElement('div');
         el.className = BACKGROUND_TRANSLATION_CLASS;
+        el.dataset.sltSig = sig;
         el.setAttribute('aria-hidden', 'true');
         if (line.classList.contains('OppositeAligned')) el.classList.add('OppositeAligned');
         if (line.classList.contains('rtl')) el.classList.add('rtl');
-        el.textContent = translation;
+        if (currentConfig.syncWordHighlight) {
+            appendTranslationWordSpans(doc, el, translation, line, 'slt-sync-word');
+        } else {
+            el.textContent = translation;
+        }
         line.parentNode.insertBefore(el, line.nextSibling);
+        syncBackgroundTranslation(line, el);
         claimed.add(el);
     }
     doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach(el => {
         if (!claimed.has(el)) el.remove();
+    });
+}
+
+function leadLineBefore(bgLine: HTMLElement): HTMLElement | null {
+    let prev = bgLine.previousElementSibling as HTMLElement | null;
+    while (prev && !(prev.classList.contains('line') && !prev.classList.contains('bg-line'))) {
+        prev = prev.previousElementSibling as HTMLElement | null;
+    }
+    return prev;
+}
+
+function syncBackgroundTranslation(bgLine: HTMLElement, el: HTMLElement): void {
+    syncTranslationLineFromOriginal(bgLine, el, 'Syllable');
+
+    if (!bgLine.style.getPropertyValue('--BlurAmount')) {
+        const lead = leadLineBefore(bgLine);
+        const leadBlur = lead?.style.getPropertyValue('--BlurAmount') || '';
+        if (leadBlur && !isLineActive(bgLine)) setStyleProp(el, '--BlurAmount', leadBlur);
+        else clearStyleProp(el, '--BlurAmount');
+    }
+
+    if (updateTranslatedWordGradients(el, bgLine)) {
+        clearStyleProp(el, '--gradient-position');
+        return;
+    }
+
+    if (bgLine.style.getPropertyValue('--gradient-position').trim() !== '') return;
+
+    const isSung = bgLine.classList.contains('Sung');
+    if (!isLineActive(bgLine)) {
+        setStyleProp(el, '--gradient-position', isSung ? '100%' : '-20%');
+        return;
+    }
+    const progress = getOverallWordGradientProgress(bgLine);
+    setStyleProp(el, '--gradient-position', `${progress === null ? 100 : -20 + progress * 120}%`);
+}
+
+function updateBackgroundSyncStates(doc: Document): void {
+    doc.querySelectorAll<HTMLElement>(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach(el => {
+        const bgLine = findOriginalLineForTranslation(el);
+        if (bgLine && bgLine.classList.contains('bg-line')) syncBackgroundTranslation(bgLine, el);
     });
 }
 
@@ -2106,6 +2154,7 @@ function syncLoop(timestamp: number = performance.now()): void {
         updateLearningRow(document);
         updateWordSyncStates(document);
         syncBlurToTranslations(document);
+        updateBackgroundSyncStates(document);
 
         const pipWindow = getPIPWindow();
         if (pipWindow) {
@@ -2124,6 +2173,7 @@ function syncLoop(timestamp: number = performance.now()): void {
                     onActiveLineChanged(pipDoc);
                     updateWordSyncStates(pipDoc);
                     syncBlurToTranslations(pipDoc);
+                    updateBackgroundSyncStates(pipDoc);
 
                     if (!activeLineObservers.has(pipDoc)) {
                         setupActiveLineObserver(pipDoc);

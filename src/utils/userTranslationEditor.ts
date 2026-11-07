@@ -3,7 +3,7 @@ import { notify } from './notify';
 import { state } from './state';
 import { getCurrentTrackUri, getCurrentTrackMeta, getTrackCache } from './trackCache';
 import { fetchLyricsFromAPI, fetchLyricsForTrackUri } from './lyricsFetcher';
-import { forceRetranslate, getVisibleLyricsLineTexts } from './core';
+import { forceRetranslate, getVisibleLyricsLineTexts, getBackgroundVocalTranslations } from './core';
 import { getLanguageName } from './languageDetection';
 import {
     getUserTranslations,
@@ -21,8 +21,20 @@ interface EditorLine {
     key: string;
 }
 
+interface BackgroundEditorLine extends EditorLine {
+    afterIndex: number;
+    romanKey: string;
+    count: number;
+}
+
+interface EditorSource {
+    lines: EditorLine[];
+    background: BackgroundEditorLine[];
+}
+
 interface EditorRow {
     line: EditorLine;
+    background: boolean;
     row: HTMLElement;
     input: HTMLTextAreaElement;
     repeat: boolean;
@@ -57,6 +69,10 @@ const EDITOR_STYLES = `
 .slt-ut-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.03); }
 .slt-ut-row[hidden] { display: none; }
 .slt-ut-row.slt-ut-dirty { border-color: var(--slt-ui-accent-line, rgba(29, 185, 84, 0.45)); }
+.slt-ut-row-bg { margin-left: 28px; padding-top: 7px; padding-bottom: 7px; background: rgba(255, 255, 255, 0.015); }
+.slt-ut-row-bg .slt-ut-num { padding-top: 1px; }
+.slt-ut-row-bg .slt-ut-src-text { font-size: 13px; font-weight: 550; color: var(--slt-ui-ink-muted); font-style: italic; }
+.slt-ut-bg-tag { font-style: normal; text-transform: lowercase; }
 .slt-ut-num { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--slt-ui-ink-faint); padding-top: 3px; text-align: right; }
 .slt-ut-src { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-top: 2px; }
 .slt-ut-src-text { font-size: 14px; font-weight: 600; color: var(--slt-ui-ink); overflow-wrap: anywhere; }
@@ -114,7 +130,7 @@ function toEditorLines(texts: string[]): EditorLine[] {
         .filter(line => line.text && line.key);
 }
 
-async function loadSourceLines(trackUri: string, targetLang: string): Promise<EditorLine[]> {
+async function loadSourceLines(trackUri: string, targetLang: string): Promise<EditorSource> {
     const isCurrent = trackUri === getCurrentTrackUri();
     let lyrics: Awaited<ReturnType<typeof fetchLyricsFromAPI>> = null;
     try {
@@ -123,20 +139,59 @@ async function loadSourceLines(trackUri: string, targetLang: string): Promise<Ed
         lyrics = null;
     }
 
-    const apiLines = (lyrics?.lineData || [])
-        .filter(line => !line.isInstrumental && line.text.trim())
-        .map(line => ({
-            text: line.text.trim(),
-            romanized: line.romanizedText && line.romanizedText !== line.text ? line.romanizedText : undefined,
-            key: userTranslationKey(line.text)
-        }))
-        .filter(line => line.key);
-    if (apiLines.length > 0) return apiLines;
+    const apiLines: EditorLine[] = [];
+    const background: BackgroundEditorLine[] = [];
+    const backgroundByKey = new Map<string, BackgroundEditorLine>();
+    for (const line of lyrics?.lineData || []) {
+        const key = userTranslationKey(line.text);
+        if (!line.isInstrumental && line.text.trim() && key) {
+            apiLines.push({
+                text: line.text.trim(),
+                romanized: line.romanizedText && line.romanizedText !== line.text ? line.romanizedText : undefined,
+                key
+            });
+        }
+        line.backgroundVocals?.forEach(vocal => {
+            const text = vocal.text.trim();
+            const vocalKey = userTranslationKey(text);
+            if (!vocalKey || /^[♪♫•\-–—\s]+$/.test(text)) return;
+            const known = backgroundByKey.get(vocalKey);
+            if (known) {
+                known.count++;
+                return;
+            }
+            const entry: BackgroundEditorLine = {
+                text,
+                romanized: vocal.romanizedText && vocal.romanizedText !== vocal.text ? vocal.romanizedText.trim() : undefined,
+                key: vocalKey,
+                romanKey: userTranslationKey(vocal.romanizedText),
+                afterIndex: apiLines.length - 1,
+                count: 1
+            };
+            backgroundByKey.set(vocalKey, entry);
+            background.push(entry);
+        });
+    }
+    if (apiLines.length > 0) {
+        const leadKeys = new Set(apiLines.map(line => line.key));
+        return { lines: apiLines, background: background.filter(line => !leadKeys.has(line.key)) };
+    }
 
     const cachedSource = getTrackCache(trackUri, targetLang)?.sourceLines || [];
-    if (cachedSource.length > 0) return toEditorLines(cachedSource);
+    if (cachedSource.length > 0) return { lines: toEditorLines(cachedSource), background: [] };
 
-    return isCurrent ? toEditorLines(getVisibleLyricsLineTexts()) : [];
+    return { lines: isCurrent ? toEditorLines(getVisibleLyricsLineTexts()) : [], background: [] };
+}
+
+function loadBackgroundAutoTranslations(trackUri: string, targetLang: string, background: BackgroundEditorLine[]): Map<string, string> {
+    const auto = new Map<string, string>();
+    if (background.length === 0 || targetLang !== state.targetLanguage) return auto;
+    const translated = getBackgroundVocalTranslations(trackUri);
+    background.forEach(line => {
+        const value = cleanUserTranslation(translated.get(line.key) || (line.romanKey ? translated.get(line.romanKey) : ''));
+        if (value && !isKeepOriginal(line.text, value)) auto.set(line.key, value);
+    });
+    return auto;
 }
 
 function loadAutoTranslations(trackUri: string, targetLang: string, userLines: Map<string, string>): Map<string, string> {
@@ -179,7 +234,9 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     }
 
     ensureEditorStyles();
-    const sourceLines = await loadSourceLines(trackUri, targetLang);
+    const source = await loadSourceLines(trackUri, targetLang);
+    const sourceLines = source.lines;
+    const backgroundLines = source.background;
     if (sourceLines.length === 0) {
         notify({ kind: 'warning', key: 'slt-user-translation', title: 'No lyrics to translate', description: 'Open the song in Spicy Lyrics so its lines can be loaded, then try again.' });
         return;
@@ -187,8 +244,11 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
 
     const savedLines = getUserTranslations(trackUri, targetLang);
     const autoLines = loadAutoTranslations(trackUri, targetLang, savedLines);
+    loadBackgroundAutoTranslations(trackUri, targetLang, backgroundLines).forEach((value, key) => {
+        if (!autoLines.has(key)) autoLines.set(key, value);
+    });
     const meta = resolveTrackMeta(trackUri, targetLang);
-    const uniqueKeys = Array.from(new Set(sourceLines.map(line => line.key)));
+    const uniqueKeys = Array.from(new Set([...sourceLines, ...backgroundLines].map(line => line.key)));
     const occurrences = new Map<string, number>();
     sourceLines.forEach(line => occurrences.set(line.key, (occurrences.get(line.key) || 0) + 1));
     const missingAutoCount = uniqueKeys.filter(key => !autoLines.has(key)).length;
@@ -204,7 +264,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     );
     const hint = el('p', {
         class: 'slt-ut-hint',
-        text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
+        text: `Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line.${backgroundLines.length > 0 ? ' Background vocals sit under the line they belong to and share one translation wherever they repeat.' : ''} Your translations stay on this device and survive clearing the cache.`
     });
 
     const pasteInput = el('textarea', {
@@ -334,14 +394,15 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
         if (!entry.row.hidden) entry.input.focus();
     };
 
-    sourceLines.forEach((line, index) => {
-        const repeat = seen.has(line.key);
-        seen.add(line.key);
-        const occurrence = occurrenceList[index];
+    const addRow = (line: EditorLine, index: number, backgroundCount: number): void => {
+        const background = backgroundCount > 0;
+        const repeat = !background && seen.has(line.key);
+        if (!background) seen.add(line.key);
+        const occurrence = background ? 0 : occurrenceList[index];
         const unlinkedKey = unlinkedTranslationKey(line.key, occurrence);
         const valueKey = repeat && initialValues.has(unlinkedKey) ? unlinkedKey : line.key;
         const auto = autoLines.get(line.key);
-        const total = occurrences.get(line.key) || 1;
+        const total = background ? 1 : occurrences.get(line.key) || 1;
 
         const sourceText = el('div', { class: 'slt-ut-src-text', text: line.text });
         const countTag = !repeat && total > 1 ? el('span', { class: 'slt-ut-repeat', text: `×${total}` }) : null;
@@ -351,6 +412,9 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
                 el('span', { class: 'slt-ut-link-hover' })
             )
             : null;
+        if (background) {
+            sourceText.append(el('span', { class: 'slt-ut-repeat slt-ut-bg-tag', text: backgroundCount > 1 ? `background ×${backgroundCount}` : 'background' }));
+        }
         if (countTag) sourceText.append(countTag);
         if (linkTag) sourceText.append(linkTag);
 
@@ -363,7 +427,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             rows: '1',
             spellcheck: 'false',
             placeholder: auto ? 'Keep the automatic translation' : 'Your translation',
-            'aria-label': `Your translation for line ${index + 1}`
+            'aria-label': background ? `Your translation for the background vocal "${line.text}"` : `Your translation for line ${index + 1}`
         }) as HTMLTextAreaElement;
         input.value = values.get(valueKey) || '';
 
@@ -375,8 +439,8 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             el('span', { class: 'slt-ut-kept-note', text: 'No translation will show for this line' })
         );
 
-        const row = el('div', { class: 'slt-ut-row' },
-            el('span', { class: 'slt-ut-num', text: String(index + 1) }),
+        const row = el('div', { class: background ? 'slt-ut-row slt-ut-row-bg' : 'slt-ut-row' },
+            el('span', { class: 'slt-ut-num', text: background ? '↳' : String(index + 1) }),
             el('div', { class: 'slt-ut-src' },
                 sourceText,
                 line.romanized ? el('div', { class: 'slt-ut-roman', text: line.romanized }) : null,
@@ -385,7 +449,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             el('div', { class: 'slt-ut-edit' }, input, tools)
         );
 
-        const entry: EditorRow = { line, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
+        const entry: EditorRow = { line, background, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
         rows.push(entry);
         rowsContainer.append(row);
         refreshLinkTag(entry);
@@ -412,6 +476,22 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
             else return;
             input.focus();
         });
+    };
+
+    const backgroundAfter = new Map<number, BackgroundEditorLine[]>();
+    backgroundLines.forEach(line => {
+        const list = backgroundAfter.get(line.afterIndex) || [];
+        list.push(line);
+        backgroundAfter.set(line.afterIndex, list);
+    });
+    const addBackgroundRows = (afterIndex: number): void => {
+        backgroundAfter.get(afterIndex)?.forEach(line => addRow(line, afterIndex, line.count));
+    };
+
+    addBackgroundRows(-1);
+    sourceLines.forEach((line, index) => {
+        addRow(line, index, 0);
+        addBackgroundRows(index);
     });
 
     refreshRepeatCounts();
@@ -426,7 +506,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     };
 
     const copyTranslations = async (): Promise<void> => {
-        const text = rows.map(entry => cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || '').join('\n');
+        const text = rows.filter(entry => !entry.background).map(entry =>cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || '').join('\n');
         try {
             await navigator.clipboard.writeText(text);
             notify({ kind: 'success', key: 'slt-user-translation', title: 'Translation copied', description: 'One line per lyric line, ready to paste back in later.' });
@@ -441,7 +521,7 @@ export async function openUserTranslationEditor(options: { trackUri?: string; ta
     });
     pasteApply.addEventListener('click', () => {
         const pasted = pasteInput.value.split(/\r?\n/).map(cleanUserTranslation).filter(Boolean);
-        const targets = rows.filter(entry => !entry.row.hidden);
+        const targets = rows.filter(entry => !entry.row.hidden && !entry.background);
         const filled = Math.min(pasted.length, targets.length);
         for (let i = 0; i < filled; i++) setValue(targets[i].valueKey, pasted[i]);
         pastePanel.hidden = true;

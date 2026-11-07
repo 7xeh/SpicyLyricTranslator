@@ -10549,27 +10549,72 @@ body.slt-update-waiting #TranslateToggle::after {
       const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
       if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode)
         continue;
+      const sig = `${currentConfig.syncWordHighlight ? "W" : ""}${translation}`;
       const next = line.nextElementSibling;
       const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
-      if (existing && existing.textContent === translation) {
+      if (existing && existing.dataset.sltSig === sig) {
         claimed.add(existing);
         continue;
       }
       existing?.remove();
       const el2 = doc.createElement("div");
       el2.className = BACKGROUND_TRANSLATION_CLASS;
+      el2.dataset.sltSig = sig;
       el2.setAttribute("aria-hidden", "true");
       if (line.classList.contains("OppositeAligned"))
         el2.classList.add("OppositeAligned");
       if (line.classList.contains("rtl"))
         el2.classList.add("rtl");
-      el2.textContent = translation;
+      if (currentConfig.syncWordHighlight) {
+        appendTranslationWordSpans(doc, el2, translation, line, "slt-sync-word");
+      } else {
+        el2.textContent = translation;
+      }
       line.parentNode.insertBefore(el2, line.nextSibling);
+      syncBackgroundTranslation(line, el2);
       claimed.add(el2);
     }
     doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach((el2) => {
       if (!claimed.has(el2))
         el2.remove();
+    });
+  }
+  function leadLineBefore(bgLine) {
+    let prev = bgLine.previousElementSibling;
+    while (prev && !(prev.classList.contains("line") && !prev.classList.contains("bg-line"))) {
+      prev = prev.previousElementSibling;
+    }
+    return prev;
+  }
+  function syncBackgroundTranslation(bgLine, el2) {
+    syncTranslationLineFromOriginal(bgLine, el2, "Syllable");
+    if (!bgLine.style.getPropertyValue("--BlurAmount")) {
+      const lead = leadLineBefore(bgLine);
+      const leadBlur = lead?.style.getPropertyValue("--BlurAmount") || "";
+      if (leadBlur && !isLineActive(bgLine))
+        setStyleProp(el2, "--BlurAmount", leadBlur);
+      else
+        clearStyleProp(el2, "--BlurAmount");
+    }
+    if (updateTranslatedWordGradients(el2, bgLine)) {
+      clearStyleProp(el2, "--gradient-position");
+      return;
+    }
+    if (bgLine.style.getPropertyValue("--gradient-position").trim() !== "")
+      return;
+    const isSung = bgLine.classList.contains("Sung");
+    if (!isLineActive(bgLine)) {
+      setStyleProp(el2, "--gradient-position", isSung ? "100%" : "-20%");
+      return;
+    }
+    const progress = getOverallWordGradientProgress(bgLine);
+    setStyleProp(el2, "--gradient-position", `${progress === null ? 100 : -20 + progress * 120}%`);
+  }
+  function updateBackgroundSyncStates(doc) {
+    doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach((el2) => {
+      const bgLine = findOriginalLineForTranslation(el2);
+      if (bgLine && bgLine.classList.contains("bg-line"))
+        syncBackgroundTranslation(bgLine, el2);
     });
   }
   function setBackgroundTranslationData(data) {
@@ -10691,6 +10736,7 @@ body.slt-update-waiting #TranslateToggle::after {
       updateLearningRow(document);
       updateWordSyncStates(document);
       syncBlurToTranslations(document);
+      updateBackgroundSyncStates(document);
       const pipWindow = getPIPWindow();
       if (pipWindow) {
         try {
@@ -10706,6 +10752,7 @@ body.slt-update-waiting #TranslateToggle::after {
             onActiveLineChanged(pipDoc);
             updateWordSyncStates(pipDoc);
             syncBlurToTranslations(pipDoc);
+            updateBackgroundSyncStates(pipDoc);
             if (!activeLineObservers.has(pipDoc)) {
               setupActiveLineObserver(pipDoc);
             }
@@ -11770,10 +11817,38 @@ body.slt-overlay-active .LyricsContent {}
     word-break: break-word;
     box-sizing: border-box;
     padding-inline-end: 0.25em;
-    color: rgba(255, 255, 255, 0.7);
     opacity: var(--Vocal-NotSung-opacity, 0.51);
     filter: blur(var(--BlurAmount, 0px));
     transition: opacity 0.3s cubic-bezier(0.37, 0, 0.63, 1), filter 0.3s cubic-bezier(0.37, 0, 0.63, 1);
+    --gradient-degrees: 180deg;
+    --gradient-alpha: 0.75;
+    --gradient-alpha-end: 0.42;
+    --gradient-position: -20%;
+    --gradient-offset: 0%;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    background-image: linear-gradient(
+        var(--gradient-degrees),
+        rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
+        rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + 20% + var(--gradient-offset))
+    ) !important;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+}
+
+.slt-bg-translation:has(.slt-sync-word) {
+    background-image: none !important;
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+}
+
+.slt-bg-translation .slt-sync-word {
+    --gradient-alpha: 0.75;
+    --gradient-alpha-end: 0.42;
 }
 
 .slt-bg-translation.OppositeAligned,
@@ -11781,13 +11856,31 @@ body.slt-overlay-active .LyricsContent {}
     text-align: end;
 }
 
-.line.bg-line.Active + .slt-bg-translation {
+.line.bg-line.Active + .slt-bg-translation,
+.slt-bg-translation.Active {
     filter: none !important;
     opacity: var(--Vocal-Active-opacity, 1) !important;
 }
 
-.line.bg-line.Sung + .slt-bg-translation {
+.line.bg-line.Active + .slt-bg-translation .slt-sync-word.slt-word-active,
+.slt-bg-translation.Active .slt-sync-word.slt-word-active {
+    text-shadow: 0 0 var(--text-shadow-blur-radius, 10px) rgba(255, 255, 255, var(--text-shadow-opacity-decimal, 0.4));
+}
+
+.slt-bg-translation.Active .slt-sync-word.slt-word-past {
+    opacity: 1;
+}
+
+.line.bg-line.Sung + .slt-bg-translation,
+.slt-bg-translation.Sung {
     opacity: var(--Vocal-Sung-opacity, 0.497);
+    --gradient-position: 100%;
+}
+
+.line.bg-line.Sung + .slt-bg-translation .slt-sync-word,
+.slt-bg-translation.Sung .slt-sync-word {
+    --gradient-alpha: 0.5;
+    --gradient-alpha-end: 0.35;
 }
 
 body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
@@ -12231,7 +12324,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.7" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.8" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -12299,7 +12392,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"e46264dbe998fabd5952bd1520e6d55692bfcca8f37fcdde7a24a92bf77840ea".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "e46264dbe998fabd5952bd1520e6d55692bfcca8f37fcdde7a24a92bf77840ea" : "";
+    return !"416493c6d619ca8643244d6e7790881edcc88dbf605ae92f85d3cc5199181952".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "416493c6d619ca8643244d6e7790881edcc88dbf605ae92f85d3cc5199181952" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -14474,6 +14567,10 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
 .slt-ut-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.03); }
 .slt-ut-row[hidden] { display: none; }
 .slt-ut-row.slt-ut-dirty { border-color: var(--slt-ui-accent-line, rgba(29, 185, 84, 0.45)); }
+.slt-ut-row-bg { margin-left: 28px; padding-top: 7px; padding-bottom: 7px; background: rgba(255, 255, 255, 0.015); }
+.slt-ut-row-bg .slt-ut-num { padding-top: 1px; }
+.slt-ut-row-bg .slt-ut-src-text { font-size: 13px; font-weight: 550; color: var(--slt-ui-ink-muted); font-style: italic; }
+.slt-ut-bg-tag { font-style: normal; text-transform: lowercase; }
 .slt-ut-num { font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--slt-ui-ink-faint); padding-top: 3px; text-align: right; }
 .slt-ut-src { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-top: 2px; }
 .slt-ut-src-text { font-size: 14px; font-weight: 600; color: var(--slt-ui-ink); overflow-wrap: anywhere; }
@@ -14532,17 +14629,60 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     } catch {
       lyrics = null;
     }
-    const apiLines = (lyrics?.lineData || []).filter((line) => !line.isInstrumental && line.text.trim()).map((line) => ({
-      text: line.text.trim(),
-      romanized: line.romanizedText && line.romanizedText !== line.text ? line.romanizedText : void 0,
-      key: userTranslationKey(line.text)
-    })).filter((line) => line.key);
-    if (apiLines.length > 0)
-      return apiLines;
+    const apiLines = [];
+    const background = [];
+    const backgroundByKey = /* @__PURE__ */ new Map();
+    for (const line of lyrics?.lineData || []) {
+      const key = userTranslationKey(line.text);
+      if (!line.isInstrumental && line.text.trim() && key) {
+        apiLines.push({
+          text: line.text.trim(),
+          romanized: line.romanizedText && line.romanizedText !== line.text ? line.romanizedText : void 0,
+          key
+        });
+      }
+      line.backgroundVocals?.forEach((vocal) => {
+        const text3 = vocal.text.trim();
+        const vocalKey = userTranslationKey(text3);
+        if (!vocalKey || /^[♪♫•\-–—\s]+$/.test(text3))
+          return;
+        const known = backgroundByKey.get(vocalKey);
+        if (known) {
+          known.count++;
+          return;
+        }
+        const entry = {
+          text: text3,
+          romanized: vocal.romanizedText && vocal.romanizedText !== vocal.text ? vocal.romanizedText.trim() : void 0,
+          key: vocalKey,
+          romanKey: userTranslationKey(vocal.romanizedText),
+          afterIndex: apiLines.length - 1,
+          count: 1
+        };
+        backgroundByKey.set(vocalKey, entry);
+        background.push(entry);
+      });
+    }
+    if (apiLines.length > 0) {
+      const leadKeys = new Set(apiLines.map((line) => line.key));
+      return { lines: apiLines, background: background.filter((line) => !leadKeys.has(line.key)) };
+    }
     const cachedSource = getTrackCache(trackUri, targetLang)?.sourceLines || [];
     if (cachedSource.length > 0)
-      return toEditorLines(cachedSource);
-    return isCurrent ? toEditorLines(getVisibleLyricsLineTexts()) : [];
+      return { lines: toEditorLines(cachedSource), background: [] };
+    return { lines: isCurrent ? toEditorLines(getVisibleLyricsLineTexts()) : [], background: [] };
+  }
+  function loadBackgroundAutoTranslations(trackUri, targetLang, background) {
+    const auto = /* @__PURE__ */ new Map();
+    if (background.length === 0 || targetLang !== state.targetLanguage)
+      return auto;
+    const translated = getBackgroundVocalTranslations(trackUri);
+    background.forEach((line) => {
+      const value = cleanUserTranslation(translated.get(line.key) || (line.romanKey ? translated.get(line.romanKey) : ""));
+      if (value && !isKeepOriginal(line.text, value))
+        auto.set(line.key, value);
+    });
+    return auto;
   }
   function loadAutoTranslations(trackUri, targetLang, userLines) {
     const auto = /* @__PURE__ */ new Map();
@@ -14582,15 +14722,21 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       return;
     }
     ensureEditorStyles2();
-    const sourceLines = await loadSourceLines(trackUri, targetLang);
+    const source = await loadSourceLines(trackUri, targetLang);
+    const sourceLines = source.lines;
+    const backgroundLines = source.background;
     if (sourceLines.length === 0) {
       notify({ kind: "warning", key: "slt-user-translation", title: "No lyrics to translate", description: "Open the song in Spicy Lyrics so its lines can be loaded, then try again." });
       return;
     }
     const savedLines = getUserTranslations(trackUri, targetLang);
     const autoLines = loadAutoTranslations(trackUri, targetLang, savedLines);
+    loadBackgroundAutoTranslations(trackUri, targetLang, backgroundLines).forEach((value, key) => {
+      if (!autoLines.has(key))
+        autoLines.set(key, value);
+    });
     const meta = resolveTrackMeta(trackUri, targetLang);
-    const uniqueKeys = Array.from(new Set(sourceLines.map((line) => line.key)));
+    const uniqueKeys = Array.from(new Set([...sourceLines, ...backgroundLines].map((line) => line.key)));
     const occurrences = /* @__PURE__ */ new Map();
     sourceLines.forEach((line) => occurrences.set(line.key, (occurrences.get(line.key) || 0) + 1));
     const missingAutoCount = uniqueKeys.filter((key) => !autoLines.has(key)).length;
@@ -14607,7 +14753,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     );
     const hint = el("p", {
       class: "slt-ut-hint",
-      text: 'Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line. Your translations stay on this device and survive clearing the cache.'
+      text: `Leave a line empty to keep the automatic translation. Repeated lines share one translation, hover a repeat tag to unlink that spot and translate it on its own. "Keep original" shows no translation under that line.${backgroundLines.length > 0 ? " Background vocals sit under the line they belong to and share one translation wherever they repeat." : ""} Your translations stay on this device and survive clearing the cache.`
     });
     const pasteInput = el("textarea", {
       class: "slt-ui-input",
@@ -14729,14 +14875,16 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (!entry.row.hidden)
         entry.input.focus();
     };
-    sourceLines.forEach((line, index) => {
-      const repeat = seen.has(line.key);
-      seen.add(line.key);
-      const occurrence = occurrenceList[index];
+    const addRow = (line, index, backgroundCount) => {
+      const background = backgroundCount > 0;
+      const repeat = !background && seen.has(line.key);
+      if (!background)
+        seen.add(line.key);
+      const occurrence = background ? 0 : occurrenceList[index];
       const unlinkedKey = unlinkedTranslationKey(line.key, occurrence);
       const valueKey = repeat && initialValues.has(unlinkedKey) ? unlinkedKey : line.key;
       const auto = autoLines.get(line.key);
-      const total = occurrences.get(line.key) || 1;
+      const total = background ? 1 : occurrences.get(line.key) || 1;
       const sourceText = el("div", { class: "slt-ut-src-text", text: line.text });
       const countTag = !repeat && total > 1 ? el("span", { class: "slt-ut-repeat", text: `\xD7${total}` }) : null;
       const linkTag = repeat ? el(
@@ -14745,6 +14893,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         el("span", { class: "slt-ut-link-idle" }),
         el("span", { class: "slt-ut-link-hover" })
       ) : null;
+      if (background) {
+        sourceText.append(el("span", { class: "slt-ut-repeat slt-ut-bg-tag", text: backgroundCount > 1 ? `background \xD7${backgroundCount}` : "background" }));
+      }
       if (countTag)
         sourceText.append(countTag);
       if (linkTag)
@@ -14755,7 +14906,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         rows: "1",
         spellcheck: "false",
         placeholder: auto ? "Keep the automatic translation" : "Your translation",
-        "aria-label": `Your translation for line ${index + 1}`
+        "aria-label": background ? `Your translation for the background vocal "${line.text}"` : `Your translation for line ${index + 1}`
       });
       input.value = values.get(valueKey) || "";
       const tools = el("div", { class: "slt-ut-tools" });
@@ -14768,8 +14919,8 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       );
       const row = el(
         "div",
-        { class: "slt-ut-row" },
-        el("span", { class: "slt-ut-num", text: String(index + 1) }),
+        { class: background ? "slt-ut-row slt-ut-row-bg" : "slt-ut-row" },
+        el("span", { class: "slt-ut-num", text: background ? "\u21B3" : String(index + 1) }),
         el(
           "div",
           { class: "slt-ut-src" },
@@ -14779,7 +14930,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         ),
         el("div", { class: "slt-ut-edit" }, input, tools)
       );
-      const entry = { line, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
+      const entry = { line, background, row, input, repeat, occurrence, valueKey, initialValueKey: valueKey, countTag, linkTag };
       rows.push(entry);
       rowsContainer.append(row);
       refreshLinkTag(entry);
@@ -14812,6 +14963,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           return;
         input.focus();
       });
+    };
+    const backgroundAfter = /* @__PURE__ */ new Map();
+    backgroundLines.forEach((line) => {
+      const list = backgroundAfter.get(line.afterIndex) || [];
+      list.push(line);
+      backgroundAfter.set(line.afterIndex, list);
+    });
+    const addBackgroundRows = (afterIndex) => {
+      backgroundAfter.get(afterIndex)?.forEach((line) => addRow(line, afterIndex, line.count));
+    };
+    addBackgroundRows(-1);
+    sourceLines.forEach((line, index) => {
+      addRow(line, index, 0);
+      addBackgroundRows(index);
     });
     refreshRepeatCounts();
     missingFilter.addEventListener("change", applyFilters);
@@ -14824,7 +14989,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       });
     };
     const copyTranslations = async () => {
-      const text3 = rows.map((entry) => cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || "").join("\n");
+      const text3 = rows.filter((entry) => !entry.background).map((entry) => cleanUserTranslation(values.get(entry.valueKey)) || autoLines.get(entry.line.key) || "").join("\n");
       try {
         await navigator.clipboard.writeText(text3);
         notify({ kind: "success", key: "slt-user-translation", title: "Translation copied", description: "One line per lyric line, ready to paste back in later." });
@@ -14838,7 +15003,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
     pasteApply.addEventListener("click", () => {
       const pasted = pasteInput.value.split(/\r?\n/).map(cleanUserTranslation).filter(Boolean);
-      const targets = rows.filter((entry) => !entry.row.hidden);
+      const targets = rows.filter((entry) => !entry.row.hidden && !entry.background);
       const filled = Math.min(pasted.length, targets.length);
       for (let i = 0; i < filled; i++)
         setValue(targets[i].valueKey, pasted[i]);
@@ -16691,6 +16856,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         const translated = (result.translatedText || "").trim();
         if (!translated || isEchoedTranslation(translated, sources[i]))
           return;
+        const handWritten = result.source === "user" || result.source === "file";
+        if (!handWritten && translated.length > Math.max(40, sources[i].length * 6))
+          return;
         backgroundTranslation.set(keys[i], translated);
         added = true;
       });
@@ -16703,6 +16871,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     } finally {
       backgroundInFlight = false;
     }
+  }
+  function getBackgroundVocalTranslations(trackUri) {
+    return trackUri && trackUri === backgroundTrackUri ? new Map(backgroundTranslation) : /* @__PURE__ */ new Map();
   }
   function setBackgroundVocalTranslation(on) {
     state.translateBackgroundVocals = on;
