@@ -635,10 +635,17 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
 
 #SpicyLyricsPage .line.bg-line + .slt-bg-translation.slt-bg-replace,
 .slt-bg-translation.slt-bg-replace {
-    font-size: 0.75em;
-    font-weight: 900;
+    font-size: calc(var(--DefaultLyricsSize, 1.33em) * 0.75);
+    font-weight: 600;
     margin-top: 0;
     padding-top: 0.1em;
+    --gradient-alpha: 0.6;
+    --gradient-alpha-end: 0.3;
+}
+
+.slt-bg-translation.slt-bg-replace .slt-sync-word {
+    --gradient-alpha: 0.6;
+    --gradient-alpha-end: 0.3;
 }
 
 .slt-sync-translation.slt-interleaved-translation {

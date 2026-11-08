@@ -12058,10 +12058,17 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
 
 #SpicyLyricsPage .line.bg-line + .slt-bg-translation.slt-bg-replace,
 .slt-bg-translation.slt-bg-replace {
-    font-size: 0.75em;
-    font-weight: 900;
+    font-size: calc(var(--DefaultLyricsSize, 1.33em) * 0.75);
+    font-weight: 600;
     margin-top: 0;
     padding-top: 0.1em;
+    --gradient-alpha: 0.6;
+    --gradient-alpha-end: 0.3;
+}
+
+.slt-bg-translation.slt-bg-replace .slt-sync-word {
+    --gradient-alpha: 0.6;
+    --gradient-alpha-end: 0.3;
 }
 
 .slt-sync-translation.slt-interleaved-translation {
@@ -12567,7 +12574,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"dedfeefb62340915bc75a537b77dbf98d69063406b37fdb264c8a03a864bd278".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "dedfeefb62340915bc75a537b77dbf98d69063406b37fdb264c8a03a864bd278" : "";
+    return !"fcfa1191a8e863dfba66f16d94f2e79da1c8f2c140dc1ee093d53cb2b61317f8".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "fcfa1191a8e863dfba66f16d94f2e79da1c8f2c140dc1ee093d53cb2b61317f8" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
