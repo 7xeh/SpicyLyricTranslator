@@ -19,6 +19,7 @@ import {
     setQualityMetadata,
     setTranslationContentData,
     setUnlinkedContentData,
+    setSourceLineData,
     setRomanizationContentData,
     setOriginalContentData,
     setQualityContentData,
@@ -1288,6 +1289,7 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         setTranslationContentData(translationByContent);
         setUnlinkedContentData(unlinkedByContent);
+        setSourceLineData(useApiLines && apiVocalLineData ? lineTexts : [], useApiLines ? apiVocalLineData : null);
         setRomanizationContentData(romanizationByContent);
         setOriginalContentData(originalByContent);
         setQualityContentData(qualityByContent);

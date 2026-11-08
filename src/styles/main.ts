@@ -633,6 +633,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
     padding-bottom: 4px;
 }
 
+#SpicyLyricsPage .line.bg-line + .slt-bg-translation.slt-bg-replace,
+.slt-bg-translation.slt-bg-replace {
+    font-size: 0.75em;
+    font-weight: 900;
+    margin-top: 0;
+    padding-top: 0.1em;
+}
+
 .slt-sync-translation.slt-interleaved-translation {
 
     --gradient-degrees: 180deg;

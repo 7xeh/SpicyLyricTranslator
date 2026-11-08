@@ -50,6 +50,10 @@ let qualityByContent: Map<string, TranslationQualityMeta> = new Map();
 let timingByContent: Map<string, LyricLineData> = new Map();
 let unlinkedByContent: Map<string, Map<number, string>> = new Map();
 let backgroundTranslations: Map<string, string> = new Map();
+let sourceLineKeys: string[][] = [];
+let sourceLineOccurrences: Map<string, number>[] = [];
+let sourceLineTiming: (LyricLineData | undefined)[] = [];
+let lastSourceOffset = -1;
 
 const BACKGROUND_LINE_SELECTOR = '.line.bg-line';
 const BACKGROUND_TRANSLATION_CLASS = 'slt-bg-translation';
@@ -129,6 +133,125 @@ function hasContentData(): boolean {
     return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
 }
 
+export function setSourceLineData(texts: string[], data: (LyricLineData | undefined)[] | null): void {
+    const textCounts = new Map<string, number>();
+    const romCounts = new Map<string, number>();
+    const count = (counts: Map<string, number>, key: string): number => {
+        const occurrence = (counts.get(key) || 0) + 1;
+        counts.set(key, occurrence);
+        return occurrence;
+    };
+
+    sourceLineKeys = [];
+    sourceLineOccurrences = [];
+    sourceLineTiming = [];
+    lastSourceOffset = -1;
+
+    texts.forEach((text, index) => {
+        const info = data?.[index];
+        const occurrences = new Map<string, number>();
+        const textKey = normalizeCompare(text);
+        const romKey = normalizeCompare(info?.romanizedText);
+        const originalKey = normalizeCompare(info?.text);
+        const textOccurrence = textKey ? count(textCounts, textKey) : 0;
+        const romOccurrence = romKey ? count(romCounts, romKey) : 0;
+        if (textKey) occurrences.set(textKey, textOccurrence);
+        if (romKey && !occurrences.has(romKey)) occurrences.set(romKey, romOccurrence);
+        if (originalKey && !occurrences.has(originalKey)) occurrences.set(originalKey, textOccurrence || romOccurrence);
+        sourceLineKeys.push(Array.from(occurrences.keys()));
+        sourceLineOccurrences.push(occurrences);
+        sourceLineTiming.push(info);
+    });
+}
+
+function virtualRowIndex(line: Element): number {
+    const row = line.closest('.VirtualLyricsContainer > [data-index]');
+    if (!row) return -1;
+    const value = parseInt(row.getAttribute('data-index') || '', 10);
+    return Number.isFinite(value) ? value : -1;
+}
+
+function lyricOrder(lines: ArrayLike<Element>): number[] {
+    const order: number[] = [];
+    const rows: number[] = [];
+    for (let index = 0; index < lines.length; index++) {
+        const row = virtualRowIndex(lines[index]);
+        if (row < 0) return Array.from({ length: lines.length }, (_, i) => i);
+        order.push(index);
+        rows.push(row);
+    }
+    return order.sort((a, b) => rows[a] - rows[b] || a - b);
+}
+
+function playbackSeconds(): number | null {
+    const progress = (globalThis as any).Spicetify?.Player?.getProgress?.();
+    return typeof progress === 'number' && Number.isFinite(progress) ? progress / 1000 : null;
+}
+
+function pickSourceOffset(candidates: number[], count: number): number {
+    if (candidates.length === 1) return candidates[0];
+
+    const now = playbackSeconds();
+    let best: number[] = candidates;
+    if (now !== null) {
+        let bestDistance = Infinity;
+        best = [];
+        for (const offset of candidates) {
+            const start = sourceLineTiming[offset]?.startTime;
+            const end = sourceLineTiming[offset + count - 1]?.endTime ?? start;
+            if (typeof start !== 'number' || typeof end !== 'number') continue;
+            const distance = now < start ? start - now : now > end ? now - end : 0;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = [offset];
+            } else if (distance === bestDistance) {
+                best.push(offset);
+            }
+        }
+        if (best.length === 0) best = candidates;
+    }
+
+    return best.includes(lastSourceOffset) ? lastSourceOffset : best[0];
+}
+
+function resolveSourcePositions(order: number[], lineTexts: string[]): Map<number, number> {
+    const positions = new Map<number, number>();
+    const total = sourceLineKeys.length;
+    if (total === 0) return positions;
+
+    const sequence: { index: number; key: string }[] = [];
+    for (const index of order) {
+        const key = normalizeCompare(lineTexts[index]);
+        if (key) sequence.push({ index, key });
+    }
+    const count = sequence.length;
+    if (count === 0 || count > total) return positions;
+
+    let bestScore = 0;
+    let candidates: number[] = [];
+    for (let offset = 0; offset + count <= total; offset++) {
+        let score = 0;
+        for (let j = 0; j < count; j++) {
+            if (sourceLineKeys[offset + j].includes(sequence[j].key)) score++;
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            candidates = [offset];
+        } else if (score === bestScore && score > 0) {
+            candidates.push(offset);
+        }
+    }
+
+    if (bestScore === 0 || bestScore * 4 < count * 3) return positions;
+
+    const offset = pickSourceOffset(candidates, count);
+    lastSourceOffset = offset;
+    sequence.forEach((entry, j) => {
+        if (sourceLineKeys[offset + j].includes(entry.key)) positions.set(entry.index, offset + j);
+    });
+    return positions;
+}
+
 function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): void {
     if (!hasContentData()) return;
 
@@ -141,15 +264,21 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
     let contentLines = 0;
     let matchedLines = 0;
     const occurrences = new Map<string, number>();
+    const order = lyricOrder(lines);
+    const sourcePositions = resolveSourcePositions(order, lineTexts);
 
-    for (let index = 0; index < lines.length; index++) {
+    for (const index of order) {
         const text = lineTexts[index];
         if (!text) continue;
         contentLines++;
 
         const keys = buildContentLookupKeys(text);
-        const occurrence = (occurrences.get(keys.norm) || 0) + 1;
-        occurrences.set(keys.norm, occurrence);
+        const sequential = (occurrences.get(keys.norm) || 0) + 1;
+        occurrences.set(keys.norm, sequential);
+        const sourceIndex = sourcePositions.get(index);
+        const occurrence = sourceIndex !== undefined
+            ? sourceLineOccurrences[sourceIndex].get(keys.norm) ?? sequential
+            : sequential;
 
         const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
         if (t) {
@@ -166,7 +295,7 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
         const q = lookupByKeys(qualityByContent, keys);
         if (q) nextQuality.set(index, q);
 
-        const tim = lookupByKeys(timingByContent, keys);
+        const tim = (sourceIndex !== undefined ? sourceLineTiming[sourceIndex] : undefined) ?? lookupByKeys(timingByContent, keys);
         if (tim) nextTiming[index] = tim;
     }
 
@@ -1938,6 +2067,7 @@ function backgroundLinesIn(doc: Document): HTMLElement[] {
 
 function removeBackgroundTranslations(doc: Document): void {
     doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach(el => el.remove());
+    doc.querySelectorAll(`${BACKGROUND_LINE_SELECTOR}.slt-replace-hidden`).forEach(el => el.classList.remove('slt-replace-hidden'));
 }
 
 export function backgroundTranslationKey(text: string | undefined | null): string {
@@ -1950,12 +2080,17 @@ function applyBackgroundTranslations(doc: Document): void {
         return;
     }
     const claimed = new Set<Element>();
+    const replacing = currentConfig.mode === 'replace';
     for (const line of backgroundLinesIn(doc)) {
         const originalText = extractLineText(line);
         const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
-        if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode) continue;
+        if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode) {
+            line.classList.remove('slt-replace-hidden');
+            continue;
+        }
+        line.classList.toggle('slt-replace-hidden', replacing);
 
-        const sig = `${currentConfig.syncWordHighlight ? 'W' : ''}${translation}`;
+        const sig = `${replacing ? 'R' : ''}${currentConfig.syncWordHighlight ? 'W' : ''}${translation}`;
         const next = line.nextElementSibling as HTMLElement | null;
         const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
         if (existing && existing.dataset.sltSig === sig) {
@@ -1966,6 +2101,7 @@ function applyBackgroundTranslations(doc: Document): void {
 
         const el = doc.createElement('div');
         el.className = BACKGROUND_TRANSLATION_CLASS;
+        if (replacing) el.classList.add('slt-bg-replace');
         el.dataset.sltSig = sig;
         el.setAttribute('aria-hidden', 'true');
         if (line.classList.contains('OppositeAligned')) el.classList.add('OppositeAligned');
@@ -2360,6 +2496,10 @@ export function disableOverlay(): void {
     originalTextMap.clear();
     translationByContent.clear();
     unlinkedByContent.clear();
+    sourceLineKeys = [];
+    sourceLineOccurrences = [];
+    sourceLineTiming = [];
+    lastSourceOffset = -1;
     romanizationByContent.clear();
     originalByContent.clear();
     qualityByContent.clear();

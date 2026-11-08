@@ -8982,6 +8982,10 @@ body.slt-update-waiting #TranslateToggle::after {
   var timingByContent = /* @__PURE__ */ new Map();
   var unlinkedByContent = /* @__PURE__ */ new Map();
   var backgroundTranslations = /* @__PURE__ */ new Map();
+  var sourceLineKeys = [];
+  var sourceLineOccurrences = [];
+  var sourceLineTiming = [];
+  var lastSourceOffset = -1;
   var BACKGROUND_LINE_SELECTOR = ".line.bg-line";
   var BACKGROUND_TRANSLATION_CLASS = "slt-bg-translation";
   function normalizeCompare(text3) {
@@ -9050,6 +9054,125 @@ body.slt-update-waiting #TranslateToggle::after {
   function hasContentData() {
     return translationByContent.size > 0 || romanizationByContent.size > 0 || originalByContent.size > 0;
   }
+  function setSourceLineData(texts, data) {
+    const textCounts = /* @__PURE__ */ new Map();
+    const romCounts = /* @__PURE__ */ new Map();
+    const count = (counts, key) => {
+      const occurrence = (counts.get(key) || 0) + 1;
+      counts.set(key, occurrence);
+      return occurrence;
+    };
+    sourceLineKeys = [];
+    sourceLineOccurrences = [];
+    sourceLineTiming = [];
+    lastSourceOffset = -1;
+    texts.forEach((text3, index) => {
+      const info = data?.[index];
+      const occurrences = /* @__PURE__ */ new Map();
+      const textKey = normalizeCompare(text3);
+      const romKey = normalizeCompare(info?.romanizedText);
+      const originalKey = normalizeCompare(info?.text);
+      const textOccurrence = textKey ? count(textCounts, textKey) : 0;
+      const romOccurrence = romKey ? count(romCounts, romKey) : 0;
+      if (textKey)
+        occurrences.set(textKey, textOccurrence);
+      if (romKey && !occurrences.has(romKey))
+        occurrences.set(romKey, romOccurrence);
+      if (originalKey && !occurrences.has(originalKey))
+        occurrences.set(originalKey, textOccurrence || romOccurrence);
+      sourceLineKeys.push(Array.from(occurrences.keys()));
+      sourceLineOccurrences.push(occurrences);
+      sourceLineTiming.push(info);
+    });
+  }
+  function virtualRowIndex(line) {
+    const row = line.closest(".VirtualLyricsContainer > [data-index]");
+    if (!row)
+      return -1;
+    const value = parseInt(row.getAttribute("data-index") || "", 10);
+    return Number.isFinite(value) ? value : -1;
+  }
+  function lyricOrder(lines) {
+    const order = [];
+    const rows = [];
+    for (let index = 0; index < lines.length; index++) {
+      const row = virtualRowIndex(lines[index]);
+      if (row < 0)
+        return Array.from({ length: lines.length }, (_, i) => i);
+      order.push(index);
+      rows.push(row);
+    }
+    return order.sort((a, b) => rows[a] - rows[b] || a - b);
+  }
+  function playbackSeconds() {
+    const progress = globalThis.Spicetify?.Player?.getProgress?.();
+    return typeof progress === "number" && Number.isFinite(progress) ? progress / 1e3 : null;
+  }
+  function pickSourceOffset(candidates, count) {
+    if (candidates.length === 1)
+      return candidates[0];
+    const now = playbackSeconds();
+    let best = candidates;
+    if (now !== null) {
+      let bestDistance = Infinity;
+      best = [];
+      for (const offset of candidates) {
+        const start = sourceLineTiming[offset]?.startTime;
+        const end = sourceLineTiming[offset + count - 1]?.endTime ?? start;
+        if (typeof start !== "number" || typeof end !== "number")
+          continue;
+        const distance = now < start ? start - now : now > end ? now - end : 0;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = [offset];
+        } else if (distance === bestDistance) {
+          best.push(offset);
+        }
+      }
+      if (best.length === 0)
+        best = candidates;
+    }
+    return best.includes(lastSourceOffset) ? lastSourceOffset : best[0];
+  }
+  function resolveSourcePositions(order, lineTexts) {
+    const positions = /* @__PURE__ */ new Map();
+    const total = sourceLineKeys.length;
+    if (total === 0)
+      return positions;
+    const sequence = [];
+    for (const index of order) {
+      const key = normalizeCompare(lineTexts[index]);
+      if (key)
+        sequence.push({ index, key });
+    }
+    const count = sequence.length;
+    if (count === 0 || count > total)
+      return positions;
+    let bestScore = 0;
+    let candidates = [];
+    for (let offset2 = 0; offset2 + count <= total; offset2++) {
+      let score = 0;
+      for (let j = 0; j < count; j++) {
+        if (sourceLineKeys[offset2 + j].includes(sequence[j].key))
+          score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        candidates = [offset2];
+      } else if (score === bestScore && score > 0) {
+        candidates.push(offset2);
+      }
+    }
+    if (bestScore === 0 || bestScore * 4 < count * 3)
+      return positions;
+    const offset = pickSourceOffset(candidates, count);
+    lastSourceOffset = offset;
+    sequence.forEach((entry, j) => {
+      if (sourceLineKeys[offset + j].includes(entry.key))
+        positions.set(entry.index, offset + j);
+    });
+    return positions;
+  }
   function rebuildPerLineMaps(lines, lineTexts) {
     if (!hasContentData())
       return;
@@ -9061,14 +9184,18 @@ body.slt-update-waiting #TranslateToggle::after {
     let contentLines = 0;
     let matchedLines = 0;
     const occurrences = /* @__PURE__ */ new Map();
-    for (let index = 0; index < lines.length; index++) {
+    const order = lyricOrder(lines);
+    const sourcePositions = resolveSourcePositions(order, lineTexts);
+    for (const index of order) {
       const text3 = lineTexts[index];
       if (!text3)
         continue;
       contentLines++;
       const keys = buildContentLookupKeys(text3);
-      const occurrence = (occurrences.get(keys.norm) || 0) + 1;
-      occurrences.set(keys.norm, occurrence);
+      const sequential = (occurrences.get(keys.norm) || 0) + 1;
+      occurrences.set(keys.norm, sequential);
+      const sourceIndex = sourcePositions.get(index);
+      const occurrence = sourceIndex !== void 0 ? sourceLineOccurrences[sourceIndex].get(keys.norm) ?? sequential : sequential;
       const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
       if (t) {
         nextTranslation.set(index, t);
@@ -9083,7 +9210,7 @@ body.slt-update-waiting #TranslateToggle::after {
       const q = lookupByKeys(qualityByContent, keys);
       if (q)
         nextQuality.set(index, q);
-      const tim = lookupByKeys(timingByContent, keys);
+      const tim = (sourceIndex !== void 0 ? sourceLineTiming[sourceIndex] : void 0) ?? lookupByKeys(timingByContent, keys);
       if (tim)
         nextTiming[index] = tim;
     }
@@ -10534,6 +10661,7 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   function removeBackgroundTranslations(doc) {
     doc.querySelectorAll(`.${BACKGROUND_TRANSLATION_CLASS}`).forEach((el2) => el2.remove());
+    doc.querySelectorAll(`${BACKGROUND_LINE_SELECTOR}.slt-replace-hidden`).forEach((el2) => el2.classList.remove("slt-replace-hidden"));
   }
   function backgroundTranslationKey(text3) {
     return normalizeLyricMatchKey(text3);
@@ -10544,12 +10672,16 @@ body.slt-update-waiting #TranslateToggle::after {
       return;
     }
     const claimed = /* @__PURE__ */ new Set();
+    const replacing = currentConfig.mode === "replace";
     for (const line of backgroundLinesIn(doc)) {
       const originalText = extractLineText(line);
       const translation = backgroundTranslations.get(backgroundTranslationKey(originalText));
-      if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode)
+      if (!translation || isEchoedTranslation(translation, originalText) || !line.parentNode) {
+        line.classList.remove("slt-replace-hidden");
         continue;
-      const sig = `${currentConfig.syncWordHighlight ? "W" : ""}${translation}`;
+      }
+      line.classList.toggle("slt-replace-hidden", replacing);
+      const sig = `${replacing ? "R" : ""}${currentConfig.syncWordHighlight ? "W" : ""}${translation}`;
       const next = line.nextElementSibling;
       const existing = next && next.classList.contains(BACKGROUND_TRANSLATION_CLASS) ? next : null;
       if (existing && existing.dataset.sltSig === sig) {
@@ -10559,6 +10691,8 @@ body.slt-update-waiting #TranslateToggle::after {
       existing?.remove();
       const el2 = doc.createElement("div");
       el2.className = BACKGROUND_TRANSLATION_CLASS;
+      if (replacing)
+        el2.classList.add("slt-bg-replace");
       el2.dataset.sltSig = sig;
       el2.setAttribute("aria-hidden", "true");
       if (line.classList.contains("OppositeAligned"))
@@ -10914,6 +11048,10 @@ body.slt-update-waiting #TranslateToggle::after {
     originalTextMap.clear();
     translationByContent.clear();
     unlinkedByContent.clear();
+    sourceLineKeys = [];
+    sourceLineOccurrences = [];
+    sourceLineTiming = [];
+    lastSourceOffset = -1;
     romanizationByContent.clear();
     originalByContent.clear();
     qualityByContent.clear();
@@ -11889,6 +12027,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
     padding-bottom: 4px;
 }
 
+#SpicyLyricsPage .line.bg-line + .slt-bg-translation.slt-bg-replace,
+.slt-bg-translation.slt-bg-replace {
+    font-size: 0.75em;
+    font-weight: 900;
+    margin-top: 0;
+    padding-top: 0.1em;
+}
+
 .slt-sync-translation.slt-interleaved-translation {
 
     --gradient-degrees: 180deg;
@@ -12392,7 +12538,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"416493c6d619ca8643244d6e7790881edcc88dbf605ae92f85d3cc5199181952".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "416493c6d619ca8643244d6e7790881edcc88dbf605ae92f85d3cc5199181952" : "";
+    return !"7ad0dab3919efc7e82d58e4458005c723f8ad73a690dc20b614fd67522ad4674".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "7ad0dab3919efc7e82d58e4458005c723f8ad73a690dc20b614fd67522ad4674" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -16496,6 +16642,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       addTimingByContent(apiLineData);
       setTranslationContentData(translationByContent2);
       setUnlinkedContentData(unlinkedByContent2);
+      setSourceLineData(useApiLines && apiVocalLineData ? lineTexts : [], useApiLines ? apiVocalLineData : null);
       setRomanizationContentData(romanizationByContent2);
       setOriginalContentData(originalByContent2);
       setQualityContentData(qualityByContent2);
