@@ -20,6 +20,7 @@ import {
     setTranslationContentData,
     setUnlinkedContentData,
     setSourceLineData,
+    resolveLineSources,
     setRomanizationContentData,
     setOriginalContentData,
     setQualityContentData,
@@ -66,6 +67,7 @@ let lastKnownRomanizationState: boolean | null = null;
 let lastTranslatedRomanizationState: boolean | null = null;
 
 let contentTranslation = new Map<string, string>();
+let contentUnlinked = new Map<string, Map<number, string>>();
 let contentQuality = new Map<string, TranslationQualityMeta>();
 let coveredKeys = new Set<string>();
 let fillGapsInFlight = false;
@@ -168,6 +170,20 @@ function buildMatchKeys(text: string): MatchKeys {
         nonLatinNorm: nonLatinOnly && nonLatinOnly !== text ? normalizeMatchKey(nonLatinOnly) : '',
         latinNorm: latinOnly && latinOnly !== text ? normalizeMatchKey(latinOnly) : ''
     };
+}
+
+function unlinkedTranslationFor(
+    unlinked: Map<string, Map<number, string>>,
+    keys: MatchKeys,
+    occurrence: number
+): string | undefined {
+    if (occurrence < 1 || unlinked.size === 0) return undefined;
+    for (const key of [keys.norm, keys.nonLatinNorm, keys.latinNorm]) {
+        if (!key) continue;
+        const match = unlinked.get(key)?.get(occurrence);
+        if (match) return match;
+    }
+    return undefined;
 }
 
 function lookupWithKeys<V>(map: Map<string, V>, keys: MatchKeys): V | undefined {
@@ -641,6 +657,13 @@ function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: strin
     }
 
     return indexes;
+}
+
+function lyricsAreVirtualized(): boolean {
+    const docs: Document[] = [document];
+    const pip = getPIPWindow();
+    if (pip) docs.push(pip.document);
+    return docs.some(doc => Boolean(doc.querySelector('.VirtualLyricsContainer')));
 }
 
 function getLyricsLines(): NodeListOf<Element> {
@@ -1289,13 +1312,14 @@ export async function translateCurrentLyrics(): Promise<void> {
 
         setTranslationContentData(translationByContent);
         setUnlinkedContentData(unlinkedByContent);
-        setSourceLineData(useApiLines && apiVocalLineData ? lineTexts : [], useApiLines ? apiVocalLineData : null);
+        setSourceLineData(useApiLines || !lyricsAreVirtualized() ? lineTexts : [], useApiLines ? apiVocalLineData : null);
         setRomanizationContentData(romanizationByContent);
         setOriginalContentData(originalByContent);
         setQualityContentData(qualityByContent);
         setTimingContentData(timingByContent);
 
         contentTranslation = translationByContent;
+        contentUnlinked = unlinkedByContent;
         contentQuality = qualityByContent;
         coveredKeys = new Set([...translationByContent.keys(), ...unlinkedByContent.keys()]);
 
@@ -1307,16 +1331,17 @@ export async function translateCurrentLyrics(): Promise<void> {
 
             const targetArr = Array.from(targetLines);
             const allowIndexFallback = targetArr.length === translations.length;
-            const domOccurrences = new Map<string, number>();
+            const domTexts = targetArr.map(line => extractLineText(line));
+            const lineSources = resolveLineSources(targetArr, domTexts);
 
             targetArr.forEach((line, domIdx) => {
-                const domText = extractLineText(line);
+                const domText = domTexts[domIdx];
                 if (!domText) return;
 
                 const matchKeys = buildMatchKeys(domText);
-                const occurrence = countOccurrence(domOccurrences, matchKeys.norm);
+                const occurrence = lineSources.get(domIdx)?.occurrence ?? 0;
 
-                let translation = unlinkedByContent.get(matchKeys.norm)?.get(occurrence) || lookupWithKeys(translationByContent, matchKeys);
+                let translation = unlinkedTranslationFor(unlinkedByContent, matchKeys, occurrence) || lookupWithKeys(translationByContent, matchKeys);
                 if (!translation && allowIndexFallback && translations[domIdx]) {
                     translation = translations[domIdx].translatedText;
                 }
@@ -1538,11 +1563,21 @@ function resolveOverlayMode(): OverlayMode {
 
 function applyTranslations(lines: NodeListOf<Element>): number {
     const translationMapByIndex = new Map<number, string>();
+    const lineTexts = Array.from(lines).map(line => extractLineText(line));
+    const lineSources = resolveLineSources(lines, lineTexts);
+
     lines.forEach((line, index) => {
-        const originalText = extractLineText(line);
-        let translatedText = state._translationsByIndex?.get(index);
+        const originalText = lineTexts[index];
+        const matchKeys = buildMatchKeys(originalText);
+        let translatedText = unlinkedTranslationFor(contentUnlinked, matchKeys, lineSources.get(index)?.occurrence ?? 0);
         if (!translatedText) {
             translatedText = state.translatedLyrics.get(originalText);
+        }
+        if (!translatedText) {
+            translatedText = lookupWithKeys(contentTranslation, matchKeys);
+        }
+        if (!translatedText) {
+            translatedText = state._translationsByIndex?.get(index);
         }
         if (!translatedText) return;
         if (translatedText === originalText) return;
@@ -1851,6 +1886,7 @@ export function removeTranslations(): void {
     if (isOverlayActive()) disableOverlay();
 
     contentTranslation = new Map();
+    contentUnlinked = new Map();
     contentQuality = new Map();
     coveredKeys = new Set();
     setUnlinkedContentData(new Map());

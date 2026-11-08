@@ -252,6 +252,49 @@ function resolveSourcePositions(order: number[], lineTexts: string[]): Map<numbe
     return positions;
 }
 
+export interface LineSourceInfo {
+    occurrence: number;
+    sourceIndex: number;
+}
+
+export function resolveLineSources(lines: ArrayLike<Element>, lineTexts: string[]): Map<number, LineSourceInfo> {
+    const resolved = new Map<number, LineSourceInfo>();
+    const order = lyricOrder(lines);
+    const sourcePositions = resolveSourcePositions(order, lineTexts);
+    const occurrences = new Map<string, number>();
+
+    for (const index of order) {
+        const text = lineTexts[index];
+        if (!text) continue;
+
+        const norm = normalizeCompare(text);
+        if (!norm) continue;
+
+        const sequential = (occurrences.get(norm) || 0) + 1;
+        occurrences.set(norm, sequential);
+
+        const sourceIndex = sourcePositions.get(index);
+        resolved.set(index, {
+            occurrence: sourceIndex !== undefined
+                ? sourceLineOccurrences[sourceIndex].get(norm) ?? sequential
+                : sequential,
+            sourceIndex: sourceIndex ?? -1
+        });
+    }
+
+    return resolved;
+}
+
+function unlinkedTranslationFor(keys: ContentLookupKeys, info: LineSourceInfo | undefined): string | undefined {
+    if (!info || info.occurrence < 1 || unlinkedByContent.size === 0) return undefined;
+    for (const key of [keys.norm, keys.nonLatinNorm, keys.latinNorm]) {
+        if (!key) continue;
+        const match = unlinkedByContent.get(key)?.get(info.occurrence);
+        if (match) return match;
+    }
+    return undefined;
+}
+
 function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): void {
     if (!hasContentData()) return;
 
@@ -263,24 +306,17 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
 
     let contentLines = 0;
     let matchedLines = 0;
-    const occurrences = new Map<string, number>();
-    const order = lyricOrder(lines);
-    const sourcePositions = resolveSourcePositions(order, lineTexts);
+    const sources = resolveLineSources(lines, lineTexts);
 
-    for (const index of order) {
+    for (let index = 0; index < lines.length; index++) {
         const text = lineTexts[index];
         if (!text) continue;
         contentLines++;
 
         const keys = buildContentLookupKeys(text);
-        const sequential = (occurrences.get(keys.norm) || 0) + 1;
-        occurrences.set(keys.norm, sequential);
-        const sourceIndex = sourcePositions.get(index);
-        const occurrence = sourceIndex !== undefined
-            ? sourceLineOccurrences[sourceIndex].get(keys.norm) ?? sequential
-            : sequential;
+        const info = sources.get(index);
 
-        const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
+        const t = unlinkedTranslationFor(keys, info) ?? lookupByKeys(translationByContent, keys);
         if (t) {
             nextTranslation.set(index, t);
             matchedLines++;
@@ -295,7 +331,8 @@ function rebuildPerLineMaps(lines: ArrayLike<Element>, lineTexts: string[]): voi
         const q = lookupByKeys(qualityByContent, keys);
         if (q) nextQuality.set(index, q);
 
-        const tim = (sourceIndex !== undefined ? sourceLineTiming[sourceIndex] : undefined) ?? lookupByKeys(timingByContent, keys);
+        const tim = (info && info.sourceIndex >= 0 ? sourceLineTiming[info.sourceIndex] : undefined)
+            ?? lookupByKeys(timingByContent, keys);
         if (tim) nextTiming[index] = tim;
     }
 

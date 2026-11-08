@@ -9173,6 +9173,40 @@ body.slt-update-waiting #TranslateToggle::after {
     });
     return positions;
   }
+  function resolveLineSources(lines, lineTexts) {
+    const resolved = /* @__PURE__ */ new Map();
+    const order = lyricOrder(lines);
+    const sourcePositions = resolveSourcePositions(order, lineTexts);
+    const occurrences = /* @__PURE__ */ new Map();
+    for (const index of order) {
+      const text3 = lineTexts[index];
+      if (!text3)
+        continue;
+      const norm = normalizeCompare(text3);
+      if (!norm)
+        continue;
+      const sequential = (occurrences.get(norm) || 0) + 1;
+      occurrences.set(norm, sequential);
+      const sourceIndex = sourcePositions.get(index);
+      resolved.set(index, {
+        occurrence: sourceIndex !== void 0 ? sourceLineOccurrences[sourceIndex].get(norm) ?? sequential : sequential,
+        sourceIndex: sourceIndex ?? -1
+      });
+    }
+    return resolved;
+  }
+  function unlinkedTranslationFor(keys, info) {
+    if (!info || info.occurrence < 1 || unlinkedByContent.size === 0)
+      return void 0;
+    for (const key of [keys.norm, keys.nonLatinNorm, keys.latinNorm]) {
+      if (!key)
+        continue;
+      const match = unlinkedByContent.get(key)?.get(info.occurrence);
+      if (match)
+        return match;
+    }
+    return void 0;
+  }
   function rebuildPerLineMaps(lines, lineTexts) {
     if (!hasContentData())
       return;
@@ -9183,20 +9217,15 @@ body.slt-update-waiting #TranslateToggle::after {
     const nextTiming = [];
     let contentLines = 0;
     let matchedLines = 0;
-    const occurrences = /* @__PURE__ */ new Map();
-    const order = lyricOrder(lines);
-    const sourcePositions = resolveSourcePositions(order, lineTexts);
-    for (const index of order) {
+    const sources = resolveLineSources(lines, lineTexts);
+    for (let index = 0; index < lines.length; index++) {
       const text3 = lineTexts[index];
       if (!text3)
         continue;
       contentLines++;
       const keys = buildContentLookupKeys(text3);
-      const sequential = (occurrences.get(keys.norm) || 0) + 1;
-      occurrences.set(keys.norm, sequential);
-      const sourceIndex = sourcePositions.get(index);
-      const occurrence = sourceIndex !== void 0 ? sourceLineOccurrences[sourceIndex].get(keys.norm) ?? sequential : sequential;
-      const t = unlinkedByContent.get(keys.norm)?.get(occurrence) ?? lookupByKeys(translationByContent, keys);
+      const info = sources.get(index);
+      const t = unlinkedTranslationFor(keys, info) ?? lookupByKeys(translationByContent, keys);
       if (t) {
         nextTranslation.set(index, t);
         matchedLines++;
@@ -9210,7 +9239,7 @@ body.slt-update-waiting #TranslateToggle::after {
       const q = lookupByKeys(qualityByContent, keys);
       if (q)
         nextQuality.set(index, q);
-      const tim = (sourceIndex !== void 0 ? sourceLineTiming[sourceIndex] : void 0) ?? lookupByKeys(timingByContent, keys);
+      const tim = (info && info.sourceIndex >= 0 ? sourceLineTiming[info.sourceIndex] : void 0) ?? lookupByKeys(timingByContent, keys);
       if (tim)
         nextTiming[index] = tim;
     }
@@ -12538,7 +12567,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"7ad0dab3919efc7e82d58e4458005c723f8ad73a690dc20b614fd67522ad4674".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "7ad0dab3919efc7e82d58e4458005c723f8ad73a690dc20b614fd67522ad4674" : "";
+    return !"dedfeefb62340915bc75a537b77dbf98d69063406b37fdb264c8a03a864bd278".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "dedfeefb62340915bc75a537b77dbf98d69063406b37fdb264c8a03a864bd278" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -15582,6 +15611,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var lastKnownRomanizationState = null;
   var lastTranslatedRomanizationState = null;
   var contentTranslation = /* @__PURE__ */ new Map();
+  var contentUnlinked = /* @__PURE__ */ new Map();
   var contentQuality = /* @__PURE__ */ new Map();
   var coveredKeys = /* @__PURE__ */ new Set();
   var fillGapsInFlight = false;
@@ -15653,6 +15683,18 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       nonLatinNorm: nonLatinOnly && nonLatinOnly !== text3 ? normalizeMatchKey(nonLatinOnly) : "",
       latinNorm: latinOnly && latinOnly !== text3 ? normalizeMatchKey(latinOnly) : ""
     };
+  }
+  function unlinkedTranslationFor2(unlinked, keys, occurrence) {
+    if (occurrence < 1 || unlinked.size === 0)
+      return void 0;
+    for (const key of [keys.norm, keys.nonLatinNorm, keys.latinNorm]) {
+      if (!key)
+        continue;
+      const match = unlinked.get(key)?.get(occurrence);
+      if (match)
+        return match;
+    }
+    return void 0;
   }
   function lookupWithKeys(map, keys) {
     const { norm, nonLatinNorm, latinNorm } = keys;
@@ -16069,6 +16111,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }
     }
     return indexes;
+  }
+  function lyricsAreVirtualized() {
+    const docs = [document];
+    const pip = getPIPWindow2();
+    if (pip)
+      docs.push(pip.document);
+    return docs.some((doc) => Boolean(doc.querySelector(".VirtualLyricsContainer")));
   }
   function getLyricsLines() {
     const docs = [document];
@@ -16642,12 +16691,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       addTimingByContent(apiLineData);
       setTranslationContentData(translationByContent2);
       setUnlinkedContentData(unlinkedByContent2);
-      setSourceLineData(useApiLines && apiVocalLineData ? lineTexts : [], useApiLines ? apiVocalLineData : null);
+      setSourceLineData(useApiLines || !lyricsAreVirtualized() ? lineTexts : [], useApiLines ? apiVocalLineData : null);
       setRomanizationContentData(romanizationByContent2);
       setOriginalContentData(originalByContent2);
       setQualityContentData(qualityByContent2);
       setTimingContentData(timingByContent2);
       contentTranslation = translationByContent2;
+      contentUnlinked = unlinkedByContent2;
       contentQuality = qualityByContent2;
       coveredKeys = /* @__PURE__ */ new Set([...translationByContent2.keys(), ...unlinkedByContent2.keys()]);
       const buildIndexMapsForLines = (targetLines) => {
@@ -16657,14 +16707,15 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         const originalByIdx = /* @__PURE__ */ new Map();
         const targetArr = Array.from(targetLines);
         const allowIndexFallback = targetArr.length === translations.length;
-        const domOccurrences = /* @__PURE__ */ new Map();
+        const domTexts = targetArr.map((line) => extractLineText2(line));
+        const lineSources = resolveLineSources(targetArr, domTexts);
         targetArr.forEach((line, domIdx) => {
-          const domText = extractLineText2(line);
+          const domText = domTexts[domIdx];
           if (!domText)
             return;
           const matchKeys = buildMatchKeys(domText);
-          const occurrence = countOccurrence(domOccurrences, matchKeys.norm);
-          let translation = unlinkedByContent2.get(matchKeys.norm)?.get(occurrence) || lookupWithKeys(translationByContent2, matchKeys);
+          const occurrence = lineSources.get(domIdx)?.occurrence ?? 0;
+          let translation = unlinkedTranslationFor2(unlinkedByContent2, matchKeys, occurrence) || lookupWithKeys(translationByContent2, matchKeys);
           if (!translation && allowIndexFallback && translations[domIdx]) {
             translation = translations[domIdx].translatedText;
           }
@@ -16875,11 +16926,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   function applyTranslations(lines) {
     const translationMapByIndex = /* @__PURE__ */ new Map();
+    const lineTexts = Array.from(lines).map((line) => extractLineText2(line));
+    const lineSources = resolveLineSources(lines, lineTexts);
     lines.forEach((line, index) => {
-      const originalText = extractLineText2(line);
-      let translatedText = state._translationsByIndex?.get(index);
+      const originalText = lineTexts[index];
+      const matchKeys = buildMatchKeys(originalText);
+      let translatedText = unlinkedTranslationFor2(contentUnlinked, matchKeys, lineSources.get(index)?.occurrence ?? 0);
       if (!translatedText) {
         translatedText = state.translatedLyrics.get(originalText);
+      }
+      if (!translatedText) {
+        translatedText = lookupWithKeys(contentTranslation, matchKeys);
+      }
+      if (!translatedText) {
+        translatedText = state._translationsByIndex?.get(index);
       }
       if (!translatedText)
         return;
@@ -17168,6 +17228,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (isOverlayActive())
       disableOverlay();
     contentTranslation = /* @__PURE__ */ new Map();
+    contentUnlinked = /* @__PURE__ */ new Map();
     contentQuality = /* @__PURE__ */ new Map();
     coveredKeys = /* @__PURE__ */ new Set();
     setUnlinkedContentData(/* @__PURE__ */ new Map());
