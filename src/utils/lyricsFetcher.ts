@@ -1,6 +1,6 @@
 import { warn } from './debug';
 import { normalizeLanguageCode } from './languageDetection';
-import { cleanLyricText, hasLyricText, pickLyricDisplayText } from './text';
+import { cleanLyricText, formatRomanization, hasLyricText, pickLyricDisplayText } from './text';
 import { collectLineTranslations, parseTtmlTranslations } from './fileTranslations';
 import type { FileTranslationSet } from './fileTranslations';
 
@@ -15,6 +15,7 @@ interface SyllableData {
     EndTime: number;
     IsPartOfWord: boolean;
     TransliteratedText?: string;
+    TransliteratedIsPartOfWord?: boolean;
     RomanizedText?: string;
 }
 
@@ -62,6 +63,13 @@ export interface WordTimingData {
     isPartOfWord: boolean;
 }
 
+export interface RomanizedWordData {
+    text: string;
+    startTime: number;
+    endTime: number;
+    startsWord: boolean;
+}
+
 export interface BackgroundVocalText {
     text: string;
     romanizedText?: string;
@@ -77,6 +85,7 @@ export interface LyricLineData {
     backgroundVocals?: BackgroundVocalText[];
 
     words?: WordTimingData[];
+    romanizedWords?: RomanizedWordData[];
 }
 
 export interface LyricsFetchResult {
@@ -350,6 +359,10 @@ function getTrackIdFromUri(trackUri: string): string | null {
     return parts[parts.length - 1] || null;
 }
 
+function continuesRomanizedWord(syllable: SyllableData): boolean {
+    return Boolean(syllable.TransliteratedIsPartOfWord ?? syllable.IsPartOfWord);
+}
+
 export function joinBackgroundSyllables(syllables: SyllableData[]): BackgroundVocalText | null {
     const kept = syllables.filter(syllable =>
         hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
@@ -362,10 +375,8 @@ export function joinBackgroundSyllables(syllables: SyllableData[]): BackgroundVo
         const roman = syllable.TransliteratedText ?? syllable.RomanizedText;
         const display = pickLyricDisplayText(syllable.Text, roman);
         if (roman && roman !== display) anyRomanized = true;
-        if (i > 0 && !kept[i - 1].IsPartOfWord) {
-            text += ' ';
-            romanized += ' ';
-        }
+        if (i > 0 && !kept[i - 1].IsPartOfWord) text += ' ';
+        if (i > 0 && !continuesRomanizedWord(kept[i - 1])) romanized += ' ';
         text += display;
         romanized += roman ?? display;
     });
@@ -373,8 +384,35 @@ export function joinBackgroundSyllables(syllables: SyllableData[]): BackgroundVo
     if (!clean) return null;
     return {
         text: clean,
-        romanizedText: anyRomanized ? romanized.replace(/\s+/g, ' ').trim() : undefined
+        romanizedText: anyRomanized ? formatRomanization(romanized, clean) : undefined
     };
+}
+
+export function buildRomanizedWords(syllables: SyllableData[], lineText: string): RomanizedWordData[] {
+    const words: RomanizedWordData[] = [];
+    let glued = false;
+    for (const syllable of syllables) {
+        const roman = syllable.TransliteratedText ?? syllable.RomanizedText;
+        const raw = typeof roman === 'string' ? roman : (syllable.Text ?? '');
+        const startsWord = !glued || /^\s/.test(raw);
+        glued = continuesRomanizedWord(syllable) && !/\s$/.test(raw);
+        const parts = formatRomanization(raw, lineText).split(' ').filter(Boolean);
+        const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+        const duration = syllable.EndTime - syllable.StartTime;
+        let sungLength = 0;
+        parts.forEach((part, index) => {
+            const startTime = index === 0 ? syllable.StartTime : syllable.StartTime + duration * (sungLength / totalLength);
+            sungLength += part.length;
+            const endTime = index === parts.length - 1 ? syllable.EndTime : syllable.StartTime + duration * (sungLength / totalLength);
+            words.push({
+                text: part,
+                startTime,
+                endTime,
+                startsWord: index > 0 || startsWord
+            });
+        });
+    }
+    return words;
 }
 
 function extractBackgroundVocals(group: VocalGroup): BackgroundVocalText[] | undefined {
@@ -425,23 +463,22 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
                 if (syllableRoman && syllableRoman !== syllableText) {
                     anyRomanized = true;
                 }
-                const startsNewWord = prev !== null && !prev.IsPartOfWord;
-                if (startsNewWord) {
-                    lineText += ' ';
-                    if (romanizedText.length > 0) romanizedText += ' ';
-                }
+                if (prev !== null && !prev.IsPartOfWord) lineText += ' ';
+                if (prev !== null && !continuesRomanizedWord(prev) && romanizedText.length > 0) romanizedText += ' ';
                 lineText += syllableText;
                 romanizedText += romanSyl;
             }
+            const cleanLine = cleanLyricText(lineText);
             lineData.push({
-                text: cleanLyricText(lineText),
+                text: cleanLine,
                 startTime: group.Lead.StartTime,
                 endTime: group.Lead.EndTime,
                 isInstrumental: false,
-                romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, ' ').trim() : undefined,
+                romanizedText: anyRomanized ? formatRomanization(romanizedText, cleanLine) : undefined,
                 translatedText: group.Lead.TranslatedText ?? group.TranslatedText,
                 backgroundVocals: extractBackgroundVocals(group),
                 words: wordTimings,
+                romanizedWords: anyRomanized ? buildRomanizedWords(syllables, cleanLine) : undefined,
             });
             continue;
         }
@@ -450,7 +487,7 @@ function extractContentLinesData(lyrics: LyricsData): LyricLineData[] {
             if (!hasLyricText(group.Text) && !hasLyricText(group.TransliteratedText)) continue;
             const groupText = pickLyricDisplayText(String(group.Text), group.TransliteratedText);
             const groupRoman = (group.TransliteratedText && group.TransliteratedText !== groupText)
-                ? group.TransliteratedText
+                ? formatRomanization(group.TransliteratedText, groupText)
                 : undefined;
             lineData.push({
                 text: cleanLyricText(groupText),
@@ -494,7 +531,7 @@ function extractStaticLinesData(lyrics: LyricsData): LyricLineData[] {
                 endTime: 0,
                 isInstrumental: false,
                 romanizedText: (line.TransliteratedText && line.TransliteratedText !== text)
-                    ? line.TransliteratedText
+                    ? formatRomanization(line.TransliteratedText, text)
                     : undefined,
                 translatedText: line.TranslatedText
             };

@@ -49,7 +49,8 @@ import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
 import { notify, dismissNotification } from './notify';
 import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
-import { cleanLyricText, normalizeLyricMatchKey } from './text';
+import { cleanLyricText, lineOwnText, normalizeLyricMatchKey } from './text';
+import { areRomanizedRowsShown, isSpicyRomanizationToggledOn, spicyRomanizationDisplay, supportsRomanizedRows, usesGroupedViewControls } from './spicyLyrics';
 import { getUserTranslations, applyUserTranslations, coversAllLines, findUnlinkedLines } from './userTranslations';
 
 let viewControlsObserver: MutationObserver | null = null;
@@ -64,6 +65,7 @@ let romanizationToggleListener: (() => void) | null = null;
 let romanizationToggleButton: Element | null = null;
 let observedLyricsContent: Element | null = null;
 let lastKnownRomanizationState: boolean | null = null;
+let lastKnownRomanizedRows: string | null = null;
 let lastTranslatedRomanizationState: boolean | null = null;
 
 let contentTranslation = new Map<string, string>();
@@ -234,55 +236,12 @@ function getPIPWindow(): Window | null {
 }
 
 export function isRomanizationActive(): boolean {
-    const readUiState = (raw: string | null | undefined): boolean | null => {
-        if (!raw) return null;
-        try {
-            const obj = JSON.parse(raw);
-            if (obj && typeof obj.romanization === 'boolean') return obj.romanization;
-        } catch (e) {}
-        return null;
-    };
+    return isSpicyRomanizationToggledOn() && spicyRomanizationDisplay() === 'replace';
+}
 
-    try {
-        const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
-        const fromSpicetify = readUiState(spicetifyStorage?.get?.('SL:uiState'));
-        if (fromSpicetify !== null) return fromSpicetify;
-    } catch (e) {}
-
-    try {
-        const fromLocal = readUiState(localStorage.getItem('SL:uiState'));
-        if (fromLocal !== null) return fromLocal;
-    } catch (e) {}
-
-    const btn = document.querySelector('#RomanizationToggle');
-    if (btn && btn.classList.contains('active')) return true;
-
-    const keys = [
-        'SpicyLyrics-romanization',
-        'SpicyLyrics:romanization',
-        'romanization'
-    ];
-
-    try {
-        const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
-        if (spicetifyStorage?.get) {
-            for (const key of keys) {
-                const val = spicetifyStorage.get(key);
-                if (val === 'true') return true;
-                if (val === 'false') return false;
-            }
-        }
-    } catch (e) {}
-
-    try {
-        for (const key of keys) {
-            const val = localStorage.getItem(key);
-            if (val === 'true') return true;
-            if (val === 'false') return false;
-        }
-    } catch (e) {}
-
-    return false;
+function romanizedRowsKey(): string {
+    const pipWindow = getPIPWindow();
+    return `${areRomanizedRowsShown(document)}|${pipWindow ? areRomanizedRowsShown(pipWindow.document) : ''}`;
 }
 
 export function isSpicyLyricsOpen(): boolean {
@@ -344,16 +303,73 @@ export function waitForElement(selector: string, timeout: number = 10000): Promi
     });
 }
 
-export function updateButtonState(): void {
-    const buttons = [
+interface ToggleIcons {
+    on: string;
+    off: string;
+    lineOn: string;
+    lineOff: string;
+}
+
+const TRANSLATE_ICONS: ToggleIcons = {
+    on: Icons.Translate,
+    off: Icons.TranslateOff,
+    lineOn: Icons.TranslateLine,
+    lineOff: Icons.TranslateLineOff
+};
+
+const LEARNING_ICONS: ToggleIcons = {
+    on: Icons.Learning,
+    off: Icons.LearningOff,
+    lineOn: Icons.LearningLine,
+    lineOff: Icons.LearningLineOff
+};
+
+function knockoutDisc(icon: string, maskId: string): string {
+    const body = icon.match(/<svg[^>]*>([\s\S]*)<\/svg>/)?.[1] ?? '';
+    return `<svg class="SL_KnockoutDisc" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" aria-hidden="true"><mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48"><rect width="48" height="48" fill="#fff"/><g transform="translate(12 12)" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</g></mask><circle cx="24" cy="24" r="24" fill="#fff" mask="url(#${maskId})"/></svg>`;
+}
+
+function paintToggleButton(button: Element | null | undefined, icons: ToggleIcons, pressed: boolean, override?: string): void {
+    if (!button) return;
+    const el = button as HTMLElement;
+    const card = el.classList.contains('CardControl');
+    const grouped = !card && usesGroupedViewControls(el);
+    const line = !card && (grouped || supportsRomanizedRows(el.ownerDocument));
+
+    el.classList.toggle('ViewToggle', grouped);
+    el.classList.toggle('active', pressed);
+    if (grouped) {
+        el.setAttribute('aria-pressed', String(pressed && !override));
+    } else {
+        el.removeAttribute('aria-pressed');
+    }
+
+    const markupKey = [grouped ? 'g' : '', line ? 'l' : '', override ? 'o' : (grouped ? '' : String(pressed))].join('|');
+    if (el.dataset.sltIcon === markupKey && el.firstElementChild) return;
+    el.dataset.sltIcon = markupKey;
+
+    if (override) {
+        el.innerHTML = override;
+    } else if (grouped) {
+        el.innerHTML = icons.lineOn + knockoutDisc(icons.lineOn, `SLT_Knockout_${el.id}`);
+    } else if (line) {
+        el.innerHTML = pressed ? icons.lineOn : icons.lineOff;
+    } else {
+        el.innerHTML = pressed ? icons.on : icons.off;
+    }
+}
+
+function translateButtons(): (Element | null | undefined)[] {
+    return [
         document.querySelector('#TranslateToggle'),
         getPIPWindow()?.document.querySelector('#TranslateToggle')
     ];
+}
 
-    buttons.forEach(button => {
+export function updateButtonState(): void {
+    translateButtons().forEach(button => {
         if (button) {
-            button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
-            button.classList.toggle('active', state.isEnabled);
+            paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled, button.classList.contains('loading') ? Icons.Loading : undefined);
             const btnWithTippy = button as any;
             if (btnWithTippy._tippy) {
                 btnWithTippy._tippy.setContent(state.isEnabled ? 'Disable Translation' : 'Enable Translation');
@@ -363,38 +379,24 @@ export function updateButtonState(): void {
 }
 
 export function restoreButtonState(): void {
-    const buttons = [
-        document.querySelector('#TranslateToggle'),
-        getPIPWindow()?.document.querySelector('#TranslateToggle')
-    ];
-
-    buttons.forEach(button => {
+    translateButtons().forEach(button => {
         if (button) {
             button.classList.remove('loading', 'error');
-            button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
+            paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled);
         }
     });
 }
 
 function setTranslateButtonsLoading(isLoading: boolean): void {
-    const buttons = [
-        document.querySelector('#TranslateToggle'),
-        getPIPWindow()?.document.querySelector('#TranslateToggle')
-    ];
-
-    buttons.forEach(button => {
+    translateButtons().forEach(button => {
         if (!button) return;
         button.classList.toggle('loading', isLoading);
-        button.innerHTML = isLoading ? Icons.Loading : (state.isEnabled ? Icons.Translate : Icons.TranslateOff);
+        paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled, isLoading ? Icons.Loading : undefined);
     });
 }
 
 export function setButtonErrorState(hasError: boolean): void {
-    const buttons = [
-        document.querySelector('#TranslateToggle'),
-        getPIPWindow()?.document.querySelector('#TranslateToggle')
-    ];
-    buttons.forEach(button => {
+    translateButtons().forEach(button => {
         if (button) button.classList.toggle('error', hasError);
     });
 }
@@ -403,9 +405,6 @@ function createTranslateButton(): HTMLButtonElement {
     const button = document.createElement('button');
     button.id = 'TranslateToggle';
     button.className = 'ViewControl';
-    button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
-
-    if (state.isEnabled) button.classList.add('active');
 
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy) {
         try {
@@ -461,6 +460,7 @@ function insertTranslateButtonIntoCardControls(doc: Document): boolean {
     } else {
         cardControls.insertBefore(button, cardControls.firstChild);
     }
+    paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled);
 
     return true;
 }
@@ -495,6 +495,7 @@ function insertTranslateButtonIntoDocument(doc: Document): void {
             viewControls.appendChild(translateButton);
         }
     }
+    paintToggleButton(translateButton, TRANSLATE_ICONS, state.isEnabled);
 }
 
 function learningButtonTooltip(): string {
@@ -505,8 +506,6 @@ function createLearningButton(): HTMLButtonElement {
     const button = document.createElement('button');
     button.id = 'LearningToggle';
     button.className = 'ViewControl';
-    button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
-    button.classList.toggle('active', state.learningVisible);
 
     if (typeof Spicetify !== 'undefined' && Spicetify.Tippy) {
         try {
@@ -541,6 +540,7 @@ function syncLearningButtonInDocument(doc: Document): void {
         const button = createLearningButton();
         if (translateButton.classList.contains('CardControl')) button.classList.add('CardControl');
         translateButton.insertAdjacentElement('afterend', button);
+        paintToggleButton(button, LEARNING_ICONS, state.learningVisible);
     });
 
     doc.querySelectorAll('#LearningToggle').forEach(button => {
@@ -549,8 +549,7 @@ function syncLearningButtonInDocument(doc: Document): void {
             button.remove();
             return;
         }
-        button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
-        button.classList.toggle('active', state.learningVisible);
+        paintToggleButton(button, LEARNING_ICONS, state.learningVisible);
         const btnWithTippy = button as any;
         if (btnWithTippy._tippy) btnWithTippy._tippy.setContent(learningButtonTooltip());
     });
@@ -604,7 +603,7 @@ export function extractLineText(lineElement: Element): string {
             .join(''));
     }
 
-    return cleanLyricText(lineElement.textContent);
+    return cleanLyricText(lineOwnText(lineElement));
 }
 
 function getConfidentNonTargetLineIndexes(lines: string[], targetLanguage: string): number[] {
@@ -775,7 +774,7 @@ export function getVisibleLyricsLineTexts(): string[] {
 export function getLyricsFirstLineText(): string | null {
     const lines = getLyricsLines();
     if (lines.length > 0) {
-        return lines[0].textContent?.trim() || null;
+        return lineOwnText(lines[0]).trim() || null;
     }
     return null;
 }
@@ -790,7 +789,7 @@ export async function waitForLyricsAndTranslate(retries: number = 10, delay: num
 
         const lines = getLyricsLines();
         if (lines.length > 0) {
-            const firstLineText = lines[0].textContent?.trim();
+            const firstLineText = lineOwnText(lines[0]).trim();
             if (firstLineText && firstLineText.length > 0) {
                 if (previousFirstLine && firstLineText === previousFirstLine && i < staleLineRetryLimit) {
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -1594,6 +1593,7 @@ function applyTranslations(lines: NodeListOf<Element>): number {
         mode: resolveOverlayMode(),
         syncWordHighlight: state.syncWordHighlight,
         showRomanization: state.showRomanization,
+        romanizationPosition: state.romanizationPosition,
         learningMode: isLearningActive()
     };
 
@@ -2055,6 +2055,7 @@ export function onSpicyLyricsClose(): void {
     }
     observedLyricsContent = null;
     lastKnownRomanizationState = null;
+    lastKnownRomanizedRows = null;
     lastTranslatedRomanizationState = null;
     cleanupRomanizationWatcher();
 }
@@ -2063,6 +2064,13 @@ function setupRomanizationWatcher(): void {
     cleanupRomanizationWatcher();
 
     const handler = () => {
+        if (spicyRomanizationDisplay() === 'underLine') {
+            setTimeout(() => {
+                lastKnownRomanizedRows = romanizedRowsKey();
+                reapplyTranslationsToCurrentLines();
+            }, 60);
+            return;
+        }
         setTimeout(async () => {
             if (state.isEnabled) {
                 for (let i = 0; i < 20 && state.isTranslating; i++) {
@@ -2222,6 +2230,12 @@ export function setupViewModeObserver(): void {
                 }
             }
             lastKnownRomanizationState = currentRomanization;
+
+            const romanizedRows = romanizedRowsKey();
+            if (lastKnownRomanizedRows !== null && romanizedRows !== lastKnownRomanizedRows) {
+                reapplyTranslationsToCurrentLines();
+            }
+            lastKnownRomanizedRows = romanizedRows;
 
             const pipWindow = getPIPWindow();
             if (pipWindow && !pipWindow.document.querySelector('#TranslateToggle')) {

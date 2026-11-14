@@ -7,7 +7,7 @@
 | No translate button | Confirm Spicy Lyrics is installed and the lyrics view is open |
 | No translations at all | Check your internet connection and selected provider; try switching providers |
 | Wrong language or stale lines | Clear both the Spicy Lyrics cache and the translation cache, then reload the song — see [below](#repairing-a-bad-cache) |
-| Romanization on, translation won't start | The extension couldn't find original lyrics and refused to send romanized text. Clear the Spicy Lyrics cache and reload the track |
+| Romanization on (set to replace the line), translation won't start | The extension couldn't find original lyrics and refused to send romanized text. Clear the Spicy Lyrics cache and reload the track |
 | Nothing happens on a track | The lyrics may already be in your target language — detection skips those on purpose |
 | Extension not loading after a manual install | Re-run `spicetify apply` and restart Spotify |
 | Custom endpoint failing | Make sure the selected **Custom API Format** matches what your endpoint actually speaks |

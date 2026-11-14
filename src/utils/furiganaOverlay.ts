@@ -6,6 +6,7 @@ import { getSourceLanguageOverride } from './state';
 import { getCurrentTrackUri } from './trackCache';
 import { notify, dismissNotification } from './notify';
 import { debug, warn } from './debug';
+import { SPICY_ROMANIZED_ROW_CLASS } from './text';
 
 const KUROMOJI_VERSION = '0.1.2';
 const KUROMOJI_SCRIPT_URL = `https://cdn.jsdelivr.net/npm/kuromoji@${KUROMOJI_VERSION}/build/kuromoji.js`;
@@ -215,7 +216,7 @@ function readLineText(line: Element): LineText {
     const doc = line.ownerDocument;
     const walker = doc.createTreeWalker(line, NodeFilter.SHOW_TEXT, {
         acceptNode: node => {
-            const owner = node.parentElement?.closest('[class*="slt-"]');
+            const owner = node.parentElement?.closest(`[class*="slt-"], .${SPICY_ROMANIZED_ROW_CLASS}`);
             return owner && owner !== line && line.contains(owner) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
         }
     });

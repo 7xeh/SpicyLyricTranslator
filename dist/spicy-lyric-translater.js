@@ -5572,14 +5572,18 @@ ${text3}`
   }
 
   // src/utils/text.ts
-  var INVISIBLE_SEPARATOR_REGEX = /[\u200B\u2060\uFEFF]/g;
-  var DIRECTION_MARK_REGEX = /[\u200E\u200F]/g;
-  var ZERO_WIDTH_REGEX = /[\u200B\u200E\u200F\u2060\uFEFF]/g;
+  var INVISIBLE_SEPARATOR_REGEX = /[​⁠﻿]/g;
+  var DIRECTION_MARK_REGEX = /[‎‏]/g;
+  var ZERO_WIDTH_REGEX = /[​‎‏⁠﻿]/g;
+  var HAN_REGEX = /\p{Script=Han}/u;
+  var KANA_OR_HANGUL_REGEX = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  var SYLLABLE_HYPHEN_REGEX = /(?<=\p{L})[-‐‑](?=\p{L})/gu;
+  var SPICY_ROMANIZED_ROW_CLASS = "RomanizedRow";
   function cleanLyricText(text3) {
     return (text3 || "").replace(DIRECTION_MARK_REGEX, "").replace(INVISIBLE_SEPARATOR_REGEX, " ").replace(/\s+/g, " ").trim();
   }
   function normalizeLyricMatchKey(text3) {
-    return (text3 || "").toLowerCase().replace(/[\s\p{P}\p{S}\u200B-\u200F\u2060\uFEFF]+/gu, "").trim();
+    return (text3 || "").toLowerCase().replace(/[\s\p{P}\p{S}​-‏⁠﻿]+/gu, "").trim();
   }
   function hasLyricText(text3) {
     return typeof text3 === "string" && text3.replace(ZERO_WIDTH_REGEX, "").trim() !== "";
@@ -5588,6 +5592,34 @@ ${text3}`
     if (hasLyricText(text3))
       return text3;
     return hasLyricText(romanizedText) ? romanizedText : text3 ?? "";
+  }
+  function isSpicyRomanizedRow(node) {
+    if (!node || node.nodeType !== 1)
+      return false;
+    return Boolean(node.classList?.contains(SPICY_ROMANIZED_ROW_CLASS));
+  }
+  function lineOwnText(line) {
+    if (!line)
+      return "";
+    const rows = typeof line.querySelectorAll === "function" ? line.querySelectorAll(`.${SPICY_ROMANIZED_ROW_CLASS}`) : null;
+    if (!rows || rows.length === 0 || !line.childNodes)
+      return line.textContent || "";
+    let text3 = "";
+    line.childNodes.forEach((node) => {
+      if (isSpicyRomanizedRow(node))
+        return;
+      text3 += node.textContent || "";
+    });
+    return text3;
+  }
+  function usesSyllableHyphens(originalText) {
+    const original = originalText || "";
+    return HAN_REGEX.test(original) && !KANA_OR_HANGUL_REGEX.test(original);
+  }
+  function formatRomanization(romanizedText, originalText) {
+    const romanized = (romanizedText || "").replace(ZERO_WIDTH_REGEX, "");
+    const spaced = usesSyllableHyphens(originalText) ? romanized.replace(SYLLABLE_HYPHEN_REGEX, " ") : romanized;
+    return spaced.replace(/\s+/g, " ").trim();
   }
 
   // src/utils/userTranslations.ts
@@ -5833,6 +5865,9 @@ ${text3}`
   function parseLanguageList(value) {
     return Array.from(new Set((value || "").split(",").map((code) => code.trim()).filter(Boolean)));
   }
+  function parseRomanizationPosition(value) {
+    return value === "below" ? "below" : "above";
+  }
   function resolveStoredNotificationLevel() {
     const stored = storage.get("notification-level");
     if (stored === "all" || stored === "errors" || stored === "off")
@@ -5896,6 +5931,7 @@ ${text3}`
     showQualityIndicator: storage.get("show-quality-indicator") !== "false",
     showConnectionIndicator: resolveStoredConnectionIndicator(),
     showRomanization: storage.get("show-romanization") === "true",
+    romanizationPosition: parseRomanizationPosition(storage.get("romanization-position")),
     showFurigana: storage.get("show-furigana") === "true",
     translateBackgroundVocals: storage.get("translate-background-vocals") !== "false",
     learningMode: storage.get("learning-mode") === "true",
@@ -6287,6 +6323,10 @@ ${text3}`
         <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
         <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </svg>`,
+    TranslateLine: `<svg class="NoFill" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>`,
+    TranslateLineOff: `<svg class="NoFill" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/><path d="m3 3 18 18"/></svg>`,
+    LearningLine: `<svg class="NoFill" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg>`,
+    LearningLineOff: `<svg class="NoFill" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/><path d="m3 3 18 18"/></svg>`,
     Settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
         <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
     </svg>`,
@@ -8072,7 +8112,7 @@ body.slt-update-waiting #TranslateToggle::after {
     const doc = line.ownerDocument;
     const walker = doc.createTreeWalker(line, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
-        const owner = node.parentElement?.closest('[class*="slt-"]');
+        const owner = node.parentElement?.closest(`[class*="slt-"], .${SPICY_ROMANIZED_ROW_CLASS}`);
         return owner && owner !== line && line.contains(owner) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -8714,6 +8754,9 @@ body.slt-update-waiting #TranslateToggle::after {
     const parts = trackUri.split(":");
     return parts[parts.length - 1] || null;
   }
+  function continuesRomanizedWord(syllable) {
+    return Boolean(syllable.TransliteratedIsPartOfWord ?? syllable.IsPartOfWord);
+  }
   function joinBackgroundSyllables(syllables) {
     const kept = syllables.filter(
       (syllable) => hasLyricText(syllable.Text) || hasLyricText(syllable.TransliteratedText ?? syllable.RomanizedText)
@@ -8728,10 +8771,10 @@ body.slt-update-waiting #TranslateToggle::after {
       const display = pickLyricDisplayText(syllable.Text, roman);
       if (roman && roman !== display)
         anyRomanized = true;
-      if (i > 0 && !kept[i - 1].IsPartOfWord) {
+      if (i > 0 && !kept[i - 1].IsPartOfWord)
         text3 += " ";
+      if (i > 0 && !continuesRomanizedWord(kept[i - 1]))
         romanized += " ";
-      }
       text3 += display;
       romanized += roman ?? display;
     });
@@ -8740,8 +8783,34 @@ body.slt-update-waiting #TranslateToggle::after {
       return null;
     return {
       text: clean,
-      romanizedText: anyRomanized ? romanized.replace(/\s+/g, " ").trim() : void 0
+      romanizedText: anyRomanized ? formatRomanization(romanized, clean) : void 0
     };
+  }
+  function buildRomanizedWords(syllables, lineText) {
+    const words = [];
+    let glued = false;
+    for (const syllable of syllables) {
+      const roman = syllable.TransliteratedText ?? syllable.RomanizedText;
+      const raw = typeof roman === "string" ? roman : syllable.Text ?? "";
+      const startsWord = !glued || /^\s/.test(raw);
+      glued = continuesRomanizedWord(syllable) && !/\s$/.test(raw);
+      const parts = formatRomanization(raw, lineText).split(" ").filter(Boolean);
+      const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+      const duration = syllable.EndTime - syllable.StartTime;
+      let sungLength = 0;
+      parts.forEach((part, index) => {
+        const startTime = index === 0 ? syllable.StartTime : syllable.StartTime + duration * (sungLength / totalLength);
+        sungLength += part.length;
+        const endTime = index === parts.length - 1 ? syllable.EndTime : syllable.StartTime + duration * (sungLength / totalLength);
+        words.push({
+          text: part,
+          startTime,
+          endTime,
+          startsWord: index > 0 || startsWord
+        });
+      });
+    }
+    return words;
   }
   function extractBackgroundVocals(group) {
     const vocals = (group.Background || []).map((background) => joinBackgroundSyllables(background.Syllables || [])).filter((vocal) => vocal !== null);
@@ -8788,24 +8857,24 @@ body.slt-update-waiting #TranslateToggle::after {
           if (syllableRoman && syllableRoman !== syllableText) {
             anyRomanized = true;
           }
-          const startsNewWord = prev !== null && !prev.IsPartOfWord;
-          if (startsNewWord) {
+          if (prev !== null && !prev.IsPartOfWord)
             lineText += " ";
-            if (romanizedText.length > 0)
-              romanizedText += " ";
-          }
+          if (prev !== null && !continuesRomanizedWord(prev) && romanizedText.length > 0)
+            romanizedText += " ";
           lineText += syllableText;
           romanizedText += romanSyl;
         }
+        const cleanLine = cleanLyricText(lineText);
         lineData.push({
-          text: cleanLyricText(lineText),
+          text: cleanLine,
           startTime: group.Lead.StartTime,
           endTime: group.Lead.EndTime,
           isInstrumental: false,
-          romanizedText: anyRomanized ? romanizedText.replace(/\s+/g, " ").trim() : void 0,
+          romanizedText: anyRomanized ? formatRomanization(romanizedText, cleanLine) : void 0,
           translatedText: group.Lead.TranslatedText ?? group.TranslatedText,
           backgroundVocals: extractBackgroundVocals(group),
-          words: wordTimings
+          words: wordTimings,
+          romanizedWords: anyRomanized ? buildRomanizedWords(syllables, cleanLine) : void 0
         });
         continue;
       }
@@ -8813,7 +8882,7 @@ body.slt-update-waiting #TranslateToggle::after {
         if (!hasLyricText(group.Text) && !hasLyricText(group.TransliteratedText))
           continue;
         const groupText = pickLyricDisplayText(String(group.Text), group.TransliteratedText);
-        const groupRoman = group.TransliteratedText && group.TransliteratedText !== groupText ? group.TransliteratedText : void 0;
+        const groupRoman = group.TransliteratedText && group.TransliteratedText !== groupText ? formatRomanization(group.TransliteratedText, groupText) : void 0;
         lineData.push({
           text: cleanLyricText(groupText),
           startTime: group.StartTime,
@@ -8851,7 +8920,7 @@ body.slt-update-waiting #TranslateToggle::after {
         startTime: 0,
         endTime: 0,
         isInstrumental: false,
-        romanizedText: line.TransliteratedText && line.TransliteratedText !== text3 ? line.TransliteratedText : void 0,
+        romanizedText: line.TransliteratedText && line.TransliteratedText !== text3 ? formatRomanization(line.TransliteratedText, text3) : void 0,
         translatedText: line.TranslatedText
       };
     });
@@ -8952,6 +9021,144 @@ body.slt-update-waiting #TranslateToggle::after {
     captureCache.clear();
   }
 
+  // src/utils/spicyLyrics.ts
+  var SETTINGS_KEY = "SL:settings";
+  var UI_STATE_KEY = "SL:uiState";
+  var ROMANIZED_ROWS_SINCE = [6, 5, 0];
+  var ROMANIZED_ROWS_SHOWN_CLASS = "RomanizedRowsShown";
+  var GROUPED_CONTROLS_CLASS = "Exp_GroupedViewControls";
+  var LEGACY_ROMANIZATION_KEYS = ["SpicyLyrics-romanization", "SpicyLyrics:romanization", "romanization"];
+  function storageReaders() {
+    return [
+      (key) => globalThis.Spicetify?.LocalStorage?.get?.(key),
+      (key) => globalThis.localStorage?.getItem?.(key)
+    ];
+  }
+  function readBlob(key) {
+    for (const read of storageReaders()) {
+      try {
+        const raw = read(key);
+        if (typeof raw !== "string" || !raw)
+          continue;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object")
+          return parsed;
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+  function readSpicySettings() {
+    return readBlob(SETTINGS_KEY);
+  }
+  function parseVersion(raw) {
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof raw === "string" ? raw.trim() : "");
+    return match ? match.slice(1).map(Number) : null;
+  }
+  function spicyLyricsVersion() {
+    return parseVersion(globalThis._spicy_lyrics_metadata?.LoadedVersion) || parseVersion(readBlob(UI_STATE_KEY)?.fromVersion);
+  }
+  function versionAtLeast(version, minimum) {
+    for (let i = 0; i < minimum.length; i++) {
+      const part = version[i] || 0;
+      if (part !== minimum[i])
+        return part > minimum[i];
+    }
+    return true;
+  }
+  function findSpicyPage(doc) {
+    try {
+      return doc?.querySelector?.("#SpicyLyricsPage") || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function currentDocument() {
+    return typeof document === "undefined" ? void 0 : document;
+  }
+  function supportsRomanizedRows(doc = currentDocument()) {
+    const version = spicyLyricsVersion();
+    if (version && versionAtLeast(version, ROMANIZED_ROWS_SINCE))
+      return true;
+    const page = findSpicyPage(doc);
+    if (!page)
+      return false;
+    if (page.style?.getPropertyValue?.("--SL-LyricsScale"))
+      return true;
+    return Boolean(page.querySelector?.(`.${SPICY_ROMANIZED_ROW_CLASS}`));
+  }
+  function spicyRomanizationDisplay(doc = currentDocument()) {
+    const saved = readSpicySettings()?.romanizationDisplay;
+    if (saved === "replace" || saved === "underLine")
+      return saved;
+    return supportsRomanizedRows(doc) ? "underLine" : "replace";
+  }
+  function isSpicyRomanizationToggledOn(doc = currentDocument()) {
+    for (const read of storageReaders()) {
+      try {
+        const raw = read(UI_STATE_KEY);
+        if (typeof raw !== "string" || !raw)
+          continue;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.romanization === "boolean")
+          return parsed.romanization;
+      } catch (e) {
+      }
+    }
+    try {
+      const button = doc?.querySelector?.("#RomanizationToggle");
+      if (button?.classList?.contains("active") || button?.getAttribute?.("aria-pressed") === "true")
+        return true;
+    } catch (e) {
+    }
+    for (const read of storageReaders()) {
+      for (const key of LEGACY_ROMANIZATION_KEYS) {
+        try {
+          const value = read(key);
+          if (value === "true")
+            return true;
+          if (value === "false")
+            return false;
+        } catch (e) {
+        }
+      }
+    }
+    return false;
+  }
+  function areRomanizedRowsShown(doc = currentDocument()) {
+    return Boolean(findSpicyPage(doc)?.classList?.contains(ROMANIZED_ROWS_SHOWN_CLASS));
+  }
+  function lineShowsRomanizedRow(line) {
+    if (!areRomanizedRowsShown(line.ownerDocument))
+      return false;
+    const children = line.children;
+    if (!children)
+      return false;
+    for (let i = 0; i < children.length; i++) {
+      if (children[i].classList.contains(SPICY_ROMANIZED_ROW_CLASS))
+        return true;
+    }
+    return false;
+  }
+  function usesGroupedViewControls(scope) {
+    return Boolean(scope?.closest?.(`#SpicyLyricsPage.${GROUPED_CONTROLS_CLASS}`));
+  }
+  function spicyLyricsClockMs() {
+    try {
+      const fromSpicy = globalThis.SpicyLyrics?.testing?.getProgress?.();
+      if (typeof fromSpicy === "number" && Number.isFinite(fromSpicy))
+        return fromSpicy;
+    } catch (e) {
+    }
+    try {
+      const fromPlayer = globalThis.Spicetify?.Player?.getProgress?.();
+      if (typeof fromPlayer === "number" && Number.isFinite(fromPlayer))
+        return fromPlayer;
+    } catch (e) {
+    }
+    return null;
+  }
+
   // src/utils/translationOverlay.ts
   function isSidebarLyricsActive(doc = document) {
     if (doc.body?.classList?.contains("SpicySidebarLyrics__Active"))
@@ -8967,6 +9174,7 @@ body.slt-update-waiting #TranslateToggle::after {
     fontSize: 0.9,
     syncWordHighlight: true,
     showRomanization: false,
+    romanizationPosition: "above",
     learningMode: false
   };
   var isOverlayEnabled = false;
@@ -9284,7 +9492,9 @@ body.slt-update-waiting #TranslateToggle::after {
     const parts = [
       currentConfig.mode,
       currentConfig.syncWordHighlight ? "1" : "0",
-      currentConfig.showRomanization ? "1" : "0"
+      currentConfig.showRomanization ? "1" : "0",
+      currentConfig.romanizationPosition,
+      areRomanizedRowsShown(lines[0]?.ownerDocument) ? "R" : ""
     ];
     for (let i = 0; i < lines.length; i++) {
       const text3 = lineTexts[i];
@@ -9326,6 +9536,17 @@ body.slt-update-waiting #TranslateToggle::after {
     lastRenderedLinesMap.delete(doc);
     lastRenderedOutputMap.delete(doc);
   }
+  function romanizationPieces(text3, timingInfo) {
+    const words = timingInfo?.romanizedWords;
+    if (!words || words.length < 2)
+      return null;
+    if (normalizeCompare(words.map((word) => word.text).join("")) !== normalizeCompare(text3))
+      return null;
+    return words;
+  }
+  function romanizationSignature(text3, timingInfo) {
+    return `${romanizationPieces(text3, timingInfo) ? "T" : "P"}${timingInfo?.startTime ?? ""}:${text3}`;
+  }
   function buildRomanizationLine(doc, index, timingInfo, line, text3) {
     const romanized = text3 !== void 0 ? text3 : romanizationMap.get(index);
     if (!romanized || !romanized.trim())
@@ -9336,7 +9557,23 @@ body.slt-update-waiting #TranslateToggle::after {
     romanEl.className = "slt-romanization-line";
     romanEl.dataset.forLine = index.toString();
     romanEl.dataset.lineIndex = index.toString();
-    romanEl.textContent = romanized;
+    romanEl.dataset.sltRomSig = romanizationSignature(romanized, timingInfo);
+    const pieces = romanizationPieces(romanized, timingInfo);
+    if (pieces) {
+      romanEl.classList.add("slt-rom-timed");
+      pieces.forEach((piece, pieceIndex) => {
+        if (pieceIndex > 0 && piece.startsWord)
+          romanEl.appendChild(doc.createTextNode(" "));
+        const span = doc.createElement("span");
+        span.className = "slt-rom-piece";
+        span.dataset.start = piece.startTime.toString();
+        span.dataset.end = piece.endTime.toString();
+        span.textContent = piece.text;
+        romanEl.appendChild(span);
+      });
+    } else {
+      romanEl.textContent = romanized;
+    }
     if (timingInfo) {
       romanEl.dataset.startTime = timingInfo.startTime.toString();
       romanEl.dataset.endTime = timingInfo.endTime.toString();
@@ -9344,6 +9581,46 @@ body.slt-update-waiting #TranslateToggle::after {
     if (isLineActive(line))
       romanEl.classList.add("active");
     return romanEl;
+  }
+  function isRomanizationLine(el2) {
+    return !!el2 && el2.classList.contains("slt-romanization-line");
+  }
+  function insertAfterLine(line, el2) {
+    const next = line.nextElementSibling;
+    const anchor = currentConfig.romanizationPosition === "above" && isRomanizationLine(next) ? next : line;
+    line.parentNode.insertBefore(el2, anchor.nextSibling);
+  }
+  function syncRomanizationLine(doc, line, translationEl, index, timingInfo, text3, claimed) {
+    const above = currentConfig.romanizationPosition === "above";
+    const anchor = above ? line : translationEl;
+    const misplaced = (above ? translationEl : line).nextElementSibling;
+    if (isRomanizationLine(misplaced))
+      misplaced.remove();
+    const next = anchor.nextElementSibling;
+    const existing = isRomanizationLine(next) ? next : null;
+    if (!text3) {
+      if (existing)
+        existing.remove();
+      return;
+    }
+    if (existing && existing.dataset.sltRomSig === romanizationSignature(text3, timingInfo)) {
+      existing.dataset.lineIndex = index.toString();
+      existing.dataset.forLine = index.toString();
+      if (timingInfo) {
+        existing.dataset.startTime = timingInfo.startTime.toString();
+        existing.dataset.endTime = timingInfo.endTime.toString();
+      }
+      existing.classList.toggle("active", isLineActive(line));
+      claimed.add(existing);
+      return;
+    }
+    if (existing)
+      existing.remove();
+    const romEl = buildRomanizationLine(doc, index, timingInfo, line, text3);
+    if (romEl && anchor.parentNode) {
+      anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
+      claimed.add(romEl);
+    }
   }
   function siblingSkippingRomanization(el2, dir) {
     let cur = dir === "next" ? el2.nextElementSibling : el2.previousElementSibling;
@@ -9354,6 +9631,8 @@ body.slt-update-waiting #TranslateToggle::after {
   }
   function romanizationCompanionText(line, index, mode) {
     if (!currentConfig.showRomanization)
+      return "";
+    if (mode !== "replace" && lineShowsRomanizedRow(line))
       return "";
     const domText = extractLineText(line);
     const nDom = normalizeCompare(domText);
@@ -9489,7 +9768,7 @@ body.slt-update-waiting #TranslateToggle::after {
       });
       return cleanLyricText(wordUnits.map((w) => w.textContent || "").join(" "));
     }
-    return cleanLyricText(line.textContent);
+    return cleanLyricText(lineOwnText(line));
   }
   var wordUnitsCache = /* @__PURE__ */ new WeakMap();
   function invalidateWordUnitsCache() {
@@ -9596,32 +9875,7 @@ body.slt-update-waiting #TranslateToggle::after {
       lineEl.classList.add("slt-replace-hidden");
       lineEl.dataset.sltIndex = index.toString();
       const refreshRomanization = (anchor) => {
-        let existingRom = anchor.nextElementSibling;
-        if (existingRom && !existingRom.classList.contains("slt-romanization-line"))
-          existingRom = null;
-        if (!romanizationText) {
-          if (existingRom)
-            existingRom.remove();
-          return;
-        }
-        if (existingRom) {
-          if (existingRom.textContent !== romanizationText)
-            existingRom.textContent = romanizationText;
-          existingRom.dataset.lineIndex = index.toString();
-          existingRom.dataset.forLine = index.toString();
-          if (timingInfo) {
-            existingRom.dataset.startTime = timingInfo.startTime.toString();
-            existingRom.dataset.endTime = timingInfo.endTime.toString();
-          }
-          existingRom.classList.toggle("active", isLineActive(line));
-          claimed.add(existingRom);
-          return;
-        }
-        const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
-        if (romEl) {
-          anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
-          claimed.add(romEl);
-        }
+        syncRomanizationLine(doc, line, anchor, index, timingInfo, romanizationText, claimed);
       };
       if (existing && existing.dataset.sltSig === sig) {
         existing.dataset.lineIndex = index.toString();
@@ -9681,7 +9935,7 @@ body.slt-update-waiting #TranslateToggle::after {
       if (qualityIndicator) {
         replaceEl.appendChild(qualityIndicator);
       }
-      line.parentNode.insertBefore(replaceEl, line.nextSibling);
+      insertAfterLine(line, replaceEl);
       claimed.add(replaceEl);
       refreshRomanization(replaceEl);
     });
@@ -9754,7 +10008,7 @@ body.slt-update-waiting #TranslateToggle::after {
     const sourceLetters = Array.from(sourceWord.querySelectorAll(".letter"));
     if (sourceLetters.length < 2)
       return null;
-    const progressValues = sourceLetters.map((letterEl) => parseFloat(letterEl.style.getPropertyValue("--gradient-position"))).filter((value) => !isNaN(value)).map((value) => Math.max(0, Math.min(1, (value + 20) / 120)));
+    const progressValues = sourceLetters.map((letterEl) => readGradientPosition(letterEl)).filter((value) => !isNaN(value)).map((value) => Math.max(0, Math.min(1, (value + 20) / 120)));
     if (progressValues.length < 2)
       return null;
     const hasSustainProgress = progressValues.some((value) => value > 0.05 && value < 0.95);
@@ -9855,32 +10109,7 @@ body.slt-update-waiting #TranslateToggle::after {
           lineEl.classList.add("slt-overlay-parent");
           lineEl.dataset.sltIndex = index.toString();
           const refreshRomanization = (anchor) => {
-            let existingRom = anchor.nextElementSibling;
-            if (existingRom && !existingRom.classList.contains("slt-romanization-line"))
-              existingRom = null;
-            if (!romanizationText) {
-              if (existingRom)
-                existingRom.remove();
-              return;
-            }
-            if (existingRom) {
-              if (existingRom.textContent !== romanizationText)
-                existingRom.textContent = romanizationText;
-              existingRom.dataset.lineIndex = index.toString();
-              existingRom.dataset.forLine = index.toString();
-              if (timingInfo) {
-                existingRom.dataset.startTime = timingInfo.startTime.toString();
-                existingRom.dataset.endTime = timingInfo.endTime.toString();
-              }
-              existingRom.classList.toggle("active", isLineActive(line));
-              claimed.add(existingRom);
-              return;
-            }
-            const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
-            if (romEl) {
-              anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
-              claimed.add(romEl);
-            }
+            syncRomanizationLine(doc, line, anchor, index, timingInfo, romanizationText, claimed);
           };
           if (existing && existing.dataset.sltSig === sig) {
             existing.dataset.lineIndex = index.toString();
@@ -9921,7 +10150,7 @@ body.slt-update-waiting #TranslateToggle::after {
           if (qualityIndicator) {
             translationEl.appendChild(qualityIndicator);
           }
-          line.parentNode.insertBefore(translationEl, line.nextSibling);
+          insertAfterLine(line, translationEl);
           claimed.add(translationEl);
           refreshRomanization(translationEl);
           if (!isBreak && currentConfig.syncWordHighlight && translation) {
@@ -10023,6 +10252,15 @@ body.slt-update-waiting #TranslateToggle::after {
       }
     }
   }
+  function readGradientPosition(el2) {
+    const direct = parseFloat(el2.style.getPropertyValue("--gradient-position"));
+    if (!isNaN(direct))
+      return direct;
+    const bloom = parseFloat(el2.style.getPropertyValue("--SLM_GradientPosition"));
+    if (isNaN(bloom))
+      return NaN;
+    return -20 + Math.max(0, Math.min(1, (bloom + 50) / 150)) * 120;
+  }
   function getOverallWordGradientProgress(originalLine) {
     const originalWords = getWordUnits(originalLine);
     if (originalWords.length === 0)
@@ -10038,9 +10276,7 @@ body.slt-update-waiting #TranslateToggle::after {
         const letters = wordEl.querySelectorAll(".letter");
         const letterGradients = [];
         for (const letter of Array.from(letters)) {
-          const letterGradient = parseFloat(
-            letter.style.getPropertyValue("--gradient-position")
-          );
+          const letterGradient = readGradientPosition(letter);
           if (!isNaN(letterGradient)) {
             letterGradients.push(letterGradient);
           }
@@ -10049,7 +10285,7 @@ body.slt-update-waiting #TranslateToggle::after {
           gradientValue = letterGradients.reduce((sum, value) => sum + value, 0) / letterGradients.length;
         }
       } else {
-        gradientValue = parseFloat(wordEl.style.getPropertyValue("--gradient-position"));
+        gradientValue = readGradientPosition(wordEl);
       }
       if (!isNaN(gradientValue)) {
         hasAnyGradientData = true;
@@ -10079,9 +10315,7 @@ body.slt-update-waiting #TranslateToggle::after {
         const letters = wordEl.querySelectorAll(".letter");
         const letterGradients = [];
         for (const letter of Array.from(letters)) {
-          const letterGradient = parseFloat(
-            letter.style.getPropertyValue("--gradient-position")
-          );
+          const letterGradient = readGradientPosition(letter);
           if (!isNaN(letterGradient)) {
             letterGradients.push(letterGradient);
           }
@@ -10090,7 +10324,7 @@ body.slt-update-waiting #TranslateToggle::after {
           gradientValue = letterGradients.reduce((sum, value) => sum + value, 0) / letterGradients.length;
         }
       } else {
-        gradientValue = parseFloat(wordEl.style.getPropertyValue("--gradient-position"));
+        gradientValue = readGradientPosition(wordEl);
       }
       gradients.push(gradientValue);
     }
@@ -10107,7 +10341,7 @@ body.slt-update-waiting #TranslateToggle::after {
     const isNotSung = originalLine.classList.contains("NotSung");
     const originalWordGradients = getOriginalWordGradients(originalLine);
     const overallProgress = getOverallWordGradientProgress(originalLine);
-    const originalText = originalLine.textContent || "";
+    const originalText = lineOwnText(originalLine);
     const originalHasNonLatin = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/.test(originalText);
     const wordRatio = translatedWords.length / Math.max(originalWordGradients.length, 1);
     const useSmoothFill = originalHasNonLatin || wordRatio < 0.7 || wordRatio > 1.45;
@@ -10281,6 +10515,48 @@ body.slt-update-waiting #TranslateToggle::after {
           const pct = total <= 0 ? 1 : (currentTime - lineStartTime) / total;
           setStyleProp(transLineEl, "--gradient-position", `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
         }
+      }
+    });
+  }
+  function setClass(el2, name, on) {
+    if (el2.classList.contains(name) !== on)
+      el2.classList.toggle(name, on);
+  }
+  function updateRomanizationLines(doc) {
+    const rows = doc.querySelectorAll(".slt-romanization-line");
+    if (rows.length === 0)
+      return;
+    const clockMs = spicyLyricsClockMs();
+    rows.forEach((row) => {
+      const line = findOriginalLineForTranslation(row);
+      if (!line)
+        return;
+      const active = isLineActive(line);
+      const sung = !active && line.classList.contains("Sung");
+      setClass(row, "active", active);
+      setClass(row, "Sung", sung);
+      setClass(row, "NotSung", !active && line.classList.contains("NotSung"));
+      setClass(row, "OppositeAligned", line.classList.contains("OppositeAligned"));
+      setClass(row, "rtl", line.classList.contains("rtl"));
+      if (!row.classList.contains("slt-rom-timed"))
+        return;
+      const pieces = row.children;
+      for (let i = 0; i < pieces.length; i++) {
+        const piece = pieces[i];
+        let position = sung ? 100 : -20;
+        if (active && clockMs !== null) {
+          const start = parseFloat(piece.dataset.start || "") * 1e3;
+          const end = parseFloat(piece.dataset.end || "") * 1e3;
+          if (isNaN(start) || isNaN(end)) {
+            position = 100;
+          } else {
+            const progress = clockMs <= start ? 0 : clockMs >= end || end <= start ? 1 : (clockMs - start) / (end - start);
+            position = Math.round((-20 + 120 * progress) * 10) / 10;
+          }
+        } else if (active) {
+          position = 100;
+        }
+        setStyleProp(piece, "--slt-rom-position", `${position}%`);
       }
     });
   }
@@ -10847,7 +11123,6 @@ body.slt-update-waiting #TranslateToggle::after {
   var activeLineObservers = /* @__PURE__ */ new Map();
   var activeSyncIntervalId = null;
   var activeSyncRafId = null;
-  var SPICY_LYRICS_SETTINGS_KEY = "SL:settings";
   var FRAME_CAP_REFRESH_MS = 1e3;
   var FRAME_CAP_SLACK_MS = 1;
   var frameCapIntervalMs = 0;
@@ -10855,9 +11130,7 @@ body.slt-update-waiting #TranslateToggle::after {
   var lastSyncFrameAt = -Infinity;
   function readSpicyLyricsFrameInterval() {
     try {
-      const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
-      const raw = spicetifyStorage?.get?.(SPICY_LYRICS_SETTINGS_KEY) ?? localStorage.getItem(SPICY_LYRICS_SETTINGS_KEY);
-      const settings = raw ? JSON.parse(raw) : null;
+      const settings = readSpicySettings();
       if (!settings?.animationFpsCapEnabled)
         return 0;
       const saved = Number(settings.animationFpsCap);
@@ -10898,6 +11171,7 @@ body.slt-update-waiting #TranslateToggle::after {
       onActiveLineChanged(document);
       updateLearningRow(document);
       updateWordSyncStates(document);
+      updateRomanizationLines(document);
       syncBlurToTranslations(document);
       updateBackgroundSyncStates(document);
       const pipWindow = getPIPWindow();
@@ -10914,6 +11188,7 @@ body.slt-update-waiting #TranslateToggle::after {
             }
             onActiveLineChanged(pipDoc);
             updateWordSyncStates(pipDoc);
+            updateRomanizationLines(pipDoc);
             syncBlurToTranslations(pipDoc);
             updateBackgroundSyncStates(pipDoc);
             if (!activeLineObservers.has(pipDoc)) {
@@ -11195,20 +11470,19 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     flex: 0 0 100%;
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     font-weight: 600;
-    font-style: italic;
     line-height: 1.2;
     padding: 2px 0 2px 0;
-    letter-spacing: 0.02em;
-    color: rgba(255, 215, 120, 0.78);
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.85);
     text-align: left;
     white-space: normal;
     word-wrap: break-word;
     overflow-wrap: anywhere;
     word-break: break-word;
     pointer-events: none;
-    opacity: 0.7;
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
     filter: blur(var(--BlurAmount, 0px));
-    transition: opacity 0.25s ease, filter 0.25s ease, color 0.25s ease;
+    transition: opacity 0.25s ease, filter 0.25s ease;
 }
 
 .slt-romanization-line.OppositeAligned,
@@ -11221,17 +11495,28 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
 .slt-romanization-line.Active {
     opacity: 1 !important;
     filter: none !important;
-    color: rgba(255, 224, 150, 0.95);
+    color: rgba(255, 255, 255, 0.95);
 }
 
 .line.Sung + .slt-romanization-line,
 .slt-romanization-line.Sung {
-    opacity: 0.45;
+    opacity: var(--Vocal-Sung-opacity, 0.497);
 }
 
 .line.NotSung + .slt-romanization-line,
 .slt-romanization-line.NotSung {
-    opacity: 0.55;
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
+}
+
+.slt-romanization-line.active.slt-rom-timed .slt-rom-piece {
+    -webkit-text-fill-color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.95) var(--slt-rom-position, -20%),
+        rgba(255, 255, 255, 0.5) calc(var(--slt-rom-position, -20%) + 20%)
+    );
 }
 
 .slt-interleaved-translation.Sung,
@@ -11448,9 +11733,14 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
     animation: spicy-translate-spin 1s linear infinite;
 }
 
-#TranslateToggle.active svg,
-#LearningToggle.active svg {
+#TranslateToggle.active:not(.ViewToggle) svg,
+#LearningToggle.active:not(.ViewToggle) svg {
     color: var(--spice-button-active, #1db954);
+}
+
+#TranslateToggle.ViewToggle.loading > svg:not(.SL_KnockoutDisc),
+#TranslateToggle.ViewToggle.error > svg:not(.SL_KnockoutDisc) {
+    opacity: 1 !important;
 }
 
 #TranslateToggle.error svg {
@@ -11671,7 +11961,8 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
 
 .slt-replace-line.Active,
 .slt-replace-line.active,
-.line.Active + .slt-replace-line {
+.line.Active + .slt-replace-line,
+.line.Active + .slt-romanization-line + .slt-replace-line {
     filter: none !important;
     opacity: var(--Vocal-Active-opacity, 1) !important;
     scale: 1;
@@ -11679,14 +11970,16 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-learning-token,
 }
 
 .slt-replace-line.Sung,
-.line.Sung + .slt-replace-line {
+.line.Sung + .slt-replace-line,
+.line.Sung + .slt-romanization-line + .slt-replace-line {
     --gradient-position: 100% !important;
     opacity: var(--Vocal-Sung-opacity, 0.497);
     scale: var(--DefaultLineScale, 1);
 }
 
 .slt-replace-line.NotSung,
-.line.NotSung + .slt-replace-line {
+.line.NotSung + .slt-replace-line,
+.line.NotSung + .slt-romanization-line + .slt-replace-line {
     --gradient-position: -20% !important;
     opacity: var(--Vocal-NotSung-opacity, 0.51);
     scale: var(--DefaultLineScale, 1);
@@ -11954,6 +12247,7 @@ body.slt-overlay-active .LyricsContent {}
 }
 
 .line.Active + .slt-interleaved-translation,
+.line.Active + .slt-romanization-line + .slt-interleaved-translation,
 .slt-interleaved-translation.active,
 .slt-interleaved-translation.Active {
     filter: none !important;
@@ -11962,11 +12256,13 @@ body.slt-overlay-active .LyricsContent {}
     text-shadow: var(--ActiveTextGlowDef) !important;
 }
 
-.line.Sung + .slt-interleaved-translation {
+.line.Sung + .slt-interleaved-translation,
+.line.Sung + .slt-romanization-line + .slt-interleaved-translation {
     opacity: var(--Vocal-Sung-opacity, 0.497);
 }
 
-.line.NotSung + .slt-interleaved-translation {
+.line.NotSung + .slt-interleaved-translation,
+.line.NotSung + .slt-romanization-line + .slt-interleaved-translation {
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
@@ -12110,17 +12406,22 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
-.line.Sung + .slt-sync-translation.slt-interleaved-translation {
+.line.Sung + .slt-sync-translation.slt-interleaved-translation,
+.line.Sung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: 100%;
 }
 
-.line.NotSung + .slt-sync-translation.slt-interleaved-translation {
+.line.NotSung + .slt-sync-translation.slt-interleaved-translation,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: -20%;
 }
 
 .line.NotSung + .slt-sync-translation.slt-interleaved-translation.active,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation.active,
 .line.Sung + .slt-sync-translation.slt-interleaved-translation.active,
-.line.Active + .slt-sync-translation.slt-interleaved-translation {
+.line.Sung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation.active,
+.line.Active + .slt-sync-translation.slt-interleaved-translation,
+.line.Active + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     filter: blur(0px) !important;
 }
 
@@ -12234,27 +12535,32 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     scroll-behavior: smooth;
 }
 
-.line.Active + .slt-sync-translation {
+.line.Active + .slt-sync-translation,
+.line.Active + .slt-romanization-line + .slt-sync-translation {
     opacity: 1 !important;
     filter: none !important;
 }
 
-.line.Active + .slt-sync-translation .slt-sync-word.slt-word-active {
+.line.Active + .slt-sync-translation .slt-sync-word.slt-word-active,
+.line.Active + .slt-romanization-line + .slt-sync-translation .slt-sync-word.slt-word-active {
     text-shadow: 0 0 var(--text-shadow-blur-radius, 10px) rgba(255, 255, 255, var(--text-shadow-opacity-decimal, 0.5));
 }
 
 .line.Active + .slt-sync-translation .slt-sync-word.slt-word-past,
+.line.Active + .slt-romanization-line + .slt-sync-translation .slt-sync-word.slt-word-past,
 .slt-sync-translation.active .slt-sync-word.slt-word-past,
 .slt-sync-translation.Active .slt-sync-word.slt-word-past {
     opacity: 1;
 }
 
-.line.Sung + .slt-sync-translation .slt-sync-word {
+.line.Sung + .slt-sync-translation .slt-sync-word,
+.line.Sung + .slt-romanization-line + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.5;
     --gradient-alpha-end: 0.35;
 }
 
-.line.NotSung + .slt-sync-translation .slt-sync-word {
+.line.NotSung + .slt-sync-translation .slt-sync-word,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
 }
@@ -12430,7 +12736,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.Sung:not(.musical-line) + .slt-replace-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-romanization-line + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
   .line.Sung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-romanization-line + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
   .line.Sung:not(.musical-line) + .slt-romanization-line,
@@ -12451,7 +12763,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.NotSung:not(.musical-line) + .slt-replace-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-romanization-line + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
   .line.NotSung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-romanization-line + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
   .line.NotSung:not(.musical-line) + .slt-romanization-line,
@@ -12506,7 +12824,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.8" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.9" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -12544,7 +12862,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var currentBackoffMs = 0;
   var checkTimer = null;
   var schedulerStarted = false;
-  function parseVersion(version) {
+  function parseVersion2(version) {
     if (typeof version !== "string")
       return null;
     const cleanVersion = version.trim().replace(/^v/i, "");
@@ -12568,13 +12886,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return 0;
   }
   function getCurrentVersion() {
-    return parseVersion(CURRENT_VERSION) || { major: 0, minor: 0, patch: 0, text: CURRENT_VERSION };
+    return parseVersion2(CURRENT_VERSION) || { major: 0, minor: 0, patch: 0, text: CURRENT_VERSION };
   }
   function getContentHashShort(length = 8) {
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"fcfa1191a8e863dfba66f16d94f2e79da1c8f2c140dc1ee093d53cb2b61317f8".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "fcfa1191a8e863dfba66f16d94f2e79da1c8f2c140dc1ee093d53cb2b61317f8" : "";
+    return !"1a61d371e99bdf4e493fe71c42a69cbcad3a9d84947fae97d78df53dd51d7a2b".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "1a61d371e99bdf4e493fe71c42a69cbcad3a9d84947fae97d78df53dd51d7a2b" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -12619,7 +12937,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (!response.ok)
         return null;
       const data = await response.json();
-      const version = parseVersion(data?.version);
+      const version = parseVersion2(data?.version);
       if (!version)
         return null;
       const hash = data.hash || data.sha256 || data.checksum || null;
@@ -12647,7 +12965,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   async function fetchGitHubLatestRelease() {
     const release = await fetchGitHubRelease("latest");
-    const version = release ? parseVersion(release.tag_name) : null;
+    const version = release ? parseVersion2(release.tag_name) : null;
     if (!release || !version)
       return null;
     const jsAsset = Array.isArray(release.assets) ? release.assets.find((asset) => typeof asset?.name === "string" && asset.name.endsWith(".js")) : null;
@@ -13361,7 +13679,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const current = getCurrentVersion();
     let applied = null;
     if (pending && Date.now() - pending.createdAt < PENDING_TTL_MS) {
-      const target = parseVersion(pending.version);
+      const target = parseVersion2(pending.version);
       const versionDelta = target ? compareVersions(current, target) : -1;
       const reached = pending.kind === "hotfix" ? versionDelta > 0 || versionDelta === 0 && !!LOADED_HASH && LOADED_HASH !== pending.fromHash : versionDelta >= 0;
       if (!reached) {
@@ -13383,7 +13701,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         resume: !!pending.resume
       };
     } else if (lastKnownVersion) {
-      const last = parseVersion(lastKnownVersion);
+      const last = parseVersion2(lastKnownVersion);
       if (last && compareVersions(current, last) > 0) {
         applied = { kind: "update", version: CURRENT_VERSION, from: last.text, changelog: "", exactChangelogOnly: !IS_LOADER_MODE, resume: false };
       } else if (IS_LOADER_MODE && lastKnownVersion === CURRENT_VERSION && LOADED_HASH && (lastKnownHash && lastKnownHash !== LOADED_HASH || legacyHotfix)) {
@@ -13989,8 +14307,24 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       type: "toggle",
       storageKey: "show-romanization",
       defaultValue: false,
-      description: "Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one",
-      effects: ["romanizationDisplay"]
+      description: "Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one. It lights up word by word on synced lyrics. Lines where Spicy Lyrics already shows its own romanization row are left to it.",
+      effects: ["romanizationDisplay", "fieldVisibility"]
+    },
+    {
+      id: "romanization-position",
+      section: "Translation",
+      keywords: "romanization romaji pinyin order position above below under lyrics translation first transliteration",
+      label: "Romanization Position",
+      type: "select",
+      storageKey: "romanization-position",
+      defaultValue: "above",
+      options: [
+        { value: "above", text: "Under the lyrics, above the translation (default)" },
+        { value: "below", text: "Under the translation" }
+      ],
+      description: "Where the pronunciation line sits: lyrics, romanization, translation, or lyrics, translation, romanization.",
+      visibleWhen: () => storage.get("show-romanization") === "true",
+      effects: ["reapplyTranslations"]
     },
     {
       id: "show-furigana",
@@ -14591,6 +14925,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         break;
       case "show-romanization":
         state.showRomanization = Boolean(value);
+        break;
+      case "romanization-position":
+        state.romanizationPosition = parseRomanizationPosition(String(value));
         break;
       case "show-furigana":
         state.showFurigana = Boolean(value);
@@ -15616,6 +15953,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   var romanizationToggleButton = null;
   var observedLyricsContent = null;
   var lastKnownRomanizationState = null;
+  var lastKnownRomanizedRows = null;
   var lastTranslatedRomanizationState = null;
   var contentTranslation = /* @__PURE__ */ new Map();
   var contentUnlinked = /* @__PURE__ */ new Map();
@@ -15746,62 +16084,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return null;
   }
   function isRomanizationActive() {
-    const readUiState = (raw) => {
-      if (!raw)
-        return null;
-      try {
-        const obj = JSON.parse(raw);
-        if (obj && typeof obj.romanization === "boolean")
-          return obj.romanization;
-      } catch (e) {
-      }
-      return null;
-    };
-    try {
-      const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
-      const fromSpicetify = readUiState(spicetifyStorage?.get?.("SL:uiState"));
-      if (fromSpicetify !== null)
-        return fromSpicetify;
-    } catch (e) {
-    }
-    try {
-      const fromLocal = readUiState(localStorage.getItem("SL:uiState"));
-      if (fromLocal !== null)
-        return fromLocal;
-    } catch (e) {
-    }
-    const btn = document.querySelector("#RomanizationToggle");
-    if (btn && btn.classList.contains("active"))
-      return true;
-    const keys = [
-      "SpicyLyrics-romanization",
-      "SpicyLyrics:romanization",
-      "romanization"
-    ];
-    try {
-      const spicetifyStorage = globalThis.Spicetify?.LocalStorage;
-      if (spicetifyStorage?.get) {
-        for (const key of keys) {
-          const val = spicetifyStorage.get(key);
-          if (val === "true")
-            return true;
-          if (val === "false")
-            return false;
-        }
-      }
-    } catch (e) {
-    }
-    try {
-      for (const key of keys) {
-        const val = localStorage.getItem(key);
-        if (val === "true")
-          return true;
-        if (val === "false")
-          return false;
-      }
-    } catch (e) {
-    }
-    return false;
+    return isSpicyRomanizationToggledOn() && spicyRomanizationDisplay() === "replace";
+  }
+  function romanizedRowsKey() {
+    const pipWindow = getPIPWindow2();
+    return `${areRomanizedRowsShown(document)}|${pipWindow ? areRomanizedRowsShown(pipWindow.document) : ""}`;
   }
   function isSpicyLyricsOpen() {
     if (document.querySelector("#SpicyLyricsPage") || document.querySelector(".spicy-pip-wrapper #SpicyLyricsPage") || isSidebarLyricsActive()) {
@@ -15849,15 +16136,60 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       }, timeout);
     });
   }
-  function updateButtonState() {
-    const buttons = [
+  var TRANSLATE_ICONS = {
+    on: Icons.Translate,
+    off: Icons.TranslateOff,
+    lineOn: Icons.TranslateLine,
+    lineOff: Icons.TranslateLineOff
+  };
+  var LEARNING_ICONS = {
+    on: Icons.Learning,
+    off: Icons.LearningOff,
+    lineOn: Icons.LearningLine,
+    lineOff: Icons.LearningLineOff
+  };
+  function knockoutDisc(icon, maskId) {
+    const body = icon.match(/<svg[^>]*>([\s\S]*)<\/svg>/)?.[1] ?? "";
+    return `<svg class="SL_KnockoutDisc" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" aria-hidden="true"><mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48"><rect width="48" height="48" fill="#fff"/><g transform="translate(12 12)" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</g></mask><circle cx="24" cy="24" r="24" fill="#fff" mask="url(#${maskId})"/></svg>`;
+  }
+  function paintToggleButton(button, icons, pressed, override) {
+    if (!button)
+      return;
+    const el2 = button;
+    const card = el2.classList.contains("CardControl");
+    const grouped = !card && usesGroupedViewControls(el2);
+    const line = !card && (grouped || supportsRomanizedRows(el2.ownerDocument));
+    el2.classList.toggle("ViewToggle", grouped);
+    el2.classList.toggle("active", pressed);
+    if (grouped) {
+      el2.setAttribute("aria-pressed", String(pressed && !override));
+    } else {
+      el2.removeAttribute("aria-pressed");
+    }
+    const markupKey = [grouped ? "g" : "", line ? "l" : "", override ? "o" : grouped ? "" : String(pressed)].join("|");
+    if (el2.dataset.sltIcon === markupKey && el2.firstElementChild)
+      return;
+    el2.dataset.sltIcon = markupKey;
+    if (override) {
+      el2.innerHTML = override;
+    } else if (grouped) {
+      el2.innerHTML = icons.lineOn + knockoutDisc(icons.lineOn, `SLT_Knockout_${el2.id}`);
+    } else if (line) {
+      el2.innerHTML = pressed ? icons.lineOn : icons.lineOff;
+    } else {
+      el2.innerHTML = pressed ? icons.on : icons.off;
+    }
+  }
+  function translateButtons() {
+    return [
       document.querySelector("#TranslateToggle"),
       getPIPWindow2()?.document.querySelector("#TranslateToggle")
     ];
-    buttons.forEach((button) => {
+  }
+  function updateButtonState() {
+    translateButtons().forEach((button) => {
       if (button) {
-        button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
-        button.classList.toggle("active", state.isEnabled);
+        paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled, button.classList.contains("loading") ? Icons.Loading : void 0);
         const btnWithTippy = button;
         if (btnWithTippy._tippy) {
           btnWithTippy._tippy.setContent(state.isEnabled ? "Disable Translation" : "Enable Translation");
@@ -15866,35 +16198,23 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     });
   }
   function restoreButtonState() {
-    const buttons = [
-      document.querySelector("#TranslateToggle"),
-      getPIPWindow2()?.document.querySelector("#TranslateToggle")
-    ];
-    buttons.forEach((button) => {
+    translateButtons().forEach((button) => {
       if (button) {
         button.classList.remove("loading", "error");
-        button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
+        paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled);
       }
     });
   }
   function setTranslateButtonsLoading(isLoading) {
-    const buttons = [
-      document.querySelector("#TranslateToggle"),
-      getPIPWindow2()?.document.querySelector("#TranslateToggle")
-    ];
-    buttons.forEach((button) => {
+    translateButtons().forEach((button) => {
       if (!button)
         return;
       button.classList.toggle("loading", isLoading);
-      button.innerHTML = isLoading ? Icons.Loading : state.isEnabled ? Icons.Translate : Icons.TranslateOff;
+      paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled, isLoading ? Icons.Loading : void 0);
     });
   }
   function setButtonErrorState(hasError) {
-    const buttons = [
-      document.querySelector("#TranslateToggle"),
-      getPIPWindow2()?.document.querySelector("#TranslateToggle")
-    ];
-    buttons.forEach((button) => {
+    translateButtons().forEach((button) => {
       if (button)
         button.classList.toggle("error", hasError);
     });
@@ -15903,9 +16223,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const button = document.createElement("button");
     button.id = "TranslateToggle";
     button.className = "ViewControl";
-    button.innerHTML = state.isEnabled ? Icons.Translate : Icons.TranslateOff;
-    if (state.isEnabled)
-      button.classList.add("active");
     if (typeof Spicetify !== "undefined" && Spicetify.Tippy) {
       try {
         const tooltip = Spicetify.Tippy(button, {
@@ -15955,6 +16272,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     } else {
       cardControls.insertBefore(button, cardControls.firstChild);
     }
+    paintToggleButton(button, TRANSLATE_ICONS, state.isEnabled);
     return true;
   }
   function insertTranslateButtonIntoDocument(doc) {
@@ -15983,6 +16301,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         viewControls.appendChild(translateButton);
       }
     }
+    paintToggleButton(translateButton, TRANSLATE_ICONS, state.isEnabled);
   }
   function learningButtonTooltip() {
     return state.learningVisible ? "Hide Learning Mode" : "Show Learning Mode";
@@ -15991,8 +16310,6 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const button = document.createElement("button");
     button.id = "LearningToggle";
     button.className = "ViewControl";
-    button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
-    button.classList.toggle("active", state.learningVisible);
     if (typeof Spicetify !== "undefined" && Spicetify.Tippy) {
       try {
         const tooltip = Spicetify.Tippy(button, {
@@ -16024,6 +16341,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       if (translateButton.classList.contains("CardControl"))
         button.classList.add("CardControl");
       translateButton.insertAdjacentElement("afterend", button);
+      paintToggleButton(button, LEARNING_ICONS, state.learningVisible);
     });
     doc.querySelectorAll("#LearningToggle").forEach((button) => {
       const prev = button.previousElementSibling;
@@ -16031,8 +16349,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         button.remove();
         return;
       }
-      button.innerHTML = state.learningVisible ? Icons.Learning : Icons.LearningOff;
-      button.classList.toggle("active", state.learningVisible);
+      paintToggleButton(button, LEARNING_ICONS, state.learningVisible);
       const btnWithTippy = button;
       if (btnWithTippy._tippy)
         btnWithTippy._tippy.setContent(learningButtonTooltip());
@@ -16075,7 +16392,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (letters.length > 0) {
       return cleanLyricText(Array.from(letters).map((l) => l.textContent || "").join(""));
     }
-    return cleanLyricText(lineElement.textContent);
+    return cleanLyricText(lineOwnText(lineElement));
   }
   function getConfidentNonTargetLineIndexes(lines, targetLanguage) {
     const indexes = [];
@@ -16203,7 +16520,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function getLyricsFirstLineText() {
     const lines = getLyricsLines();
     if (lines.length > 0) {
-      return lines[0].textContent?.trim() || null;
+      return lineOwnText(lines[0]).trim() || null;
     }
     return null;
   }
@@ -16215,7 +16532,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         return;
       const lines = getLyricsLines();
       if (lines.length > 0) {
-        const firstLineText = lines[0].textContent?.trim();
+        const firstLineText = lineOwnText(lines[0]).trim();
         if (firstLineText && firstLineText.length > 0) {
           if (previousFirstLine && firstLineText === previousFirstLine && i < staleLineRetryLimit) {
             await new Promise((resolve) => setTimeout(resolve, delay));
@@ -16964,6 +17281,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       mode: resolveOverlayMode(),
       syncWordHighlight: state.syncWordHighlight,
       showRomanization: state.showRomanization,
+      romanizationPosition: state.romanizationPosition,
       learningMode: isLearningActive()
     };
     if (!isOverlayActive()) {
@@ -17391,12 +17709,20 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     observedLyricsContent = null;
     lastKnownRomanizationState = null;
+    lastKnownRomanizedRows = null;
     lastTranslatedRomanizationState = null;
     cleanupRomanizationWatcher();
   }
   function setupRomanizationWatcher() {
     cleanupRomanizationWatcher();
     const handler = () => {
+      if (spicyRomanizationDisplay() === "underLine") {
+        setTimeout(() => {
+          lastKnownRomanizedRows = romanizedRowsKey();
+          reapplyTranslationsToCurrentLines();
+        }, 60);
+        return;
+      }
       setTimeout(async () => {
         if (state.isEnabled) {
           for (let i = 0; i < 20 && state.isTranslating; i++) {
@@ -17544,6 +17870,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           }
         }
         lastKnownRomanizationState = currentRomanization;
+        const romanizedRows = romanizedRowsKey();
+        if (lastKnownRomanizedRows !== null && romanizedRows !== lastKnownRomanizedRows) {
+          reapplyTranslationsToCurrentLines();
+        }
+        lastKnownRomanizedRows = romanizedRows;
         const pipWindow = getPIPWindow2();
         if (pipWindow && !pipWindow.document.querySelector("#TranslateToggle")) {
           insertTranslateButtonIntoDocument(pipWindow.document);

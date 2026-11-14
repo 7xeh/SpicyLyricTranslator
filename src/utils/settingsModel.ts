@@ -1,4 +1,4 @@
-import { state, parseLanguageList, refreshTargetLanguage } from './state';
+import { state, parseLanguageList, parseRomanizationPosition, refreshTargetLanguage } from './state';
 import type { NotificationLevel } from './state';
 import { storage } from './storage';
 import { notify } from './notify';
@@ -138,8 +138,24 @@ export const SETTINGS_SCHEMA: SettingsField[] = [
         type: 'toggle',
         storageKey: 'show-romanization',
         defaultValue: false,
-        description: 'Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one',
-        effects: ['romanizationDisplay']
+        description: 'Show the pronunciation line (pinyin, romaji, ...) alongside the translation, when the lyrics provider supplies one. It lights up word by word on synced lyrics. Lines where Spicy Lyrics already shows its own romanization row are left to it.',
+        effects: ['romanizationDisplay', 'fieldVisibility']
+    },
+    {
+        id: 'romanization-position',
+        section: 'Translation',
+        keywords: 'romanization romaji pinyin order position above below under lyrics translation first transliteration',
+        label: 'Romanization Position',
+        type: 'select',
+        storageKey: 'romanization-position',
+        defaultValue: 'above',
+        options: [
+            { value: 'above', text: 'Under the lyrics, above the translation (default)' },
+            { value: 'below', text: 'Under the translation' }
+        ],
+        description: 'Where the pronunciation line sits: lyrics, romanization, translation, or lyrics, translation, romanization.',
+        visibleWhen: () => storage.get('show-romanization') === 'true',
+        effects: ['reapplyTranslations']
     },
     {
         id: 'show-furigana',
@@ -765,6 +781,9 @@ export function writeSettingValue(field: SettingsField, value: string | boolean)
             break;
         case 'show-romanization':
             state.showRomanization = Boolean(value);
+            break;
+        case 'romanization-position':
+            state.romanizationPosition = parseRomanizationPosition(String(value));
             break;
         case 'show-furigana':
             state.showFurigana = Boolean(value);

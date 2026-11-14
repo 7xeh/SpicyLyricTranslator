@@ -29,6 +29,11 @@ export function parseLanguageList(value: string | null | undefined): string[] {
 
 export type NotificationLevel = 'all' | 'errors' | 'off';
 export type LearningBreakdownMode = 'auto' | 'on-demand';
+export type RomanizationPosition = 'above' | 'below';
+
+export function parseRomanizationPosition(value: string | null | undefined): RomanizationPosition {
+    return value === 'below' ? 'below' : 'above';
+}
 
 function resolveStoredNotificationLevel(): NotificationLevel {
     const stored = storage.get('notification-level');
@@ -96,6 +101,7 @@ export interface ExtensionState {
     showQualityIndicator: boolean;
     showConnectionIndicator: boolean;
     showRomanization: boolean;
+    romanizationPosition: RomanizationPosition;
     showFurigana: boolean;
     translateBackgroundVocals: boolean;
     learningMode: boolean;
@@ -156,6 +162,7 @@ export const state: ExtensionState = {
     showQualityIndicator: storage.get('show-quality-indicator') !== 'false',
     showConnectionIndicator: resolveStoredConnectionIndicator(),
     showRomanization: storage.get('show-romanization') === 'true',
+    romanizationPosition: parseRomanizationPosition(storage.get('romanization-position')),
     showFurigana: storage.get('show-furigana') === 'true',
     translateBackgroundVocals: storage.get('translate-background-vocals') !== 'false',
     learningMode: storage.get('learning-mode') === 'true',

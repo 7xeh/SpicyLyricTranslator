@@ -1,9 +1,10 @@
 import { warn } from './debug';
-import type { LyricLineData, WordTimingData } from './lyricsFetcher';
+import type { LyricLineData, RomanizedWordData, WordTimingData } from './lyricsFetcher';
 import type { TranslationQualityMeta } from './state';
 import { storage } from './storage';
 import { buildHeuristicBreakdown, BreakdownToken } from './wordBreakdown';
-import { cleanLyricText, normalizeLyricMatchKey } from './text';
+import { cleanLyricText, lineOwnText, normalizeLyricMatchKey } from './text';
+import { areRomanizedRowsShown, lineShowsRomanizedRow, readSpicySettings, spicyLyricsClockMs } from './spicyLyrics';
 
 export function isSidebarLyricsActive(doc: Document = document): boolean {
     if (doc.body?.classList?.contains('SpicySidebarLyrics__Active')) return true;
@@ -24,6 +25,7 @@ export interface OverlayConfig {
     fontSize: number;
     syncWordHighlight: boolean;
     showRomanization: boolean;
+    romanizationPosition: 'above' | 'below';
     learningMode: boolean;
 }
 
@@ -33,6 +35,7 @@ let currentConfig: OverlayConfig = {
     fontSize: 0.9,
     syncWordHighlight: true,
     showRomanization: false,
+    romanizationPosition: 'above',
     learningMode: false
 };
 
@@ -388,7 +391,9 @@ function computeRenderSignature(lines: ArrayLike<Element>, lineTexts: string[]):
     const parts: string[] = [
         currentConfig.mode,
         currentConfig.syncWordHighlight ? '1' : '0',
-        currentConfig.showRomanization ? '1' : '0'
+        currentConfig.showRomanization ? '1' : '0',
+        currentConfig.romanizationPosition,
+        areRomanizedRowsShown(lines[0]?.ownerDocument) ? 'R' : ''
     ];
     for (let i = 0; i < lines.length; i++) {
         const text = lineTexts[i];
@@ -436,6 +441,17 @@ export function forgetRenderState(doc: Document): void {
     lastRenderedOutputMap.delete(doc);
 }
 
+function romanizationPieces(text: string, timingInfo: LyricLineData | undefined): RomanizedWordData[] | null {
+    const words = timingInfo?.romanizedWords;
+    if (!words || words.length < 2) return null;
+    if (normalizeCompare(words.map(word => word.text).join('')) !== normalizeCompare(text)) return null;
+    return words;
+}
+
+function romanizationSignature(text: string, timingInfo: LyricLineData | undefined): string {
+    return `${romanizationPieces(text, timingInfo) ? 'T' : 'P'}${timingInfo?.startTime ?? ''}:${text}`;
+}
+
 function buildRomanizationLine(
     doc: Document,
     index: number,
@@ -451,7 +467,23 @@ function buildRomanizationLine(
     romanEl.className = 'slt-romanization-line';
     romanEl.dataset.forLine = index.toString();
     romanEl.dataset.lineIndex = index.toString();
-    romanEl.textContent = romanized;
+    romanEl.dataset.sltRomSig = romanizationSignature(romanized, timingInfo);
+
+    const pieces = romanizationPieces(romanized, timingInfo);
+    if (pieces) {
+        romanEl.classList.add('slt-rom-timed');
+        pieces.forEach((piece, pieceIndex) => {
+            if (pieceIndex > 0 && piece.startsWord) romanEl.appendChild(doc.createTextNode(' '));
+            const span = doc.createElement('span');
+            span.className = 'slt-rom-piece';
+            span.dataset.start = piece.startTime.toString();
+            span.dataset.end = piece.endTime.toString();
+            span.textContent = piece.text;
+            romanEl.appendChild(span);
+        });
+    } else {
+        romanEl.textContent = romanized;
+    }
 
     if (timingInfo) {
         romanEl.dataset.startTime = timingInfo.startTime.toString();
@@ -459,6 +491,59 @@ function buildRomanizationLine(
     }
     if (isLineActive(line)) romanEl.classList.add('active');
     return romanEl;
+}
+
+function isRomanizationLine(el: Element | null | undefined): el is HTMLElement {
+    return !!el && el.classList.contains('slt-romanization-line');
+}
+
+function insertAfterLine(line: Element, el: HTMLElement): void {
+    const next = line.nextElementSibling;
+    const anchor = currentConfig.romanizationPosition === 'above' && isRomanizationLine(next) ? next : line;
+    line.parentNode!.insertBefore(el, anchor.nextSibling);
+}
+
+function syncRomanizationLine(
+    doc: Document,
+    line: Element,
+    translationEl: HTMLElement,
+    index: number,
+    timingInfo: LyricLineData | undefined,
+    text: string,
+    claimed: Set<Element>
+): void {
+    const above = currentConfig.romanizationPosition === 'above';
+    const anchor = above ? line : translationEl;
+    const misplaced = (above ? translationEl : line).nextElementSibling;
+    if (isRomanizationLine(misplaced)) misplaced.remove();
+
+    const next = anchor.nextElementSibling;
+    const existing = isRomanizationLine(next) ? next : null;
+
+    if (!text) {
+        if (existing) existing.remove();
+        return;
+    }
+
+    if (existing && existing.dataset.sltRomSig === romanizationSignature(text, timingInfo)) {
+        existing.dataset.lineIndex = index.toString();
+        existing.dataset.forLine = index.toString();
+        if (timingInfo) {
+            existing.dataset.startTime = timingInfo.startTime.toString();
+            existing.dataset.endTime = timingInfo.endTime.toString();
+        }
+        existing.classList.toggle('active', isLineActive(line));
+        claimed.add(existing);
+        return;
+    }
+
+    if (existing) existing.remove();
+
+    const romEl = buildRomanizationLine(doc, index, timingInfo, line, text);
+    if (romEl && anchor.parentNode) {
+        anchor.parentNode.insertBefore(romEl, anchor.nextSibling);
+        claimed.add(romEl);
+    }
 }
 
 function siblingSkippingRomanization(el: Element, dir: 'next' | 'prev'): HTMLElement | null {
@@ -471,6 +556,7 @@ function siblingSkippingRomanization(el: Element, dir: 'next' | 'prev'): HTMLEle
 
 function romanizationCompanionText(line: Element, index: number, mode: OverlayMode): string {
     if (!currentConfig.showRomanization) return '';
+    if (mode !== 'replace' && lineShowsRomanizedRow(line)) return '';
 
     const domText = extractLineText(line);
     const nDom = normalizeCompare(domText);
@@ -616,7 +702,7 @@ function extractLineText(line: Element): string {
         return cleanLyricText(wordUnits.map(w => w.textContent || '').join(' '));
     }
 
-    return cleanLyricText(line.textContent);
+    return cleanLyricText(lineOwnText(line));
 }
 
 let wordUnitsCache = new WeakMap<Element, Element[]>();
@@ -741,32 +827,7 @@ function applyReplaceMode(doc: Document): void {
         lineEl.dataset.sltIndex = index.toString();
 
         const refreshRomanization = (anchor: HTMLElement): void => {
-            let existingRom = anchor.nextElementSibling as HTMLElement | null;
-            if (existingRom && !existingRom.classList.contains('slt-romanization-line')) existingRom = null;
-
-            if (!romanizationText) {
-                if (existingRom) existingRom.remove();
-                return;
-            }
-
-            if (existingRom) {
-                if (existingRom.textContent !== romanizationText) existingRom.textContent = romanizationText;
-                existingRom.dataset.lineIndex = index.toString();
-                existingRom.dataset.forLine = index.toString();
-                if (timingInfo) {
-                    existingRom.dataset.startTime = timingInfo.startTime.toString();
-                    existingRom.dataset.endTime = timingInfo.endTime.toString();
-                }
-                existingRom.classList.toggle('active', isLineActive(line));
-                claimed.add(existingRom);
-                return;
-            }
-
-            const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
-            if (romEl) {
-                anchor.parentNode!.insertBefore(romEl, anchor.nextSibling);
-                claimed.add(romEl);
-            }
+            syncRomanizationLine(doc, line, anchor, index, timingInfo, romanizationText, claimed);
         };
 
         if (existing && existing.dataset.sltSig === sig) {
@@ -836,7 +897,7 @@ function applyReplaceMode(doc: Document): void {
             replaceEl.appendChild(qualityIndicator);
         }
 
-        line.parentNode!.insertBefore(replaceEl, line.nextSibling);
+        insertAfterLine(line, replaceEl);
         claimed.add(replaceEl);
 
         refreshRomanization(replaceEl);
@@ -936,7 +997,7 @@ function getMappedOriginalLetterProgresses(originalLine: HTMLElement, mappedInde
     if (sourceLetters.length < 2) return null;
 
     const progressValues = sourceLetters
-        .map((letterEl) => parseFloat(letterEl.style.getPropertyValue('--gradient-position')))
+        .map((letterEl) => readGradientPosition(letterEl))
         .filter((value) => !isNaN(value))
         .map((value) => Math.max(0, Math.min(1, (value + 20) / 120)));
 
@@ -1123,32 +1184,7 @@ function applyInterleavedMode(doc: Document): void {
                 lineEl.dataset.sltIndex = index.toString();
 
                 const refreshRomanization = (anchor: HTMLElement): void => {
-                    let existingRom = anchor.nextElementSibling as HTMLElement | null;
-                    if (existingRom && !existingRom.classList.contains('slt-romanization-line')) existingRom = null;
-
-                    if (!romanizationText) {
-                        if (existingRom) existingRom.remove();
-                        return;
-                    }
-
-                    if (existingRom) {
-                        if (existingRom.textContent !== romanizationText) existingRom.textContent = romanizationText;
-                        existingRom.dataset.lineIndex = index.toString();
-                        existingRom.dataset.forLine = index.toString();
-                        if (timingInfo) {
-                            existingRom.dataset.startTime = timingInfo.startTime.toString();
-                            existingRom.dataset.endTime = timingInfo.endTime.toString();
-                        }
-                        existingRom.classList.toggle('active', isLineActive(line));
-                        claimed.add(existingRom);
-                        return;
-                    }
-
-                    const romEl = buildRomanizationLine(doc, index, timingInfo, line, romanizationText);
-                    if (romEl) {
-                        anchor.parentNode!.insertBefore(romEl, anchor.nextSibling);
-                        claimed.add(romEl);
-                    }
+                    syncRomanizationLine(doc, line, anchor, index, timingInfo, romanizationText, claimed);
                 };
 
                 if (existing && existing.dataset.sltSig === sig) {
@@ -1159,7 +1195,7 @@ function applyInterleavedMode(doc: Document): void {
                         existing.dataset.endTime = timingInfo.endTime.toString();
                     }
                     claimed.add(existing);
-                            refreshRomanization(existing);
+                    refreshRomanization(existing);
                     return;
                 }
 
@@ -1195,10 +1231,10 @@ function applyInterleavedMode(doc: Document): void {
                     translationEl.appendChild(qualityIndicator);
                 }
 
-                line.parentNode!.insertBefore(translationEl, line.nextSibling);
+                insertAfterLine(line, translationEl);
                 claimed.add(translationEl);
 
-                    refreshRomanization(translationEl);
+                refreshRomanization(translationEl);
 
                 if (!isBreak && currentConfig.syncWordHighlight && translation) {
                     fallbackToContinuousMultilineGradient(translationEl, translation, line);
@@ -1319,6 +1355,14 @@ function syncTranslationLineFromOriginal(
     }
 }
 
+function readGradientPosition(el: HTMLElement): number {
+    const direct = parseFloat(el.style.getPropertyValue('--gradient-position'));
+    if (!isNaN(direct)) return direct;
+    const bloom = parseFloat(el.style.getPropertyValue('--SLM_GradientPosition'));
+    if (isNaN(bloom)) return NaN;
+    return -20 + Math.max(0, Math.min(1, (bloom + 50) / 150)) * 120;
+}
+
 function getOverallWordGradientProgress(originalLine: HTMLElement): number | null {
     const originalWords = getWordUnits(originalLine);
     if (originalWords.length === 0) return null;
@@ -1336,9 +1380,7 @@ function getOverallWordGradientProgress(originalLine: HTMLElement): number | nul
             const letters = wordEl.querySelectorAll('.letter');
             const letterGradients: number[] = [];
             for (const letter of Array.from(letters)) {
-                const letterGradient = parseFloat(
-                    (letter as HTMLElement).style.getPropertyValue('--gradient-position')
-                );
+                const letterGradient = readGradientPosition(letter as HTMLElement);
                 if (!isNaN(letterGradient)) {
                     letterGradients.push(letterGradient);
                 }
@@ -1347,7 +1389,7 @@ function getOverallWordGradientProgress(originalLine: HTMLElement): number | nul
                 gradientValue = letterGradients.reduce((sum, value) => sum + value, 0) / letterGradients.length;
             }
         } else {
-            gradientValue = parseFloat(wordEl.style.getPropertyValue('--gradient-position'));
+            gradientValue = readGradientPosition(wordEl);
         }
 
         if (!isNaN(gradientValue)) {
@@ -1384,9 +1426,7 @@ function getOriginalWordGradients(originalLine: HTMLElement): number[] {
             const letters = wordEl.querySelectorAll('.letter');
             const letterGradients: number[] = [];
             for (const letter of Array.from(letters)) {
-                const letterGradient = parseFloat(
-                    (letter as HTMLElement).style.getPropertyValue('--gradient-position')
-                );
+                const letterGradient = readGradientPosition(letter as HTMLElement);
                 if (!isNaN(letterGradient)) {
                     letterGradients.push(letterGradient);
                 }
@@ -1395,7 +1435,7 @@ function getOriginalWordGradients(originalLine: HTMLElement): number[] {
                 gradientValue = letterGradients.reduce((sum, value) => sum + value, 0) / letterGradients.length;
             }
         } else {
-            gradientValue = parseFloat(wordEl.style.getPropertyValue('--gradient-position'));
+            gradientValue = readGradientPosition(wordEl);
         }
 
         gradients.push(gradientValue);
@@ -1417,7 +1457,7 @@ function updateTranslatedWordGradients(translatedLine: HTMLElement, originalLine
     const originalWordGradients = getOriginalWordGradients(originalLine);
     const overallProgress = getOverallWordGradientProgress(originalLine);
 
-    const originalText = originalLine.textContent || '';
+    const originalText = lineOwnText(originalLine);
     const originalHasNonLatin = /[぀-ヿ㐀-䶿一-鿿가-힯ᄀ-ᇿ؀-ۿ֐-׿Ѐ-ӿ฀-๿Ͱ-Ͽ]/.test(originalText);
     const wordRatio = translatedWords.length / Math.max(originalWordGradients.length, 1);
     const useSmoothFill = originalHasNonLatin || wordRatio < 0.7 || wordRatio > 1.45;
@@ -1629,6 +1669,50 @@ function updateWordSyncStates(doc: Document): void {
                 const pct = total <= 0 ? 1 : (currentTime - lineStartTime) / total;
                 setStyleProp(transLineEl, '--gradient-position', `${-20 + Math.max(0, Math.min(1, pct)) * 120}%`);
             }
+        }
+    });
+}
+
+function setClass(el: HTMLElement, name: string, on: boolean): void {
+    if (el.classList.contains(name) !== on) el.classList.toggle(name, on);
+}
+
+function updateRomanizationLines(doc: Document): void {
+    const rows = doc.querySelectorAll<HTMLElement>('.slt-romanization-line');
+    if (rows.length === 0) return;
+
+    const clockMs = spicyLyricsClockMs();
+    rows.forEach(row => {
+        const line = findOriginalLineForTranslation(row);
+        if (!line) return;
+
+        const active = isLineActive(line);
+        const sung = !active && line.classList.contains('Sung');
+        setClass(row, 'active', active);
+        setClass(row, 'Sung', sung);
+        setClass(row, 'NotSung', !active && line.classList.contains('NotSung'));
+        setClass(row, 'OppositeAligned', line.classList.contains('OppositeAligned'));
+        setClass(row, 'rtl', line.classList.contains('rtl'));
+
+        if (!row.classList.contains('slt-rom-timed')) return;
+
+        const pieces = row.children;
+        for (let i = 0; i < pieces.length; i++) {
+            const piece = pieces[i] as HTMLElement;
+            let position = sung ? 100 : -20;
+            if (active && clockMs !== null) {
+                const start = parseFloat(piece.dataset.start || '') * 1000;
+                const end = parseFloat(piece.dataset.end || '') * 1000;
+                if (isNaN(start) || isNaN(end)) {
+                    position = 100;
+                } else {
+                    const progress = clockMs <= start ? 0 : (clockMs >= end || end <= start) ? 1 : (clockMs - start) / (end - start);
+                    position = Math.round((-20 + 120 * progress) * 10) / 10;
+                }
+            } else if (active) {
+                position = 100;
+            }
+            setStyleProp(piece, '--slt-rom-position', `${position}%`);
         }
     });
 }
@@ -2270,7 +2354,6 @@ const activeLineObservers = new Map<Document, MutationObserver>();
 let activeSyncIntervalId: ReturnType<typeof setInterval> | null = null;
 let activeSyncRafId: number | null = null;
 
-const SPICY_LYRICS_SETTINGS_KEY = 'SL:settings';
 const FRAME_CAP_REFRESH_MS = 1000;
 const FRAME_CAP_SLACK_MS = 1;
 let frameCapIntervalMs = 0;
@@ -2279,9 +2362,7 @@ let lastSyncFrameAt = -Infinity;
 
 function readSpicyLyricsFrameInterval(): number {
     try {
-        const spicetifyStorage = (globalThis as any).Spicetify?.LocalStorage;
-        const raw = spicetifyStorage?.get?.(SPICY_LYRICS_SETTINGS_KEY) ?? localStorage.getItem(SPICY_LYRICS_SETTINGS_KEY);
-        const settings = raw ? JSON.parse(raw) : null;
+        const settings = readSpicySettings();
         if (!settings?.animationFpsCapEnabled) return 0;
         const saved = Number(settings.animationFpsCap);
         const fps = Number.isFinite(saved) ? Math.min(240, Math.max(15, saved)) : 60;
@@ -2326,6 +2407,7 @@ function syncLoop(timestamp: number = performance.now()): void {
         onActiveLineChanged(document);
         updateLearningRow(document);
         updateWordSyncStates(document);
+        updateRomanizationLines(document);
         syncBlurToTranslations(document);
         updateBackgroundSyncStates(document);
 
@@ -2345,6 +2427,7 @@ function syncLoop(timestamp: number = performance.now()): void {
 
                     onActiveLineChanged(pipDoc);
                     updateWordSyncStates(pipDoc);
+                    updateRomanizationLines(pipDoc);
                     syncBlurToTranslations(pipDoc);
                     updateBackgroundSyncStates(pipDoc);
 
@@ -2765,20 +2848,19 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
     flex: 0 0 100%;
     font-size: calc(0.55em * var(--slt-overlay-font-scale, 1));
     font-weight: 600;
-    font-style: italic;
     line-height: 1.2;
     padding: 2px 0 2px 0;
-    letter-spacing: 0.02em;
-    color: rgba(255, 215, 120, 0.78);
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.85);
     text-align: left;
     white-space: normal;
     word-wrap: break-word;
     overflow-wrap: anywhere;
     word-break: break-word;
     pointer-events: none;
-    opacity: 0.7;
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
     filter: blur(var(--BlurAmount, 0px));
-    transition: opacity 0.25s ease, filter 0.25s ease, color 0.25s ease;
+    transition: opacity 0.25s ease, filter 0.25s ease;
 }
 
 .slt-romanization-line.OppositeAligned,
@@ -2791,17 +2873,28 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-interleaved-translation,
 .slt-romanization-line.Active {
     opacity: 1 !important;
     filter: none !important;
-    color: rgba(255, 224, 150, 0.95);
+    color: rgba(255, 255, 255, 0.95);
 }
 
 .line.Sung + .slt-romanization-line,
 .slt-romanization-line.Sung {
-    opacity: 0.45;
+    opacity: var(--Vocal-Sung-opacity, 0.497);
 }
 
 .line.NotSung + .slt-romanization-line,
 .slt-romanization-line.NotSung {
-    opacity: 0.55;
+    opacity: var(--Vocal-NotSung-opacity, 0.51);
+}
+
+.slt-romanization-line.active.slt-rom-timed .slt-rom-piece {
+    -webkit-text-fill-color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.95) var(--slt-rom-position, -20%),
+        rgba(255, 255, 255, 0.5) calc(var(--slt-rom-position, -20%) + 20%)
+    );
 }
 
 .slt-interleaved-translation.Sung,

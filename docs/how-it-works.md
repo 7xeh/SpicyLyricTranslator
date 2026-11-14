@@ -11,7 +11,9 @@ So the extension prefers original lyrics in this order:
 3. This extension's previously cached original source lines
 4. Visible DOM lyrics — only when romanization is off
 
-If romanization is on and no original lyrics can be found, the extension **stops** rather than sending romanized text to the provider. If that happens, clear the Spicy Lyrics cache and reload the track — see [Troubleshooting](troubleshooting.md).
+From Spicy Lyrics 6.5 the default romanization display is a row under each line, and the line itself keeps the original script. In that mode the visible lyrics are safe to translate, so the rule above only applies when Spicy Lyrics is set to replace the line with its romanization. SLT never reads the romanized row as part of the line.
+
+If romanization replaces the lines and no original lyrics can be found, the extension **stops** rather than sending romanized text to the provider. If that happens, clear the Spicy Lyrics cache and reload the track — see [Troubleshooting](troubleshooting.md).
 
 ## Language detection
 

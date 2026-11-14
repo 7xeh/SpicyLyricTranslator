@@ -25,9 +25,14 @@ export const styles = `
     animation: spicy-translate-spin 1s linear infinite;
 }
 
-#TranslateToggle.active svg,
-#LearningToggle.active svg {
+#TranslateToggle.active:not(.ViewToggle) svg,
+#LearningToggle.active:not(.ViewToggle) svg {
     color: var(--spice-button-active, #1db954);
+}
+
+#TranslateToggle.ViewToggle.loading > svg:not(.SL_KnockoutDisc),
+#TranslateToggle.ViewToggle.error > svg:not(.SL_KnockoutDisc) {
+    opacity: 1 !important;
 }
 
 #TranslateToggle.error svg {
@@ -248,7 +253,8 @@ export const styles = `
 
 .slt-replace-line.Active,
 .slt-replace-line.active,
-.line.Active + .slt-replace-line {
+.line.Active + .slt-replace-line,
+.line.Active + .slt-romanization-line + .slt-replace-line {
     filter: none !important;
     opacity: var(--Vocal-Active-opacity, 1) !important;
     scale: 1;
@@ -256,14 +262,16 @@ export const styles = `
 }
 
 .slt-replace-line.Sung,
-.line.Sung + .slt-replace-line {
+.line.Sung + .slt-replace-line,
+.line.Sung + .slt-romanization-line + .slt-replace-line {
     --gradient-position: 100% !important;
     opacity: var(--Vocal-Sung-opacity, 0.497);
     scale: var(--DefaultLineScale, 1);
 }
 
 .slt-replace-line.NotSung,
-.line.NotSung + .slt-replace-line {
+.line.NotSung + .slt-replace-line,
+.line.NotSung + .slt-romanization-line + .slt-replace-line {
     --gradient-position: -20% !important;
     opacity: var(--Vocal-NotSung-opacity, 0.51);
     scale: var(--DefaultLineScale, 1);
@@ -531,6 +539,7 @@ body.slt-overlay-active .LyricsContent {}
 }
 
 .line.Active + .slt-interleaved-translation,
+.line.Active + .slt-romanization-line + .slt-interleaved-translation,
 .slt-interleaved-translation.active,
 .slt-interleaved-translation.Active {
     filter: none !important;
@@ -539,11 +548,13 @@ body.slt-overlay-active .LyricsContent {}
     text-shadow: var(--ActiveTextGlowDef) !important;
 }
 
-.line.Sung + .slt-interleaved-translation {
+.line.Sung + .slt-interleaved-translation,
+.line.Sung + .slt-romanization-line + .slt-interleaved-translation {
     opacity: var(--Vocal-Sung-opacity, 0.497);
 }
 
-.line.NotSung + .slt-interleaved-translation {
+.line.NotSung + .slt-interleaved-translation,
+.line.NotSung + .slt-romanization-line + .slt-interleaved-translation {
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
@@ -687,17 +698,22 @@ body.SpicySidebarLyrics__Active #SpicyLyricsPage .slt-bg-translation,
     opacity: var(--Vocal-NotSung-opacity, 0.51);
 }
 
-.line.Sung + .slt-sync-translation.slt-interleaved-translation {
+.line.Sung + .slt-sync-translation.slt-interleaved-translation,
+.line.Sung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: 100%;
 }
 
-.line.NotSung + .slt-sync-translation.slt-interleaved-translation {
+.line.NotSung + .slt-sync-translation.slt-interleaved-translation,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     --gradient-position: -20%;
 }
 
 .line.NotSung + .slt-sync-translation.slt-interleaved-translation.active,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation.active,
 .line.Sung + .slt-sync-translation.slt-interleaved-translation.active,
-.line.Active + .slt-sync-translation.slt-interleaved-translation {
+.line.Sung + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation.active,
+.line.Active + .slt-sync-translation.slt-interleaved-translation,
+.line.Active + .slt-romanization-line + .slt-sync-translation.slt-interleaved-translation {
     filter: blur(0px) !important;
 }
 
@@ -811,27 +827,32 @@ body.SpicySidebarLyrics__Active .slt-interleaved-translation,
     scroll-behavior: smooth;
 }
 
-.line.Active + .slt-sync-translation {
+.line.Active + .slt-sync-translation,
+.line.Active + .slt-romanization-line + .slt-sync-translation {
     opacity: 1 !important;
     filter: none !important;
 }
 
-.line.Active + .slt-sync-translation .slt-sync-word.slt-word-active {
+.line.Active + .slt-sync-translation .slt-sync-word.slt-word-active,
+.line.Active + .slt-romanization-line + .slt-sync-translation .slt-sync-word.slt-word-active {
     text-shadow: 0 0 var(--text-shadow-blur-radius, 10px) rgba(255, 255, 255, var(--text-shadow-opacity-decimal, 0.5));
 }
 
 .line.Active + .slt-sync-translation .slt-sync-word.slt-word-past,
+.line.Active + .slt-romanization-line + .slt-sync-translation .slt-sync-word.slt-word-past,
 .slt-sync-translation.active .slt-sync-word.slt-word-past,
 .slt-sync-translation.Active .slt-sync-word.slt-word-past {
     opacity: 1;
 }
 
-.line.Sung + .slt-sync-translation .slt-sync-word {
+.line.Sung + .slt-sync-translation .slt-sync-word,
+.line.Sung + .slt-romanization-line + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.5;
     --gradient-alpha-end: 0.35;
 }
 
-.line.NotSung + .slt-sync-translation .slt-sync-word {
+.line.NotSung + .slt-sync-translation .slt-sync-word,
+.line.NotSung + .slt-romanization-line + .slt-sync-translation .slt-sync-word {
     --gradient-alpha: 0.85;
     --gradient-alpha-end: 0.5;
 }
@@ -1007,7 +1028,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.Sung:not(.musical-line) + .slt-replace-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-romanization-line + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
   .line.Sung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.Sung:not(.musical-line) + .slt-romanization-line + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
   .line.Sung:not(.musical-line) + .slt-romanization-line,
@@ -1028,7 +1055,13 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   .line.NotSung:not(.musical-line) + .slt-replace-line,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-romanization-line + .slt-replace-line,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
   .line.NotSung:not(.musical-line) + .slt-interleaved-translation,
+#SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
+  .LyricsContent:not(.HideLineBlur)
+  .line.NotSung:not(.musical-line) + .slt-romanization-line + .slt-interleaved-translation,
 #SpicyLyricsPage.SpicyRenderer.Fullscreen.MinimalLyricsMode:not(.CompactMode)
   .LyricsContent:not(.HideLineBlur)
   .line.NotSung:not(.musical-line) + .slt-romanization-line,

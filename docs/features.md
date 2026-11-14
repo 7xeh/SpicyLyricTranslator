@@ -18,8 +18,16 @@ song you get the original characters, the pinyin underneath, and the translation
 follow what the song means and still sing along.
 
 The romanization comes from the lyrics provider, so it appears on tracks that ship transliterated text
-(most Chinese, Japanese and Korean songs with synced lyrics). If Spicy Lyrics' own romanization toggle is
-already on, the extra line shows the original script instead, so you never see the same text twice.
+(most Chinese, Japanese and Korean songs with synced lyrics). It is drawn in the same white as the lyrics
+and the translation, and on word-synced lyrics each word of it lights up as that word is sung. Pinyin is
+written with spaces between syllables.
+
+**Romanization Position** picks the order: lyrics, romanization, translation (the default), or lyrics,
+translation, romanization.
+
+Spicy Lyrics 6.5 has its own romanization row under each line. When that row is open, SLT leaves the line
+to it and only adds the translation below, so you never see the same text twice. With Spicy Lyrics set to
+replace the line with its romanization instead, the extra line shows the original script.
 
 ## Translation quality indicator
 
