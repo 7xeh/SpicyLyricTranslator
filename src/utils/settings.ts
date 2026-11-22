@@ -14,6 +14,7 @@ import { setConnectionIndicatorHidden } from './connectivity';
 import { setOverlayRomanization, setOverlayLearningMode } from './translationOverlay';
 import { attachHotkeyCapture } from './hotkeys';
 import { setFuriganaEnabled } from './furiganaOverlay';
+import { findLastNativeSettingsSection, findOpenProfileMenu, findProfileTrigger, findSettingsPage, menuItemsOf, menuRowOf, profileTriggerContaining } from './hostDom';
 import { parseLanguageRules, serializeLanguageRules, setLanguageRule, NO_TRANSLATION } from './languageRules';
 import {
     SETTINGS_SCHEMA,
@@ -456,12 +457,12 @@ function createNativeSettingsSection(): HTMLElement {
     const section = document.createElement('div');
     section.id = SETTINGS_ID;
     section.innerHTML = `
-        <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
+        <div class="x-settings-section">
             <h2 class="e-10310-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
 
-    const sectionContent = section.querySelector('.x-settings-section.fNaaQ0Cp8Yzy19j8') as HTMLElement;
+    const sectionContent = section.querySelector('.x-settings-section') as HTMLElement;
 
     renderNativeSettingsFields(sectionContent);
     syncModelLists();
@@ -531,64 +532,46 @@ function createNativeSettingsSection(): HTMLElement {
 }
 
 function injectSettingsIntoPage(): void {
-    const settingsContainer = document.querySelector('.x-settings-container') ||
-                              document.querySelector('[data-testid="settings-page"]') ||
-                              document.querySelector('main.x-settings-container');
+    const settingsContainer = findSettingsPage(document, SETTINGS_ID);
     if (!settingsContainer) {
         return;
     }
 
     const existingSettingsSection = document.getElementById(SETTINGS_ID);
-    const sectionAlreadyInContainer = !!existingSettingsSection && settingsContainer.contains(existingSettingsSection);
-    if (sectionAlreadyInContainer) {
+    if (existingSettingsSection && settingsContainer.contains(existingSettingsSection)) {
+        placeSettingsSection(settingsContainer, existingSettingsSection);
         return;
     }
 
     readNativeSettingsClasses(settingsContainer);
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
     adoptNativeSettingsClasses(settingsSection);
+    placeSettingsSection(settingsContainer, settingsSection);
+}
 
-    const spicyLyricsSettings = document.getElementById('spicy-lyrics-settings');
-    const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');
-
-    if (spicyLyricsDevSettings) {
-        spicyLyricsDevSettings.after(settingsSection);
-    } else if (spicyLyricsSettings) {
-        spicyLyricsSettings.after(settingsSection);
-    } else {
-        const allSections = settingsContainer.querySelectorAll('.x-settings-section fNaaQ0Cp8Yzy19j8');
-        if (allSections.length > 0) {
-            const lastSection = allSections[allSections.length - 1];
-            const lastSectionParent = lastSection.closest('div:not(.x-settings-section fNaaQ0Cp8Yzy19j8):not(.x-settings-container)') || lastSection;
-            lastSectionParent.after(settingsSection);
-        } else {
-            settingsContainer.appendChild(settingsSection);
-        }
+function placeSettingsSection(settingsContainer: HTMLElement, settingsSection: HTMLElement): void {
+    const anchor = document.getElementById('spicy-lyrics-dev-settings')
+        ?? document.getElementById('spicy-lyrics-settings')
+        ?? findLastNativeSettingsSection(settingsContainer, SETTINGS_ID);
+    if (anchor && settingsContainer.contains(anchor)) {
+        if (anchor.nextElementSibling !== settingsSection) anchor.after(settingsSection);
+    } else if (settingsSection.parentElement !== settingsContainer) {
+        settingsContainer.appendChild(settingsSection);
     }
+}
 
+function isPreferencesPath(pathname: string | undefined | null): boolean {
+    return !!pathname && (pathname.includes('preferences') || pathname.includes('settings'));
 }
 
 function isOnSettingsPage(): boolean {
-    const hasSettingsContainer = !!document.querySelector('.x-settings-container');
-    const hasSettingsTestId = !!document.querySelector('[data-testid="settings-page"]');
-    const pathCheck = window.location.pathname.includes('preferences') ||
-                      window.location.pathname.includes('settings') ||
-                      window.location.href.includes('preferences') ||
-                      window.location.href.includes('settings');
-
-    let historyCheck = false;
+    if (findSettingsPage(document, SETTINGS_ID)) return true;
+    if (isPreferencesPath(window.location.pathname) || isPreferencesPath(window.location.href)) return true;
     try {
-        const location = Spicetify.Platform?.History?.location;
-        if (location) {
-            historyCheck = location.pathname?.includes('preferences') ||
-                          location.pathname?.includes('settings') ||
-                          false;
-        }
-    } catch (e) {
-
+        return isPreferencesPath(Spicetify.Platform?.History?.location?.pathname);
+    } catch {
+        return false;
     }
-
-    return hasSettingsContainer || hasSettingsTestId || pathCheck || historyCheck;
 }
 
 function watchForSettingsPage(): void {
@@ -599,27 +582,30 @@ function watchForSettingsPage(): void {
 
     if (Spicetify.Platform?.History) {
         Spicetify.Platform.History.listen((location: any) => {
-            if (location?.pathname?.includes('preferences') || location?.pathname?.includes('settings')) {
-                setTimeout(injectSettingsIntoPage, 100);
-                setTimeout(injectSettingsIntoPage, 300);
-                setTimeout(injectSettingsIntoPage, 500);
-                setTimeout(injectSettingsIntoPage, 1000);
+            if (isPreferencesPath(location?.pathname)) {
+                [100, 300, 500, 1000].forEach(delay => setTimeout(injectSettingsIntoPage, delay));
             }
         });
     }
 
-    const observer = new MutationObserver((mutations) => {
-        const settingsContainer = document.querySelector('.x-settings-container') ||
-                                  document.querySelector('[data-testid="settings-page"]');
-        if (settingsContainer && !document.getElementById(SETTINGS_ID)) {
-            injectSettingsIntoPage();
-        }
-
-        const ourSettings = document.getElementById(SETTINGS_ID);
-        const spicyLyricsDevSettings = document.getElementById('spicy-lyrics-dev-settings');
-        if (ourSettings && spicyLyricsDevSettings && ourSettings.previousElementSibling !== spicyLyricsDevSettings) {
-            spicyLyricsDevSettings.after(ourSettings);
-        }
+    let scheduled = false;
+    const observer = new MutationObserver(() => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+            scheduled = false;
+            const settingsContainer = findSettingsPage(document, SETTINGS_ID);
+            if (!settingsContainer) return;
+            const ourSettings = document.getElementById(SETTINGS_ID);
+            if (!ourSettings || !settingsContainer.contains(ourSettings)) {
+                injectSettingsIntoPage();
+                return;
+            }
+            const spicyLyricsSettings = document.getElementById('spicy-lyrics-dev-settings') ?? document.getElementById('spicy-lyrics-settings');
+            if (spicyLyricsSettings && ourSettings.previousElementSibling !== spicyLyricsSettings) {
+                placeSettingsSection(settingsContainer, ourSettings);
+            }
+        });
     });
 
     observer.observe(document.body, {
@@ -2354,71 +2340,249 @@ function usesDomOnlyProfileMenu(): boolean {
 
 const MENU_LABEL = 'SLT Settings';
 const MENU_ROW_ID = 'slt-profile-menu-item';
-const PROFILE_BUTTON = '[data-testid="user-widget-link"]';
-const PROFILE_MENU = '#context-menu ul[role="menu"]';
+const MENU_ROW_MARK = 'data-slt-menu-row';
+const MENU_OPEN_WINDOW_MS = 1500;
+const MENU_POLL_INTERVAL_MS = 16;
+const MENU_STRIPPED_ATTRIBUTES = [
+    'id', 'href', 'target', 'rel', 'download',
+    'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-haspopup', 'aria-expanded',
+    'aria-checked', 'aria-selected', 'aria-current', 'aria-disabled', 'aria-label', 'aria-keyshortcuts',
+    'data-key', 'data-testid', 'data-hovered', 'data-focused', 'data-focus-visible', 'data-pressed',
+    'data-selected', 'data-disabled', 'data-open', 'data-has-submenu', 'data-react-aria-pressable',
+    'data-collection', 'data-rac',
+];
 
-function syncProfileMenu(): void {
-    const profile = document.querySelector<HTMLElement>(PROFILE_BUTTON);
-    const owned = document.getElementById(MENU_ROW_ID);
-    const menu = document.querySelector<HTMLUListElement>(PROFILE_MENU);
-    if (profile?.getAttribute('aria-expanded') !== 'true' || !menu) {
-        owned?.remove();
-        return;
-    }
+let profileMenuWatch: { menu: HTMLElement; observer: MutationObserver } | null = null;
+let profileMenuPollUntil = 0;
+let profileMenuTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const rows = Array.from(menu.querySelectorAll<HTMLLIElement>(':scope > li[role="presentation"]'));
-    if (rows.some(row => row.id !== MENU_ROW_ID && row.textContent?.trim() === MENU_LABEL)) {
-        owned?.remove();
-        return;
-    }
-    if (owned?.parentElement === menu) return;
-    owned?.remove();
+function menuItemText(item: Element): string {
+    return (item.textContent || '').replace(/\s+/g, ' ').trim();
+}
 
-    const template = rows.find(row => row.querySelector('[role="menuitem"]'));
-    const nativeButton = template?.querySelector<HTMLElement>('[role="menuitem"]');
-    if (!template || !nativeButton) return;
+function pickTemplateItem(items: HTMLElement[]): HTMLElement | null {
+    const plain = items.filter(item =>
+        item.getAttribute('role') === 'menuitem' &&
+        !item.hasAttribute('aria-haspopup') &&
+        item.getAttribute('aria-disabled') !== 'true' &&
+        !item.querySelector('img, input, [role="menu"]') &&
+        menuItemText(item).length > 0
+    );
+    const score = (item: HTMLElement) => {
+        const label = findLabelElement(item, menuItemText(item));
+        const svgs = Array.from(item.querySelectorAll<SVGElement>('svg')).filter(svg => !(svg.parentElement instanceof SVGElement));
+        const leading = svgs.some(svg => isLeadingMenuIcon(svg, label));
+        const trailing = svgs.some(svg => !isLeadingMenuIcon(svg, label));
+        return (item.tagName === 'A' ? 0 : 2) + (leading ? 4 : 0) - (trailing ? 1 : 0);
+    };
+    return plain.sort((a, b) => score(b) - score(a))[0] ?? null;
+}
 
-    const row = document.createElement('li');
-    row.id = MENU_ROW_ID;
-    row.className = template.className;
-    row.setAttribute('role', 'presentation');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = nativeButton.className;
-    button.setAttribute('role', 'menuitem');
-    button.tabIndex = -1;
-    const label = document.createElement('span');
-    label.className = 'encore-text-body-small ellipsis-one-line';
-    label.dir = 'auto';
-    label.style.flex = '1';
-    label.textContent = MENU_LABEL;
+function isLeadingMenuIcon(svg: SVGElement, label: Element | null): boolean {
+    return !(svg.parentElement instanceof SVGElement) && !!label && !!(svg.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+function findEmptyLeadingSlot(item: HTMLElement, label: HTMLElement): HTMLElement | null {
+    return Array.from(item.querySelectorAll<HTMLElement>('*')).find(element =>
+        !(element instanceof SVGElement) && element.childNodes.length === 0 && !element.contains(label) &&
+        !!(element.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ) ?? null;
+}
+
+function findLabelElement(root: HTMLElement, text: string): HTMLElement | null {
+    const elements = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
+    return elements.reverse().find(element =>
+        !(element instanceof SVGElement) && menuItemText(element) === text &&
+        Array.from(element.childNodes).some(node => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim())
+    ) ?? null;
+}
+
+function createMenuIcon(template: SVGElement | null): SVGElement {
     const graphic = new DOMParser().parseFromString(SLT_MENU_ICON, 'image/svg+xml').documentElement;
-    graphic.setAttribute('aria-hidden', 'true');
-    button.append(document.importNode(graphic, true), label);
-    button.addEventListener('click', (event) => {
+    const icon = document.importNode(graphic, true) as unknown as SVGElement;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('focusable', 'false');
+    if (template) {
+        for (const attribute of ['class', 'data-encore-id', 'style']) {
+            const value = template.getAttribute(attribute);
+            if (value) icon.setAttribute(attribute, value);
+        }
+    } else {
+        icon.setAttribute('style', 'flex:0 0 16px;width:16px;height:16px;margin-inline-end:12px;vertical-align:middle;');
+    }
+    return icon;
+}
+
+function closeProfileMenu(trigger: HTMLElement | null, menu: HTMLElement): void {
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+    setTimeout(() => {
+        if (trigger?.getAttribute('aria-expanded') === 'true') trigger.click();
+    }, 0);
+}
+
+function buildProfileMenuRow(templateItem: HTMLElement, templateRow: HTMLElement, menu: HTMLElement): HTMLElement | null {
+    const templateText = menuItemText(templateItem);
+    const row = templateRow.cloneNode(true) as HTMLElement;
+    const item = templateRow === templateItem ? row : row.querySelector<HTMLElement>('[role="menuitem"]');
+    if (!item) return null;
+
+    const isLeadingIcon = isLeadingMenuIcon;
+    const templateLabel = findLabelElement(templateItem, templateText);
+    const leadingTemplateIcon = Array.from(templateItem.querySelectorAll<SVGElement>('svg')).find(svg => isLeadingIcon(svg, templateLabel)) ?? null;
+
+    let label = findLabelElement(item, templateText);
+    const leadingSlotIcon = Array.from(item.querySelectorAll<SVGElement>('svg')).find(svg => isLeadingIcon(svg, label)) ?? null;
+    const icon = createMenuIcon(leadingTemplateIcon);
+    leadingSlotIcon?.replaceWith(icon);
+    row.querySelectorAll('svg, img').forEach(node => {
+        if (node !== icon && !icon.contains(node)) node.remove();
+    });
+    for (const element of [row, ...Array.from(row.querySelectorAll('*'))]) {
+        MENU_STRIPPED_ATTRIBUTES.forEach(attribute => element.removeAttribute(attribute));
+    }
+    if (!label || !row.contains(label)) {
+        item.textContent = '';
+        label = document.createElement('span');
+        label.className = 'encore-text-body-small ellipsis-one-line';
+        label.style.flex = '1';
+        item.append(label);
+    }
+    label.textContent = MENU_LABEL;
+    label.dir = 'auto';
+    if (!row.contains(icon)) {
+        const slot = findEmptyLeadingSlot(item, label);
+        if (slot) {
+            icon.setAttribute('style', 'width:16px;height:16px;display:block;');
+            slot.append(icon);
+        } else {
+            label.before(icon);
+        }
+    }
+
+    row.id = MENU_ROW_ID;
+    row.setAttribute(MENU_ROW_MARK, 'true');
+    item.setAttribute('role', 'menuitem');
+    item.tabIndex = -1;
+    if (item instanceof HTMLButtonElement) item.type = 'button';
+
+    const setState = (attribute: string, on: boolean) => {
+        if (on) item.setAttribute(attribute, 'true');
+        else item.removeAttribute(attribute);
+    };
+    item.addEventListener('pointerenter', () => {
+        setState('data-hovered', true);
+        item.focus({ preventScroll: true });
+    });
+    item.addEventListener('pointerleave', () => setState('data-hovered', false));
+    item.addEventListener('focus', () => setState('data-focused', true));
+    item.addEventListener('blur', () => setState('data-focused', false));
+    const activate = (event: Event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (profile.getAttribute('aria-expanded') === 'true') profile.click();
+        closeProfileMenu(findProfileTrigger(), menu);
         openSettingsModal();
+    };
+    item.addEventListener('click', activate);
+    item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') activate(event);
     });
-    row.append(button);
+    return row;
+}
 
-    const firstLinkRow = rows.find(candidate => candidate.querySelector('a[role="menuitem"][href]'));
-    if (firstLinkRow) firstLinkRow.before(row);
-    else menu.prepend(row);
+function placeProfileMenuRow(row: HTMLElement, menu: HTMLElement, rows: HTMLElement[]): void {
+    const hasLink = (candidate: HTMLElement, selector: string) => candidate.matches(selector) || !!candidate.querySelector(selector);
+    const settingsRow = rows.find(candidate => hasLink(candidate, 'a[href$="/preferences"], a[href*="/preferences?"]'));
+    if (settingsRow) {
+        settingsRow.after(row);
+        return;
+    }
+    const firstLinkRow = rows.find(candidate => hasLink(candidate, 'a[href]'));
+    if (firstLinkRow) {
+        firstLinkRow.before(row);
+        return;
+    }
+    const lastRow = rows[rows.length - 1];
+    if (lastRow && rows.length > 1) lastRow.before(row);
+    else menu.append(row);
+}
+
+function ensureProfileMenuRow(menu: HTMLElement): void {
+    const owned = document.getElementById(MENU_ROW_ID);
+    const items = menuItemsOf(menu).filter(item => !item.closest(`#${MENU_ROW_ID}`));
+    if (items.some(item => menuItemText(item) === MENU_LABEL)) {
+        owned?.remove();
+        return;
+    }
+    if (owned && menu.contains(owned)) return;
+    owned?.remove();
+
+    const templateItem = pickTemplateItem(items);
+    if (!templateItem) return;
+    const row = buildProfileMenuRow(templateItem, menuRowOf(templateItem, menu), menu);
+    if (!row) return;
+    placeProfileMenuRow(row, menu, items.map(item => menuRowOf(item, menu)));
+}
+
+function unwatchProfileMenu(): void {
+    profileMenuWatch?.observer.disconnect();
+    profileMenuWatch = null;
+}
+
+function watchOpenProfileMenu(menu: HTMLElement): void {
+    if (profileMenuWatch?.menu === menu) return;
+    unwatchProfileMenu();
+    const observer = new MutationObserver(() => {
+        if (!menu.isConnected) {
+            unwatchProfileMenu();
+            return;
+        }
+        ensureProfileMenuRow(menu);
+    });
+    observer.observe(menu, { childList: true, subtree: true });
+    profileMenuWatch = { menu, observer };
+}
+
+function syncProfileMenu(): boolean {
+    if (profileMenuWatch && !profileMenuWatch.menu.isConnected) unwatchProfileMenu();
+    const trigger = findProfileTrigger();
+    const expanded = trigger?.getAttribute('aria-expanded') ?? null;
+    const polling = performance.now() < profileMenuPollUntil;
+    const mayBeOpen = expanded === 'true' || (expanded === null && polling);
+    const menu = mayBeOpen ? findOpenProfileMenu(trigger) : null;
+    if (!menu) {
+        if (!mayBeOpen) {
+            document.getElementById(MENU_ROW_ID)?.remove();
+            unwatchProfileMenu();
+        }
+        return false;
+    }
+    watchOpenProfileMenu(menu);
+    ensureProfileMenuRow(menu);
+    return !!document.getElementById(MENU_ROW_ID) || menuItemsOf(menu).some(item => menuItemText(item) === MENU_LABEL);
+}
+
+function scheduleProfileMenuSync(windowMs: number = MENU_OPEN_WINDOW_MS): void {
+    profileMenuPollUntil = Math.max(profileMenuPollUntil, performance.now() + windowMs);
+    if (profileMenuTimer) return;
+    const tick = () => {
+        profileMenuTimer = null;
+        const placed = syncProfileMenu();
+        if (!placed && performance.now() < profileMenuPollUntil) profileMenuTimer = setTimeout(tick, MENU_POLL_INTERVAL_MS);
+    };
+    profileMenuTimer = setTimeout(tick, 0);
 }
 
 function watchProfileMenu(): void {
     new MutationObserver((records) => {
-        const relevant = records.some(record => {
-            const target = record.target;
-            if (target instanceof Element && (target.matches(PROFILE_BUTTON) || target.closest('#context-menu'))) return true;
-            return [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)].some(node =>
-                node instanceof Element && (node.matches('#context-menu') || !!node.querySelector('#context-menu'))
-            );
-        });
-        if (relevant) syncProfileMenu();
-    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] });
+        if (records.some(record => !!profileTriggerContaining(record.target as Element))) scheduleProfileMenuSync();
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-expanded'] });
+
+    const onIntent = (event: Event) => {
+        if (event instanceof KeyboardEvent && !['Enter', ' ', 'ArrowDown'].includes(event.key)) return;
+        if (profileTriggerContaining(event.target as Element | null)) scheduleProfileMenuSync();
+    };
+    document.addEventListener('click', onIntent, true);
+    document.addEventListener('keydown', onIntent, true);
     syncProfileMenu();
 }
 

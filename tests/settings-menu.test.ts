@@ -26,7 +26,9 @@ const storageMap = new Map<string, string>();
 (globalThis as any).document = {
     body: {},
     querySelector: () => null,
-    getElementById: () => null
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    addEventListener: () => {}
 };
 
 (globalThis as any).window = {
@@ -42,9 +44,10 @@ const storageMap = new Map<string, string>();
     disconnect(): void {}
 };
 
-function installSpicetifyMock(registered: RegisteredMenuItem[], notifications: string[] = []): void {
+function installSpicetifyMock(registered: RegisteredMenuItem[], notifications: string[] = [], version?: string): void {
     (globalThis as any).Spicetify = {
         Platform: {
+            version,
             History: {
                 location: { pathname: '/' },
                 listen: () => {}
@@ -80,10 +83,10 @@ function getMenuItem(registered: RegisteredMenuItem[], label: string): Registere
     return item;
 }
 
-test('settings menu registers a single SLT Settings entry with an icon', async () => {
+test('settings menu registers a single SLT Settings entry with an icon on Spotify before 1.3.5', async () => {
     storageMap.clear();
     const registered: RegisteredMenuItem[] = [];
-    installSpicetifyMock(registered);
+    installSpicetifyMock(registered, [], '1.3.4.1234');
 
     const { registerSettings } = require('../src/utils/settings') as { registerSettings: () => Promise<void> };
     await registerSettings();
@@ -93,6 +96,17 @@ test('settings menu registers a single SLT Settings entry with an icon', async (
     const settingsItem = getMenuItem(registered, 'SLT Settings');
     assert.ok(settingsItem.icon, 'SLT Settings menu item should have an icon');
     assert.match(settingsItem.icon!, /^<svg/);
+});
+
+test('settings menu never registers a Spicetify Menu.Item on Spotify 1.3.5 and later', async () => {
+    storageMap.clear();
+    const { registerSettings } = require('../src/utils/settings') as { registerSettings: () => Promise<void> };
+    for (const version of ['1.3.5.3058', '1.3.10.2586', '1.4.0.1', '2.0.0', undefined]) {
+        const registered: RegisteredMenuItem[] = [];
+        installSpicetifyMock(registered, [], version);
+        await registerSettings();
+        assert.deepEqual(registered, [], `Spotify ${version ?? 'unknown'} should use the DOM menu row`);
+    }
 });
 
 test('cache tab actions clear translations and the Spicy Lyrics lyric stores', async () => {

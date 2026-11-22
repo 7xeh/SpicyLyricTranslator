@@ -1,4 +1,5 @@
 import { storage } from './storage';
+import { findTopbarActions, waitForHost } from './hostDom';
 
 const API_BASE = 'https://7xeh.dev/apps/spicylyrictranslate/api/connectivity.php';
 const CLIENT_ID_KEY = 'client-id';
@@ -363,38 +364,7 @@ function startPeriodicChecks(): void {
 }
 
 function getIndicatorContainer(): HTMLElement | null {
-    const topBarContentRight = document.querySelector('.main-topBar-topbarContentRight');
-    if (topBarContentRight) return topBarContentRight as HTMLElement;
-
-    const userWidget = document.querySelector('.main-userWidget-box, [data-testid="user-widget-link"]');
-    if (userWidget && userWidget.parentNode) return userWidget.parentNode as HTMLElement;
-
-    const historyButtons = document.querySelector('.main-topBar-historyButtons');
-    if (historyButtons && historyButtons.parentNode) return historyButtons.parentNode as HTMLElement;
-
-    return null;
-}
-
-function waitForElement(selector: string, timeout: number = 10000): Promise<Element | null> {
-    return new Promise((resolve) => {
-        const element = document.querySelector(selector);
-        if (element) {
-            resolve(element);
-            return;
-        }
-        const observer = new MutationObserver((mutations, obs) => {
-            const el = document.querySelector(selector);
-            if (el) {
-                obs.disconnect();
-                resolve(el);
-            }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-        setTimeout(() => {
-            observer.disconnect();
-            resolve(document.querySelector(selector));
-        }, timeout);
-    });
+    return findTopbarActions();
 }
 
 async function appendToDOM(): Promise<boolean> {
@@ -412,8 +382,7 @@ async function appendToDOM(): Promise<boolean> {
         return true;
     }
 
-    await waitForElement('.main-topBar-topbarContentRight, .main-userWidget-box, [data-testid="user-widget-link"], .main-topBar-historyButtons');
-    const lateContainer = getIndicatorContainer();
+    const lateContainer = await waitForHost(getIndicatorContainer);
     if (lateContainer) {
         containerElement = createIndicatorElement();
         lateContainer.insertBefore(containerElement, lateContainer.firstChild);
@@ -424,7 +393,29 @@ async function appendToDOM(): Promise<boolean> {
     return false;
 }
 
+let attachmentObserver: MutationObserver | null = null;
+
+function keepIndicatorAttached(): void {
+    if (attachmentObserver) return;
+    let scheduled = false;
+    attachmentObserver = new MutationObserver(() => {
+        if (scheduled || !containerElement || containerElement.isConnected) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+            scheduled = false;
+            if (!containerElement || containerElement.isConnected) return;
+            const container = getIndicatorContainer();
+            if (!container) return;
+            container.insertBefore(containerElement, container.firstChild);
+            applyIndicatorVisibility();
+        });
+    });
+    attachmentObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 function removeFromDOM(): void {
+    attachmentObserver?.disconnect();
+    attachmentObserver = null;
     if (containerElement && containerElement.parentNode) {
         containerElement.parentNode.removeChild(containerElement);
     }
@@ -438,6 +429,7 @@ export async function initConnectionIndicator(): Promise<void> {
     if (!appended) return;
 
     indicatorState.isInitialized = true;
+    keepIndicatorAttached();
 
     await new Promise(resolve => setTimeout(resolve, INITIAL_DELAY));
 

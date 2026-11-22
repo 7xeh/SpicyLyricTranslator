@@ -1,5 +1,6 @@
 import { themeState, ThemeConfig, adaptToneVars } from './uiTheme';
 import { Icons } from './icons';
+import { findNowPlayingBar } from './hostDom';
 
 export type Tone = 'accent' | 'hotfix' | 'error' | 'success';
 
@@ -615,9 +616,7 @@ let observedBar: HTMLElement | null = null;
 
 function placeRegion(): void {
     if (!region) return;
-    const bar = document.querySelector<HTMLElement>('.Root__now-playing-bar')
-        ?? document.querySelector<HTMLElement>('[data-testid="now-playing-bar"]')?.parentElement
-        ?? null;
+    const bar = findNowPlayingBar();
     let bottom = 16;
     if (bar) {
         const rect = bar.getBoundingClientRect();

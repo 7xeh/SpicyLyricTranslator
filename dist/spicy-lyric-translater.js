@@ -6341,6 +6341,173 @@ ${text3}`
     </svg>`
   };
 
+  // src/utils/hostDom.ts
+  var PROFILE_TRIGGER_SELECTOR = [
+    '[data-testid="user-widget-link"]',
+    ".main-userWidget-box",
+    ".main-userWidget-boxCondensed"
+  ].join(", ");
+  var PROFILE_AVATAR_SELECTOR = '[data-testid="user-widget-avatar"]';
+  var GLOBAL_NAV_SELECTOR = "#global-nav-bar, .Root__globalNav, .Root__top-bar, .main-topBar-container";
+  var NOW_PLAYING_BAR_SELECTOR = ".Root__now-playing-bar, .main-nowPlayingBar-nowPlayingBar, [data-npb-layer]";
+  var SETTINGS_PAGE_SELECTOR = '[data-testid="settings-page"], .x-settings-container';
+  var SETTINGS_ROW_SELECTOR = "[data-settings-row]";
+  var MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]';
+  function isRendered(element) {
+    if (!element || !element.isConnected)
+      return false;
+    const rect = element.getBoundingClientRect?.();
+    return !rect || rect.width > 0 || rect.height > 0;
+  }
+  function findProfileTrigger(doc = document) {
+    const direct = Array.from(doc.querySelectorAll(PROFILE_TRIGGER_SELECTOR));
+    const rendered = direct.find(isRendered) ?? direct[0];
+    if (rendered)
+      return rendered;
+    const avatar = doc.querySelector(PROFILE_AVATAR_SELECTOR);
+    const avatarButton = avatar?.closest('button, [role="button"]');
+    if (avatarButton)
+      return avatarButton;
+    const nav = doc.querySelector(GLOBAL_NAV_SELECTOR);
+    if (!nav)
+      return null;
+    const expandable = Array.from(nav.querySelectorAll('button[aria-expanded], [role="button"][aria-expanded]'));
+    return expandable[expandable.length - 1] ?? null;
+  }
+  function profileTriggerContaining(element) {
+    if (!element)
+      return null;
+    const match = element.closest(PROFILE_TRIGGER_SELECTOR) ?? element.closest(PROFILE_AVATAR_SELECTOR)?.closest('button, [role="button"]');
+    if (match)
+      return match;
+    const trigger = findProfileTrigger(element.ownerDocument);
+    return trigger && trigger.contains(element) ? trigger : null;
+  }
+  function isTopLevelMenu(menu) {
+    const depth = Number.parseInt(menu.getAttribute("data-depth") || "0", 10);
+    if (depth > 0)
+      return false;
+    return !menu.parentElement?.closest('[role="menu"]');
+  }
+  function findOpenProfileMenu(trigger, doc = document) {
+    const menus = Array.from(doc.querySelectorAll('[role="menu"]')).filter((menu) => isRendered(menu) && isTopLevelMenu(menu));
+    if (menus.length === 0)
+      return null;
+    const controls = trigger?.getAttribute("aria-controls");
+    if (controls) {
+      const controlled = doc.getElementById(controls);
+      const menu = controlled?.matches('[role="menu"]') ? controlled : controlled?.querySelector('[role="menu"]');
+      if (menu && menus.includes(menu))
+        return menu;
+    }
+    const label = trigger?.getAttribute("aria-label")?.trim();
+    if (label) {
+      const labelled = menus.find((menu) => menu.getAttribute("aria-label")?.trim() === label);
+      if (labelled)
+        return labelled;
+    }
+    const labelledBy = (menu) => {
+      const id = menu.getAttribute("aria-labelledby");
+      return id ? doc.getElementById(id) : null;
+    };
+    const ownedByTrigger = menus.find((menu) => {
+      const labeller = labelledBy(menu);
+      return !!labeller && !!trigger && (labeller === trigger || trigger.contains(labeller));
+    });
+    if (ownedByTrigger)
+      return ownedByTrigger;
+    const inContextMenu = menus.filter((menu) => menu.closest('#context-menu, [data-encore-id="popover"]'));
+    if (inContextMenu.length === 1)
+      return inContextMenu[0];
+    return menus.length === 1 ? menus[0] : null;
+  }
+  function menuItemsOf(menu) {
+    return Array.from(menu.querySelectorAll(MENU_ITEM_SELECTOR)).filter((item) => item.parentElement?.closest('[role="menu"]') === menu);
+  }
+  function menuRowOf(item, menu) {
+    let row = item;
+    while (row.parentElement && row.parentElement !== menu && row.parentElement.getAttribute("role") !== "group") {
+      row = row.parentElement;
+    }
+    return row;
+  }
+  function findNowPlayingBar(doc = document) {
+    const legacy2 = doc.querySelector('[data-testid="now-playing-bar"]');
+    const candidates = [
+      ...Array.from(doc.querySelectorAll(NOW_PLAYING_BAR_SELECTOR)),
+      ...legacy2?.parentElement ? [legacy2.parentElement] : []
+    ];
+    return candidates.find(isRendered) ?? candidates[0] ?? null;
+  }
+  function findTopbarActions(doc = document) {
+    const contentRight = doc.querySelector(".main-topBar-topbarContentRight");
+    if (contentRight)
+      return contentRight;
+    const profile = findProfileTrigger(doc);
+    if (profile?.parentElement)
+      return profile.parentElement;
+    const history = doc.querySelector(".main-topBar-historyButtons");
+    if (history?.parentElement)
+      return history.parentElement;
+    return null;
+  }
+  function isOwnElement(element, ownId) {
+    return !!element.closest(`#${CSS.escape(ownId)}`);
+  }
+  function findSettingsPage(doc = document, ownId) {
+    const direct = doc.querySelector(SETTINGS_PAGE_SELECTOR);
+    if (direct)
+      return direct;
+    const nativeRow = Array.from(doc.querySelectorAll(SETTINGS_ROW_SELECTOR)).find((row) => !ownId || !isOwnElement(row, ownId));
+    const section = nativeRow?.parentElement;
+    const page = section?.parentElement;
+    if (!page || !page.closest("#main-view, .Root__main-view, main"))
+      return null;
+    return page;
+  }
+  function findLastNativeSettingsSection(page, ownId) {
+    const rows = Array.from(page.querySelectorAll(SETTINGS_ROW_SELECTOR)).filter((row) => !isOwnElement(row, ownId));
+    const last = rows[rows.length - 1];
+    if (!last)
+      return null;
+    let section = last;
+    while (section.parentElement && section.parentElement !== page)
+      section = section.parentElement;
+    return section.parentElement === page ? section : null;
+  }
+  function waitForHost(find, timeout = 1e4) {
+    return new Promise((resolve) => {
+      const found = find();
+      if (found) {
+        resolve(found);
+        return;
+      }
+      let settled = false;
+      let scheduled = false;
+      const finish = (value) => {
+        if (settled)
+          return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const observer = new MutationObserver(() => {
+        if (scheduled)
+          return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          const value = find();
+          if (value)
+            finish(value);
+        });
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      const timer = setTimeout(() => finish(find()), timeout);
+    });
+  }
+
   // src/utils/surface.ts
   var STYLE_ID = "slt-ui-styles";
   var EASE = "cubic-bezier(0.2, 0.9, 0.1, 1)";
@@ -6891,7 +7058,7 @@ ${text3}`
   function placeRegion() {
     if (!region)
       return;
-    const bar = document.querySelector(".Root__now-playing-bar") ?? document.querySelector('[data-testid="now-playing-bar"]')?.parentElement ?? null;
+    const bar = findNowPlayingBar();
     let bottom = 16;
     if (bar) {
       const rect = bar.getBoundingClientRect();
@@ -12824,7 +12991,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.2.9" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.3.0" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -12892,7 +13059,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"1a61d371e99bdf4e493fe71c42a69cbcad3a9d84947fae97d78df53dd51d7a2b".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "1a61d371e99bdf4e493fe71c42a69cbcad3a9d84947fae97d78df53dd51d7a2b" : "";
+    return !"2a9e10ed79289274d181cd65f76dbf14c8de2b1777e5dd062639f90122f30261".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "2a9e10ed79289274d181cd65f76dbf14c8de2b1777e5dd062639f90122f30261" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -18227,37 +18394,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }, LATENCY_CHECK_INTERVAL);
   }
   function getIndicatorContainer() {
-    const topBarContentRight = document.querySelector(".main-topBar-topbarContentRight");
-    if (topBarContentRight)
-      return topBarContentRight;
-    const userWidget = document.querySelector('.main-userWidget-box, [data-testid="user-widget-link"]');
-    if (userWidget && userWidget.parentNode)
-      return userWidget.parentNode;
-    const historyButtons = document.querySelector(".main-topBar-historyButtons");
-    if (historyButtons && historyButtons.parentNode)
-      return historyButtons.parentNode;
-    return null;
-  }
-  function waitForElement2(selector, timeout = 1e4) {
-    return new Promise((resolve) => {
-      const element = document.querySelector(selector);
-      if (element) {
-        resolve(element);
-        return;
-      }
-      const observer = new MutationObserver((mutations, obs) => {
-        const el2 = document.querySelector(selector);
-        if (el2) {
-          obs.disconnect();
-          resolve(el2);
-        }
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(document.querySelector(selector));
-      }, timeout);
-    });
+    return findTopbarActions();
   }
   async function appendToDOM() {
     if (containerElement && containerElement.parentNode) {
@@ -18271,8 +18408,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       applyIndicatorVisibility();
       return true;
     }
-    await waitForElement2('.main-topBar-topbarContentRight, .main-userWidget-box, [data-testid="user-widget-link"], .main-topBar-historyButtons');
-    const lateContainer = getIndicatorContainer();
+    const lateContainer = await waitForHost(getIndicatorContainer);
     if (lateContainer) {
       containerElement = createIndicatorElement();
       lateContainer.insertBefore(containerElement, lateContainer.firstChild);
@@ -18281,6 +18417,28 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     return false;
   }
+  var attachmentObserver = null;
+  function keepIndicatorAttached() {
+    if (attachmentObserver)
+      return;
+    let scheduled = false;
+    attachmentObserver = new MutationObserver(() => {
+      if (scheduled || !containerElement || containerElement.isConnected)
+        return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        if (!containerElement || containerElement.isConnected)
+          return;
+        const container = getIndicatorContainer();
+        if (!container)
+          return;
+        container.insertBefore(containerElement, container.firstChild);
+        applyIndicatorVisibility();
+      });
+    });
+    attachmentObserver.observe(document.body, { childList: true, subtree: true });
+  }
   async function initConnectionIndicator() {
     if (indicatorState.isInitialized)
       return;
@@ -18288,6 +18446,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     if (!appended)
       return;
     indicatorState.isInitialized = true;
+    keepIndicatorAttached();
     await new Promise((resolve) => setTimeout(resolve, INITIAL_DELAY));
     const connected = await connect();
     if (connected) {
@@ -20655,11 +20814,11 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     const section = document.createElement("div");
     section.id = SETTINGS_ID;
     section.innerHTML = `
-        <div class="x-settings-section fNaaQ0Cp8Yzy19j8">
+        <div class="x-settings-section">
             <h2 class="e-10310-text encore-text-body-medium-bold encore-internal-color-text-base">Spicy Lyric Translator</h2>
         </div>
     `;
-    const sectionContent = section.querySelector(".x-settings-section.fNaaQ0Cp8Yzy19j8");
+    const sectionContent = section.querySelector(".x-settings-section");
     renderNativeSettingsFields(sectionContent);
     syncModelLists();
     sectionContent.appendChild(createNativeButton(
@@ -20721,48 +20880,42 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return section;
   }
   function injectSettingsIntoPage() {
-    const settingsContainer = document.querySelector(".x-settings-container") || document.querySelector('[data-testid="settings-page"]') || document.querySelector("main.x-settings-container");
+    const settingsContainer = findSettingsPage(document, SETTINGS_ID);
     if (!settingsContainer) {
       return;
     }
     const existingSettingsSection = document.getElementById(SETTINGS_ID);
-    const sectionAlreadyInContainer = !!existingSettingsSection && settingsContainer.contains(existingSettingsSection);
-    if (sectionAlreadyInContainer) {
+    if (existingSettingsSection && settingsContainer.contains(existingSettingsSection)) {
+      placeSettingsSection(settingsContainer, existingSettingsSection);
       return;
     }
     readNativeSettingsClasses(settingsContainer);
     const settingsSection = existingSettingsSection || createNativeSettingsSection();
     adoptNativeSettingsClasses(settingsSection);
-    const spicyLyricsSettings = document.getElementById("spicy-lyrics-settings");
-    const spicyLyricsDevSettings = document.getElementById("spicy-lyrics-dev-settings");
-    if (spicyLyricsDevSettings) {
-      spicyLyricsDevSettings.after(settingsSection);
-    } else if (spicyLyricsSettings) {
-      spicyLyricsSettings.after(settingsSection);
-    } else {
-      const allSections = settingsContainer.querySelectorAll(".x-settings-section fNaaQ0Cp8Yzy19j8");
-      if (allSections.length > 0) {
-        const lastSection = allSections[allSections.length - 1];
-        const lastSectionParent = lastSection.closest("div:not(.x-settings-section fNaaQ0Cp8Yzy19j8):not(.x-settings-container)") || lastSection;
-        lastSectionParent.after(settingsSection);
-      } else {
-        settingsContainer.appendChild(settingsSection);
-      }
+    placeSettingsSection(settingsContainer, settingsSection);
+  }
+  function placeSettingsSection(settingsContainer, settingsSection) {
+    const anchor = document.getElementById("spicy-lyrics-dev-settings") ?? document.getElementById("spicy-lyrics-settings") ?? findLastNativeSettingsSection(settingsContainer, SETTINGS_ID);
+    if (anchor && settingsContainer.contains(anchor)) {
+      if (anchor.nextElementSibling !== settingsSection)
+        anchor.after(settingsSection);
+    } else if (settingsSection.parentElement !== settingsContainer) {
+      settingsContainer.appendChild(settingsSection);
     }
   }
+  function isPreferencesPath(pathname) {
+    return !!pathname && (pathname.includes("preferences") || pathname.includes("settings"));
+  }
   function isOnSettingsPage() {
-    const hasSettingsContainer = !!document.querySelector(".x-settings-container");
-    const hasSettingsTestId = !!document.querySelector('[data-testid="settings-page"]');
-    const pathCheck = window.location.pathname.includes("preferences") || window.location.pathname.includes("settings") || window.location.href.includes("preferences") || window.location.href.includes("settings");
-    let historyCheck = false;
+    if (findSettingsPage(document, SETTINGS_ID))
+      return true;
+    if (isPreferencesPath(window.location.pathname) || isPreferencesPath(window.location.href))
+      return true;
     try {
-      const location = Spicetify.Platform?.History?.location;
-      if (location) {
-        historyCheck = location.pathname?.includes("preferences") || location.pathname?.includes("settings") || false;
-      }
-    } catch (e) {
+      return isPreferencesPath(Spicetify.Platform?.History?.location?.pathname);
+    } catch {
+      return false;
     }
-    return hasSettingsContainer || hasSettingsTestId || pathCheck || historyCheck;
   }
   function watchForSettingsPage() {
     if (isOnSettingsPage()) {
@@ -20771,24 +20924,31 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     }
     if (Spicetify.Platform?.History) {
       Spicetify.Platform.History.listen((location) => {
-        if (location?.pathname?.includes("preferences") || location?.pathname?.includes("settings")) {
-          setTimeout(injectSettingsIntoPage, 100);
-          setTimeout(injectSettingsIntoPage, 300);
-          setTimeout(injectSettingsIntoPage, 500);
-          setTimeout(injectSettingsIntoPage, 1e3);
+        if (isPreferencesPath(location?.pathname)) {
+          [100, 300, 500, 1e3].forEach((delay) => setTimeout(injectSettingsIntoPage, delay));
         }
       });
     }
-    const observer = new MutationObserver((mutations) => {
-      const settingsContainer = document.querySelector(".x-settings-container") || document.querySelector('[data-testid="settings-page"]');
-      if (settingsContainer && !document.getElementById(SETTINGS_ID)) {
-        injectSettingsIntoPage();
-      }
-      const ourSettings = document.getElementById(SETTINGS_ID);
-      const spicyLyricsDevSettings = document.getElementById("spicy-lyrics-dev-settings");
-      if (ourSettings && spicyLyricsDevSettings && ourSettings.previousElementSibling !== spicyLyricsDevSettings) {
-        spicyLyricsDevSettings.after(ourSettings);
-      }
+    let scheduled = false;
+    const observer = new MutationObserver(() => {
+      if (scheduled)
+        return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        const settingsContainer = findSettingsPage(document, SETTINGS_ID);
+        if (!settingsContainer)
+          return;
+        const ourSettings = document.getElementById(SETTINGS_ID);
+        if (!ourSettings || !settingsContainer.contains(ourSettings)) {
+          injectSettingsIntoPage();
+          return;
+        }
+        const spicyLyricsSettings = document.getElementById("spicy-lyrics-dev-settings") ?? document.getElementById("spicy-lyrics-settings");
+        if (spicyLyricsSettings && ourSettings.previousElementSibling !== spicyLyricsSettings) {
+          placeSettingsSection(settingsContainer, ourSettings);
+        }
+      });
     });
     observer.observe(document.body, {
       childList: true,
@@ -22449,72 +22609,264 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var MENU_LABEL = "SLT Settings";
   var MENU_ROW_ID = "slt-profile-menu-item";
-  var PROFILE_BUTTON = '[data-testid="user-widget-link"]';
-  var PROFILE_MENU = '#context-menu ul[role="menu"]';
-  function syncProfileMenu() {
-    const profile = document.querySelector(PROFILE_BUTTON);
-    const owned = document.getElementById(MENU_ROW_ID);
-    const menu = document.querySelector(PROFILE_MENU);
-    if (profile?.getAttribute("aria-expanded") !== "true" || !menu) {
-      owned?.remove();
-      return;
-    }
-    const rows = Array.from(menu.querySelectorAll(':scope > li[role="presentation"]'));
-    if (rows.some((row2) => row2.id !== MENU_ROW_ID && row2.textContent?.trim() === MENU_LABEL)) {
-      owned?.remove();
-      return;
-    }
-    if (owned?.parentElement === menu)
-      return;
-    owned?.remove();
-    const template = rows.find((row2) => row2.querySelector('[role="menuitem"]'));
-    const nativeButton = template?.querySelector('[role="menuitem"]');
-    if (!template || !nativeButton)
-      return;
-    const row = document.createElement("li");
-    row.id = MENU_ROW_ID;
-    row.className = template.className;
-    row.setAttribute("role", "presentation");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = nativeButton.className;
-    button.setAttribute("role", "menuitem");
-    button.tabIndex = -1;
-    const label = document.createElement("span");
-    label.className = "encore-text-body-small ellipsis-one-line";
-    label.dir = "auto";
-    label.style.flex = "1";
-    label.textContent = MENU_LABEL;
+  var MENU_ROW_MARK = "data-slt-menu-row";
+  var MENU_OPEN_WINDOW_MS = 1500;
+  var MENU_POLL_INTERVAL_MS = 16;
+  var MENU_STRIPPED_ATTRIBUTES = [
+    "id",
+    "href",
+    "target",
+    "rel",
+    "download",
+    "aria-labelledby",
+    "aria-describedby",
+    "aria-controls",
+    "aria-haspopup",
+    "aria-expanded",
+    "aria-checked",
+    "aria-selected",
+    "aria-current",
+    "aria-disabled",
+    "aria-label",
+    "aria-keyshortcuts",
+    "data-key",
+    "data-testid",
+    "data-hovered",
+    "data-focused",
+    "data-focus-visible",
+    "data-pressed",
+    "data-selected",
+    "data-disabled",
+    "data-open",
+    "data-has-submenu",
+    "data-react-aria-pressable",
+    "data-collection",
+    "data-rac"
+  ];
+  var profileMenuWatch = null;
+  var profileMenuPollUntil = 0;
+  var profileMenuTimer = null;
+  function menuItemText(item) {
+    return (item.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  function pickTemplateItem(items) {
+    const plain = items.filter(
+      (item) => item.getAttribute("role") === "menuitem" && !item.hasAttribute("aria-haspopup") && item.getAttribute("aria-disabled") !== "true" && !item.querySelector('img, input, [role="menu"]') && menuItemText(item).length > 0
+    );
+    const score = (item) => {
+      const label = findLabelElement(item, menuItemText(item));
+      const svgs = Array.from(item.querySelectorAll("svg")).filter((svg) => !(svg.parentElement instanceof SVGElement));
+      const leading = svgs.some((svg) => isLeadingMenuIcon(svg, label));
+      const trailing = svgs.some((svg) => !isLeadingMenuIcon(svg, label));
+      return (item.tagName === "A" ? 0 : 2) + (leading ? 4 : 0) - (trailing ? 1 : 0);
+    };
+    return plain.sort((a, b) => score(b) - score(a))[0] ?? null;
+  }
+  function isLeadingMenuIcon(svg, label) {
+    return !(svg.parentElement instanceof SVGElement) && !!label && !!(svg.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+  function findEmptyLeadingSlot(item, label) {
+    return Array.from(item.querySelectorAll("*")).find(
+      (element) => !(element instanceof SVGElement) && element.childNodes.length === 0 && !element.contains(label) && !!(element.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ) ?? null;
+  }
+  function findLabelElement(root, text3) {
+    const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+    return elements.reverse().find(
+      (element) => !(element instanceof SVGElement) && menuItemText(element) === text3 && Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim())
+    ) ?? null;
+  }
+  function createMenuIcon(template) {
     const graphic = new DOMParser().parseFromString(SLT_MENU_ICON, "image/svg+xml").documentElement;
-    graphic.setAttribute("aria-hidden", "true");
-    button.append(document.importNode(graphic, true), label);
-    button.addEventListener("click", (event) => {
+    const icon = document.importNode(graphic, true);
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    if (template) {
+      for (const attribute of ["class", "data-encore-id", "style"]) {
+        const value = template.getAttribute(attribute);
+        if (value)
+          icon.setAttribute(attribute, value);
+      }
+    } else {
+      icon.setAttribute("style", "flex:0 0 16px;width:16px;height:16px;margin-inline-end:12px;vertical-align:middle;");
+    }
+    return icon;
+  }
+  function closeProfileMenu(trigger, menu) {
+    menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    setTimeout(() => {
+      if (trigger?.getAttribute("aria-expanded") === "true")
+        trigger.click();
+    }, 0);
+  }
+  function buildProfileMenuRow(templateItem, templateRow, menu) {
+    const templateText = menuItemText(templateItem);
+    const row = templateRow.cloneNode(true);
+    const item = templateRow === templateItem ? row : row.querySelector('[role="menuitem"]');
+    if (!item)
+      return null;
+    const isLeadingIcon = isLeadingMenuIcon;
+    const templateLabel = findLabelElement(templateItem, templateText);
+    const leadingTemplateIcon = Array.from(templateItem.querySelectorAll("svg")).find((svg) => isLeadingIcon(svg, templateLabel)) ?? null;
+    let label = findLabelElement(item, templateText);
+    const leadingSlotIcon = Array.from(item.querySelectorAll("svg")).find((svg) => isLeadingIcon(svg, label)) ?? null;
+    const icon = createMenuIcon(leadingTemplateIcon);
+    leadingSlotIcon?.replaceWith(icon);
+    row.querySelectorAll("svg, img").forEach((node) => {
+      if (node !== icon && !icon.contains(node))
+        node.remove();
+    });
+    for (const element of [row, ...Array.from(row.querySelectorAll("*"))]) {
+      MENU_STRIPPED_ATTRIBUTES.forEach((attribute) => element.removeAttribute(attribute));
+    }
+    if (!label || !row.contains(label)) {
+      item.textContent = "";
+      label = document.createElement("span");
+      label.className = "encore-text-body-small ellipsis-one-line";
+      label.style.flex = "1";
+      item.append(label);
+    }
+    label.textContent = MENU_LABEL;
+    label.dir = "auto";
+    if (!row.contains(icon)) {
+      const slot = findEmptyLeadingSlot(item, label);
+      if (slot) {
+        icon.setAttribute("style", "width:16px;height:16px;display:block;");
+        slot.append(icon);
+      } else {
+        label.before(icon);
+      }
+    }
+    row.id = MENU_ROW_ID;
+    row.setAttribute(MENU_ROW_MARK, "true");
+    item.setAttribute("role", "menuitem");
+    item.tabIndex = -1;
+    if (item instanceof HTMLButtonElement)
+      item.type = "button";
+    const setState = (attribute, on) => {
+      if (on)
+        item.setAttribute(attribute, "true");
+      else
+        item.removeAttribute(attribute);
+    };
+    item.addEventListener("pointerenter", () => {
+      setState("data-hovered", true);
+      item.focus({ preventScroll: true });
+    });
+    item.addEventListener("pointerleave", () => setState("data-hovered", false));
+    item.addEventListener("focus", () => setState("data-focused", true));
+    item.addEventListener("blur", () => setState("data-focused", false));
+    const activate = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (profile.getAttribute("aria-expanded") === "true")
-        profile.click();
+      closeProfileMenu(findProfileTrigger(), menu);
       openSettingsModal();
+    };
+    item.addEventListener("click", activate);
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ")
+        activate(event);
     });
-    row.append(button);
-    const firstLinkRow = rows.find((candidate) => candidate.querySelector('a[role="menuitem"][href]'));
-    if (firstLinkRow)
+    return row;
+  }
+  function placeProfileMenuRow(row, menu, rows) {
+    const hasLink = (candidate, selector) => candidate.matches(selector) || !!candidate.querySelector(selector);
+    const settingsRow = rows.find((candidate) => hasLink(candidate, 'a[href$="/preferences"], a[href*="/preferences?"]'));
+    if (settingsRow) {
+      settingsRow.after(row);
+      return;
+    }
+    const firstLinkRow = rows.find((candidate) => hasLink(candidate, "a[href]"));
+    if (firstLinkRow) {
       firstLinkRow.before(row);
+      return;
+    }
+    const lastRow = rows[rows.length - 1];
+    if (lastRow && rows.length > 1)
+      lastRow.before(row);
     else
-      menu.prepend(row);
+      menu.append(row);
+  }
+  function ensureProfileMenuRow(menu) {
+    const owned = document.getElementById(MENU_ROW_ID);
+    const items = menuItemsOf(menu).filter((item) => !item.closest(`#${MENU_ROW_ID}`));
+    if (items.some((item) => menuItemText(item) === MENU_LABEL)) {
+      owned?.remove();
+      return;
+    }
+    if (owned && menu.contains(owned))
+      return;
+    owned?.remove();
+    const templateItem = pickTemplateItem(items);
+    if (!templateItem)
+      return;
+    const row = buildProfileMenuRow(templateItem, menuRowOf(templateItem, menu), menu);
+    if (!row)
+      return;
+    placeProfileMenuRow(row, menu, items.map((item) => menuRowOf(item, menu)));
+  }
+  function unwatchProfileMenu() {
+    profileMenuWatch?.observer.disconnect();
+    profileMenuWatch = null;
+  }
+  function watchOpenProfileMenu(menu) {
+    if (profileMenuWatch?.menu === menu)
+      return;
+    unwatchProfileMenu();
+    const observer = new MutationObserver(() => {
+      if (!menu.isConnected) {
+        unwatchProfileMenu();
+        return;
+      }
+      ensureProfileMenuRow(menu);
+    });
+    observer.observe(menu, { childList: true, subtree: true });
+    profileMenuWatch = { menu, observer };
+  }
+  function syncProfileMenu() {
+    if (profileMenuWatch && !profileMenuWatch.menu.isConnected)
+      unwatchProfileMenu();
+    const trigger = findProfileTrigger();
+    const expanded = trigger?.getAttribute("aria-expanded") ?? null;
+    const polling = performance.now() < profileMenuPollUntil;
+    const mayBeOpen = expanded === "true" || expanded === null && polling;
+    const menu = mayBeOpen ? findOpenProfileMenu(trigger) : null;
+    if (!menu) {
+      if (!mayBeOpen) {
+        document.getElementById(MENU_ROW_ID)?.remove();
+        unwatchProfileMenu();
+      }
+      return false;
+    }
+    watchOpenProfileMenu(menu);
+    ensureProfileMenuRow(menu);
+    return !!document.getElementById(MENU_ROW_ID) || menuItemsOf(menu).some((item) => menuItemText(item) === MENU_LABEL);
+  }
+  function scheduleProfileMenuSync(windowMs = MENU_OPEN_WINDOW_MS) {
+    profileMenuPollUntil = Math.max(profileMenuPollUntil, performance.now() + windowMs);
+    if (profileMenuTimer)
+      return;
+    const tick = () => {
+      profileMenuTimer = null;
+      const placed = syncProfileMenu();
+      if (!placed && performance.now() < profileMenuPollUntil)
+        profileMenuTimer = setTimeout(tick, MENU_POLL_INTERVAL_MS);
+    };
+    profileMenuTimer = setTimeout(tick, 0);
   }
   function watchProfileMenu() {
     new MutationObserver((records) => {
-      const relevant = records.some((record2) => {
-        const target = record2.target;
-        if (target instanceof Element && (target.matches(PROFILE_BUTTON) || target.closest("#context-menu")))
-          return true;
-        return [...Array.from(record2.addedNodes), ...Array.from(record2.removedNodes)].some(
-          (node) => node instanceof Element && (node.matches("#context-menu") || !!node.querySelector("#context-menu"))
-        );
-      });
-      if (relevant)
-        syncProfileMenu();
-    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-expanded"] });
+      if (records.some((record2) => !!profileTriggerContaining(record2.target)))
+        scheduleProfileMenuSync();
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["aria-expanded"] });
+    const onIntent = (event) => {
+      if (event instanceof KeyboardEvent && !["Enter", " ", "ArrowDown"].includes(event.key))
+        return;
+      if (profileTriggerContaining(event.target))
+        scheduleProfileMenuSync();
+    };
+    document.addEventListener("click", onIntent, true);
+    document.addEventListener("keydown", onIntent, true);
     syncProfileMenu();
   }
 

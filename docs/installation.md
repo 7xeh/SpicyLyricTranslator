@@ -8,6 +8,8 @@ For most users, installing from the **Spicetify Marketplace** is the way to go â
 - Spicy Lyrics extension (`>= 6.3.20`) installed and enabled
 - Internet connection for translations and update checks
 
+Tested on Spotify `1.3.10`, Spicetify `2.46.7` and Spicy Lyrics `6.5.10`.
+
 ## Option 1: Loader script (recommended)
 
 The loader keeps the extension up to date by fetching the latest hosted build at startup.

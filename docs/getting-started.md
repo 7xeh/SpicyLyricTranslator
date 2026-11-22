@@ -6,6 +6,8 @@
 - The Spicy Lyrics extension (`>= 6.3.20`), installed and working
 - An internet connection for first-time translations and update checks
 
+Tested on Spotify `1.3.10`, Spicetify `2.46.7` and Spicy Lyrics `6.5.10`.
+
 ## Install
 
 **Marketplace (recommended)**

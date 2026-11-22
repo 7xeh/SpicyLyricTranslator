@@ -9,7 +9,7 @@ Translate any song as it plays — replace the lines or stack translations under
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/fXK34DeDW5)
 
 ![Spicetify](https://img.shields.io/badge/Spicetify-Extension-1DB954?style=flat-square&logo=spotify&logoColor=white)
-![Version](https://img.shields.io/badge/Version-2.2.9-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-2.3.0-blue?style=flat-square)
 ![License](https://img.shields.io/badge/License-Source%20Available-blue?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Online-success?style=flat-square)
 
@@ -47,7 +47,7 @@ Full feature list: [docs/features.md](docs/features.md)
 
 No further setup needed — it works out of the box on Google Translate.
 
-Requires Spicetify `>= 2.45.1` and Spicy Lyrics `>= 6.3.20`. For loader script or Windows installer instructions, see [docs/installation.md](docs/installation.md).
+Requires Spicetify `>= 2.45.1` and Spicy Lyrics `>= 6.3.20`. Tested on Spotify `1.3.10`, Spicetify `2.46.7` and Spicy Lyrics `6.5.10`. For loader script or Windows installer instructions, see [docs/installation.md](docs/installation.md).
 
 Then: play a track with lyrics, open the lyrics view, and click the **translate button**. Right-click it for quick settings. → [Getting Started](docs/getting-started.md)
 
