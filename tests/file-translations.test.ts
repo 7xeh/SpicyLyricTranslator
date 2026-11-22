@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import type {
     fetchLyricsForTrackUri as FetchLyricsForTrackUri,
-    clearLyricsCache as ClearLyricsCache
+    clearLyricsCache as ClearLyricsCache,
+    hasLocalLyricsChanged as HasLocalLyricsChanged
 } from '../src/utils/lyricsFetcher';
 import {
     collectLineTranslations,
@@ -23,9 +25,10 @@ const trackUri = `spotify:track:${trackId}`;
     }
 };
 
-const { fetchLyricsForTrackUri, clearLyricsCache } = require('../src/utils/lyricsFetcher') as {
+const { fetchLyricsForTrackUri, clearLyricsCache, hasLocalLyricsChanged } = require('../src/utils/lyricsFetcher') as {
     fetchLyricsForTrackUri: typeof FetchLyricsForTrackUri;
     clearLyricsCache: typeof ClearLyricsCache;
+    hasLocalLyricsChanged: typeof HasLocalLyricsChanged;
 };
 
 const ENGLISH = [
@@ -179,4 +182,85 @@ test('only lines without a file translation are left for the provider', () => {
     assert.deepEqual(uncoveredLineIndexes(lines, covered), [1, 6]);
     assert.deepEqual(uncoveredLineIndexes(lines.filter((_line, i) => i !== 1 && i !== 6), covered), []);
     assert.deepEqual(uncoveredLineIndexes(['a', 'b'], new Map()), [0, 1]);
+});
+
+function syllables(words: string[]) {
+    return words.map((word, i) => ({ Text: word.replace(/\+$/, ''), StartTime: i, EndTime: i + 1, IsPartOfWord: word.endsWith('+') }));
+}
+
+test('a TTML uploaded while its song is playing replaces the cached API lyrics, and removing it brings them back', async () => {
+    clearLyricsCache();
+    const uri = 'spotify:track:0jY829pCMnstlNtaE72vSB';
+    const raw = readFileSync('tests/fixtures/decadence-translation.ttml', 'utf8');
+    const russian = [
+        'Слушай, да, они знают что ты снова причинил себе боль',
+        'Неужели они не знают что ты и так полон боли?'
+    ];
+    const uploaded = {
+        Type: 'Syllable',
+        source: 'ldb',
+        Content: [
+            { Type: 'Vocal', Lead: { StartTime: 20, EndTime: 23, TranslatedText: russian[0], Syllables: syllables(['Say,', 'yes,', 'they', 'know', 'that', "you've", 'hurt', 'your+', 'self', 'a+', 'no+', 'ther', 'time']) } },
+            { Type: 'Vocal', Lead: { StartTime: 23, EndTime: 26, TranslatedText: russian[1], Syllables: syllables(["Don't", 'they', 'know', 'that', "you're", 'full', 'of', 'pain', 'al+', 'rea+', 'dy?']) } }
+        ]
+    };
+    const store = new Map<string, string>();
+    let parses = 0;
+    (globalThis as any).SpicyLyrics = {
+        db: {
+            objectStores: {
+                lyricsStore: {
+                    manager: {
+                        get: async (key: string) => {
+                            if (!store.has(key)) return null;
+                            parses++;
+                            return uploaded;
+                        },
+                        getRaw: async (key: string) => store.get(key) ?? null
+                    }
+                }
+            }
+        }
+    };
+    (globalThis as any).caches = {
+        has: async (name: string) => name === 'SpicyLyrics_LyricsStore_g1',
+        open: async () => ({
+            match: async () => ({
+                json: async () => ({
+                    ExpiresAt: Date.now() + 60_000,
+                    Content: {
+                        Type: 'Syllable',
+                        Content: [
+                            { Type: 'Vocal', Lead: { StartTime: 0, EndTime: 3, Syllables: syllables(['Oh,', 'ah']) } },
+                            { Type: 'Vocal', Lead: { StartTime: 20, EndTime: 23, Syllables: syllables(['Say,', 'yes,', 'they', 'know', 'that', "you've", 'hurt', 'yourself', 'another', 'time']) } }
+                        ]
+                    }
+                })
+            })
+        })
+    };
+
+    const fromApi = await fetchLyricsForTrackUri(uri);
+    assert.deepEqual(fromApi?.lines, ['Oh, ah', "Say, yes, they know that you've hurt yourself another time"]);
+    assert.deepEqual(fromApi?.fileTranslations, []);
+    assert.equal(await hasLocalLyricsChanged(uri), false);
+
+    store.set(uri, raw);
+    assert.equal(await hasLocalLyricsChanged(uri), true);
+    const fromFile = await fetchLyricsForTrackUri(uri);
+    assert.deepEqual(fromFile?.lines, ["Say, yes, they know that you've hurt yourself another time", "Don't they know that you're full of pain already?"]);
+    const fileLines = resolveFileTranslations(fromFile!.fileTranslations, 'always', 'ru');
+    assert.deepEqual(Array.from(fileLines.values()), russian);
+    assert.equal(coversAllLines(fromFile!.lines, fileLines), true);
+    assert.equal(await hasLocalLyricsChanged(uri), false);
+    await fetchLyricsForTrackUri(uri);
+    assert.equal(parses, 1);
+
+    store.delete(uri);
+    assert.equal(await hasLocalLyricsChanged(uri), true);
+    assert.deepEqual((await fetchLyricsForTrackUri(uri))?.fileTranslations, []);
+    assert.equal(await hasLocalLyricsChanged('spotify:track:another-track'), false);
+
+    delete (globalThis as any).SpicyLyrics;
+    (globalThis as any).caches = undefined;
 });

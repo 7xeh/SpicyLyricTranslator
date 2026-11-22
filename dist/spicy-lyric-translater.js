@@ -8897,10 +8897,20 @@ body.slt-update-waiting #TranslateToggle::after {
       const lyrics = await manager.get(trackUri);
       if (!isLyricsData(lyrics))
         return null;
-      const raw = typeof manager.getRaw === "function" ? await manager.getRaw(trackUri).catch(() => null) : null;
-      return { lyrics, raw };
+      return { lyrics, raw: await readLocalRaw(trackUri) };
     } catch (err) {
       warn("Failed to read Spicy Lyrics local lyrics:", err);
+      return null;
+    }
+  }
+  async function readLocalRaw(trackUri) {
+    const manager = getLocalLyricsManager();
+    if (typeof manager?.getRaw !== "function" || !trackUri)
+      return null;
+    try {
+      const raw = await manager.getRaw(trackUri);
+      return typeof raw === "string" ? raw : null;
+    } catch {
       return null;
     }
   }
@@ -9120,6 +9130,7 @@ body.slt-update-waiting #TranslateToggle::after {
   var cachedLineData = null;
   var cachedLanguage = null;
   var cachedFileTranslations = [];
+  var cachedLocalRaw = null;
   function getLyricsLanguage(lyrics) {
     const iso = normalizeLanguageCode(lyrics.LanguageISO2);
     if (iso !== "unknown" && iso !== "auto")
@@ -9150,7 +9161,19 @@ body.slt-update-waiting #TranslateToggle::after {
     cachedLineData = lineData;
     cachedLanguage = getLyricsLanguage(lyrics) || null;
     cachedFileTranslations = fromRaw.length > 0 ? fromRaw : fromLines ? [fromLines] : [];
+    cachedLocalRaw = rawTtml;
     return cachedResult();
+  }
+  async function hasLocalLyricsChanged(trackUri) {
+    const trackId = trackUri ? getTrackIdFromUri(trackUri) : null;
+    if (!trackUri || !trackId || trackId !== cachedTrackId || !cachedLineData)
+      return false;
+    return await readLocalRaw(trackUri) !== cachedLocalRaw;
+  }
+  async function freshCachedResult(trackUri, trackId) {
+    if (trackId !== cachedTrackId || !cachedLineData)
+      return null;
+    return await hasLocalLyricsChanged(trackUri) ? null : cachedResult();
   }
   async function loadLyrics(trackUri, trackId) {
     const local = await readLocalLyrics(trackUri);
@@ -9164,11 +9187,13 @@ body.slt-update-waiting #TranslateToggle::after {
     if (!trackId) {
       return null;
     }
-    if (trackId === cachedTrackId && cachedLineData) {
-      return cachedResult();
+    const trackUri = getCurrentTrackUri2() || `spotify:track:${trackId}`;
+    const cached = await freshCachedResult(trackUri, trackId);
+    if (cached) {
+      return cached;
     }
     try {
-      return await loadLyrics(getCurrentTrackUri2() || `spotify:track:${trackId}`, trackId);
+      return await loadLyrics(trackUri, trackId);
     } catch (err) {
       warn("Failed to capture lyrics from Spicy Lyrics fetch:", err);
       return null;
@@ -9179,8 +9204,9 @@ body.slt-update-waiting #TranslateToggle::after {
     if (!trackId) {
       return null;
     }
-    if (trackId === cachedTrackId && cachedLineData) {
-      return cachedResult();
+    const cached = await freshCachedResult(trackUri, trackId);
+    if (cached) {
+      return cached;
     }
     try {
       return await loadLyrics(trackUri, trackId);
@@ -9194,6 +9220,7 @@ body.slt-update-waiting #TranslateToggle::after {
     cachedLineData = null;
     cachedLanguage = null;
     cachedFileTranslations = [];
+    cachedLocalRaw = null;
     captureCache.clear();
   }
 
@@ -13068,7 +13095,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"a5d3986945bf784fabf36b6e4e4e02205e036623052a4ffd765e6d41d4a162b5".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "a5d3986945bf784fabf36b6e4e4e02205e036623052a4ffd765e6d41d4a162b5" : "";
+    return !"91503268da13cc2ad6345cdf8c1314b9e7e07228ee4c9a60deee5cf0f699109e".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "91503268da13cc2ad6345cdf8c1314b9e7e07228ee4c9a60deee5cf0f699109e" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -17794,6 +17821,26 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     state._translationsByIndex = void 0;
     state._qualityByIndex = void 0;
   }
+  var localLyricsCheckInFlight = false;
+  async function retranslateIfLocalLyricsChanged() {
+    const trackUri = getCurrentTrackUri();
+    if (localLyricsCheckInFlight || !trackUri)
+      return false;
+    localLyricsCheckInFlight = true;
+    try {
+      if (!await hasLocalLyricsChanged(trackUri))
+        return false;
+      if (!state.isEnabled || state.isTranslating || getCurrentTrackUri() !== trackUri)
+        return false;
+      debug("Spicy Lyrics local lyrics changed for the current track, translating again");
+      state.lastTranslatedSongUri = null;
+      removeTranslations();
+      await translateCurrentLyrics();
+      return true;
+    } finally {
+      localLyricsCheckInFlight = false;
+    }
+  }
   function setupLyricsObserver() {
     if (lyricsObserver) {
       lyricsObserver.disconnect();
@@ -17826,10 +17873,14 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
             rerenderDebounceTimer = null;
             if (state.isTranslating)
               return;
-            const lines = getLyricsLines();
-            if (lines.length > 0)
-              applyTranslations(lines);
-            void fillVisibleGaps();
+            void retranslateIfLocalLyricsChanged().then((retranslated) => {
+              if (retranslated || state.isTranslating)
+                return;
+              const lines = getLyricsLines();
+              if (lines.length > 0)
+                applyTranslations(lines);
+              void fillVisibleGaps();
+            });
           }, 200);
         } else if (state.autoTranslate) {
           if (translateDebounceTimer)
@@ -18049,8 +18100,12 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }
         if (!lyricsObserver && state.isEnabled) {
           setupLyricsObserver();
-          if (observedContentReplaced)
-            reapplyTranslationsToCurrentLines();
+          if (observedContentReplaced) {
+            void retranslateIfLocalLyricsChanged().then((retranslated) => {
+              if (!retranslated)
+                reapplyTranslationsToCurrentLines();
+            });
+          }
         }
         const currentRomanization = isRomanizationActive();
         if (lastKnownRomanizationState !== null && currentRomanization !== lastKnownRomanizationState) {

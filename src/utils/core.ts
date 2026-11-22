@@ -49,7 +49,7 @@ import { openSettingsModal } from './settings';
 import { openQuickMenu } from './quickMenu';
 import { warn, error, debug } from './debug';
 import { notify, dismissNotification } from './notify';
-import { fetchLyricsFromAPI, clearLyricsCache, LyricLineData } from './lyricsFetcher';
+import { fetchLyricsFromAPI, clearLyricsCache, hasLocalLyricsChanged, LyricLineData } from './lyricsFetcher';
 import { cleanLyricText, lineOwnText, normalizeLyricMatchKey } from './text';
 import { areRomanizedRowsShown, isSpicyRomanizationToggledOn, spicyRomanizationDisplay, supportsRomanizedRows, usesGroupedViewControls } from './spicyLyrics';
 import { getUserTranslations, applyUserTranslations, coversAllLines, findUnlinkedLines } from './userTranslations';
@@ -1968,6 +1968,25 @@ export function removeTranslations(): void {
     state._qualityByIndex = undefined;
 }
 
+let localLyricsCheckInFlight = false;
+
+async function retranslateIfLocalLyricsChanged(): Promise<boolean> {
+    const trackUri = getCurrentTrackUri();
+    if (localLyricsCheckInFlight || !trackUri) return false;
+    localLyricsCheckInFlight = true;
+    try {
+        if (!(await hasLocalLyricsChanged(trackUri))) return false;
+        if (!state.isEnabled || state.isTranslating || getCurrentTrackUri() !== trackUri) return false;
+        debug('Spicy Lyrics local lyrics changed for the current track, translating again');
+        state.lastTranslatedSongUri = null;
+        removeTranslations();
+        await translateCurrentLyrics();
+        return true;
+    } finally {
+        localLyricsCheckInFlight = false;
+    }
+}
+
 export function setupLyricsObserver(): void {
     if (lyricsObserver) {
         lyricsObserver.disconnect();
@@ -2004,9 +2023,12 @@ export function setupLyricsObserver(): void {
                 rerenderDebounceTimer = setTimeout(() => {
                     rerenderDebounceTimer = null;
                     if (state.isTranslating) return;
-                    const lines = getLyricsLines();
-                    if (lines.length > 0) applyTranslations(lines);
-                    void fillVisibleGaps();
+                    void retranslateIfLocalLyricsChanged().then(retranslated => {
+                        if (retranslated || state.isTranslating) return;
+                        const lines = getLyricsLines();
+                        if (lines.length > 0) applyTranslations(lines);
+                        void fillVisibleGaps();
+                    });
                 }, 200);
             } else if (state.autoTranslate) {
                 if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
@@ -2243,7 +2265,11 @@ export function setupViewModeObserver(): void {
             }
             if (!lyricsObserver && state.isEnabled) {
                 setupLyricsObserver();
-                if (observedContentReplaced) reapplyTranslationsToCurrentLines();
+                if (observedContentReplaced) {
+                    void retranslateIfLocalLyricsChanged().then(retranslated => {
+                        if (!retranslated) reapplyTranslationsToCurrentLines();
+                    });
+                }
             }
 
             const currentRomanization = isRomanizationActive();
