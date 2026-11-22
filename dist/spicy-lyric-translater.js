@@ -5844,6 +5844,15 @@ ${text3}`
     }));
     return merged;
   }
+  function uncoveredLineIndexes(lines, covered) {
+    const indexes = [];
+    lines.forEach((line, index) => {
+      const key = userTranslationKey(line);
+      if (key && !covered.has(key))
+        indexes.push(index);
+    });
+    return indexes;
+  }
   function mergeTranslationLines(...maps) {
     const merged = /* @__PURE__ */ new Map();
     maps.forEach((map) => map.forEach((value, key) => merged.set(key, value)));
@@ -12991,7 +13000,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   }
   var LOADER_METADATA = getLoaderMetadata();
   var IS_LOADER_MODE = LOADER_METADATA?.IsLoader === true;
-  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.3.0" : "0.0.0");
+  var CURRENT_VERSION = LOADER_METADATA?.LoadedVersion || (true ? "2.3.1" : "0.0.0");
   var LOADED_HASH = typeof LOADER_METADATA?.ContentHash === "string" ? LOADER_METADATA.ContentHash : "";
   var GITHUB_REPO = "7xeh/SpicyLyricTranslator";
   var GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases`;
@@ -13059,7 +13068,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
     return LOADED_HASH ? LOADED_HASH.substring(0, length) : "";
   }
   function getBuildHash() {
-    return !"2a9e10ed79289274d181cd65f76dbf14c8de2b1777e5dd062639f90122f30261".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "2a9e10ed79289274d181cd65f76dbf14c8de2b1777e5dd062639f90122f30261" : "";
+    return !"a5d3986945bf784fabf36b6e4e4e02205e036623052a4ffd765e6d41d4a162b5".startsWith("SLT_BUILD_HASH_PLACEHOLDER") ? "a5d3986945bf784fabf36b6e4e4e02205e036623052a4ffd765e6d41d4a162b5" : "";
   }
   function getDisplayHash() {
     if (LOADED_HASH)
@@ -16136,6 +16145,24 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
   function normalizeMatchKey(text3) {
     return normalizeLyricMatchKey(text3);
   }
+  async function translateUncoveredLines(lines, covered, trackUri, detectedSourceLang, skipTrackCache = false) {
+    if (covered.size === 0)
+      return translateLyrics(lines, state.targetLanguage, trackUri, detectedSourceLang, skipTrackCache);
+    const indexes = uncoveredLineIndexes(lines, covered);
+    const results = indexes.length > 0 ? await translateLyrics(indexes.map((index) => lines[index]), state.targetLanguage, trackUri, detectedSourceLang, true) : [];
+    const byIndex = /* @__PURE__ */ new Map();
+    indexes.forEach((lineIndex, i) => {
+      if (results[i])
+        byIndex.set(lineIndex, results[i]);
+    });
+    return lines.map((line, index) => byIndex.get(index) || {
+      originalText: line,
+      translatedText: line,
+      targetLanguage: state.targetLanguage,
+      wasTranslated: false,
+      detectedLanguage: detectedSourceLang
+    });
+  }
   function buildLyricsKey(lines) {
     let hash = 2166136261;
     let count = 0;
@@ -16965,9 +16992,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
         }).length;
         const nonTargetDominates = classifiableLineCount > 0 && nonTargetIndexes.length >= Math.max(2, Math.ceil(classifiableLineCount * 0.35));
         if (nonTargetDominates) {
-          translations = await translateLyrics(
+          translations = await translateUncoveredLines(
             lineTexts,
-            state.targetLanguage,
+            fileLines,
             currentTrackUri2 || void 0,
             void 0
           );
@@ -16992,9 +17019,9 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           return;
         } else {
           const partialLines = nonTargetIndexes.map((index) => lineTexts[index]);
-          const partialTranslations = await translateLyrics(
+          const partialTranslations = await translateUncoveredLines(
             partialLines,
-            state.targetLanguage,
+            fileLines,
             void 0,
             void 0
           );
@@ -17022,7 +17049,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
           });
         }
       } else {
-        translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri2 || void 0, state.detectedLanguage || void 0);
+        translations = await translateUncoveredLines(lineTexts, fileLines, currentTrackUri2 || void 0, state.detectedLanguage || void 0);
       }
       if (currentTrackUri2 && getCurrentTrackUri() !== currentTrackUri2) {
         return;
@@ -17540,7 +17567,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const fileLines = trackUri && trackUri === fileTranslationUri ? fileTranslationLines : /* @__PURE__ */ new Map();
       const results = applyUserTranslations(
         applyUserTranslations(
-          await translateLyrics(sources, state.targetLanguage, trackUri || void 0, void 0, true),
+          await translateUncoveredLines(sources, fileLines, trackUri || void 0, void 0, true),
           sources,
           fileLines,
           "file"
@@ -17641,7 +17668,7 @@ body.SpicySidebarLyrics__Active .slt-qi-dot,
       const fileLinesForTrack = currentTrackUri && currentTrackUri === fileTranslationUri ? fileTranslationLines : /* @__PURE__ */ new Map();
       const results = applyUserTranslations(
         applyUserTranslations(
-          await translateLyrics(missing, state.targetLanguage, currentTrackUri || void 0, state.detectedLanguage || void 0, true),
+          await translateUncoveredLines(missing, fileLinesForTrack, currentTrackUri || void 0, state.detectedLanguage || void 0, true),
           missing,
           fileLinesForTrack,
           "file"

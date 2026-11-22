@@ -132,6 +132,15 @@ export function resolveFileTranslations(
     return merged;
 }
 
+export function uncoveredLineIndexes(lines: string[], covered: Map<string, string>): number[] {
+    const indexes: number[] = [];
+    lines.forEach((line, index) => {
+        const key = userTranslationKey(line);
+        if (key && !covered.has(key)) indexes.push(index);
+    });
+    return indexes;
+}
+
 export function mergeTranslationLines(...maps: Map<string, string>[]): Map<string, string> {
     const merged = new Map<string, string>();
     maps.forEach(map => map.forEach((value, key) => merged.set(key, value)));

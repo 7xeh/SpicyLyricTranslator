@@ -8,6 +8,7 @@ import {
     collectLineTranslations,
     resolveFileTranslations,
     mergeTranslationLines,
+    uncoveredLineIndexes,
     parseFileTranslationMode,
     parseTtmlTranslations
 } from '../src/utils/fileTranslations';
@@ -170,4 +171,12 @@ test('translations inside cached Spicy Lyrics API lyrics are picked up per line'
     const result = await fetchLyricsForTrackUri(trackUri);
     assert.equal(result?.lineData[0].translatedText, ENGLISH[2]);
     assert.deepEqual(Array.from(resolveFileTranslations(result!.fileTranslations, 'match', 'en').values()), [ENGLISH[2]]);
+});
+
+test('only lines without a file translation are left for the provider', () => {
+    const covered = englishSet('en').lines;
+    const lines = ['隣で眠ってるあなたの', '新しい朝が来た', ' 口が開く  そして笑った ', '♪', '', 'どんな夢見てるの？', 'Oh yeah'];
+    assert.deepEqual(uncoveredLineIndexes(lines, covered), [1, 6]);
+    assert.deepEqual(uncoveredLineIndexes(lines.filter((_line, i) => i !== 1 && i !== 6), covered), []);
+    assert.deepEqual(uncoveredLineIndexes(['a', 'b'], new Map()), [0, 1]);
 });

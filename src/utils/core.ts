@@ -1,11 +1,12 @@
 import { state, TranslationQualityMeta, isLearningActive, getSourceLanguageOverride, setTrackSourceLanguage, refreshTargetLanguage, resolveTargetForSource, isUntranslatedLanguage } from './state';
 import { isNoTranslationRule } from './languageRules';
 import { scheduleFuriganaPass } from './furiganaOverlay';
-import { resolveFileTranslations, mergeTranslationLines } from './fileTranslations';
+import { resolveFileTranslations, mergeTranslationLines, uncoveredLineIndexes } from './fileTranslations';
 import type { FileTranslationSet } from './fileTranslations';
 import { normalizeHotkey } from './hotkeys';
 import { Icons } from './icons';
 import { storage } from './storage';
+import type { TranslationResult } from './translator';
 import { translateLyrics, isOffline, getCacheStats, fetchWordBreakdown, getCachedWordBreakdown, providerSupportsWordBreakdown, SUPPORTED_LANGUAGES, forgetCachedTranslations } from './translator';
 import { getCurrentTrackUri, getTrackCache } from './trackCache';
 import {
@@ -92,6 +93,33 @@ let lastSkippedTranslation: SkippedTranslationState | null = null;
 
 function normalizeMatchKey(text: string | undefined | null): string {
     return normalizeLyricMatchKey(text);
+}
+
+async function translateUncoveredLines(
+    lines: string[],
+    covered: Map<string, string>,
+    trackUri: string | undefined,
+    detectedSourceLang: string | undefined,
+    skipTrackCache: boolean = false
+): Promise<TranslationResult[]> {
+    if (covered.size === 0) return translateLyrics(lines, state.targetLanguage, trackUri, detectedSourceLang, skipTrackCache);
+
+    const indexes = uncoveredLineIndexes(lines, covered);
+    const results = indexes.length > 0
+        ? await translateLyrics(indexes.map(index => lines[index]), state.targetLanguage, trackUri, detectedSourceLang, true)
+        : [];
+    const byIndex = new Map<number, TranslationResult>();
+    indexes.forEach((lineIndex, i) => {
+        if (results[i]) byIndex.set(lineIndex, results[i]);
+    });
+
+    return lines.map((line, index) => byIndex.get(index) || {
+        originalText: line,
+        translatedText: line,
+        targetLanguage: state.targetLanguage,
+        wasTranslated: false,
+        detectedLanguage: detectedSourceLang
+    });
 }
 
 function buildLyricsKey(lines: string[]): string {
@@ -1093,9 +1121,9 @@ export async function translateCurrentLyrics(): Promise<void> {
                 nonTargetIndexes.length >= Math.max(2, Math.ceil(classifiableLineCount * 0.35));
 
             if (nonTargetDominates) {
-                translations = await translateLyrics(
+                translations = await translateUncoveredLines(
                     lineTexts,
-                    state.targetLanguage,
+                    fileLines,
                     currentTrackUri || undefined,
                     undefined
                 );
@@ -1120,9 +1148,9 @@ export async function translateCurrentLyrics(): Promise<void> {
                 return;
             } else {
                 const partialLines = nonTargetIndexes.map(index => lineTexts[index]);
-                const partialTranslations = await translateLyrics(
+                const partialTranslations = await translateUncoveredLines(
                     partialLines,
-                    state.targetLanguage,
+                    fileLines,
                     undefined,
                     undefined
                 );
@@ -1152,7 +1180,7 @@ export async function translateCurrentLyrics(): Promise<void> {
                 });
             }
         } else {
-            translations = await translateLyrics(lineTexts, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined);
+            translations = await translateUncoveredLines(lineTexts, fileLines, currentTrackUri || undefined, state.detectedLanguage || undefined);
         }
 
         if (currentTrackUri && getCurrentTrackUri() !== currentTrackUri) {
@@ -1683,7 +1711,7 @@ async function translateBackgroundVocals(): Promise<void> {
         const fileLines = trackUri && trackUri === fileTranslationUri ? fileTranslationLines : new Map<string, string>();
         const results = applyUserTranslations(
             applyUserTranslations(
-                await translateLyrics(sources, state.targetLanguage, trackUri || undefined, undefined, true),
+                await translateUncoveredLines(sources, fileLines, trackUri || undefined, undefined, true),
                 sources,
                 fileLines,
                 'file'
@@ -1783,7 +1811,7 @@ async function fillVisibleGaps(): Promise<void> {
         const fileLinesForTrack = currentTrackUri && currentTrackUri === fileTranslationUri ? fileTranslationLines : new Map<string, string>();
         const results = applyUserTranslations(
             applyUserTranslations(
-                await translateLyrics(missing, state.targetLanguage, currentTrackUri || undefined, state.detectedLanguage || undefined, true),
+                await translateUncoveredLines(missing, fileLinesForTrack, currentTrackUri || undefined, state.detectedLanguage || undefined, true),
                 missing,
                 fileLinesForTrack,
                 'file'
